@@ -171,6 +171,7 @@ vi.mock("../registry/localEmbedder.js", () => ({
 vi.mock("../registry/localSemantic.js", () => ({
   mediaSemanticRanking: async () => null,
   localSemanticRanking: async () => {
+    if (!state.runtimeOnDisk) throw new Error("the on-device runtime is not installed yet");
     if (state.rankingError) throw state.rankingError;
     return state.ranking;
   },
@@ -867,11 +868,24 @@ describe("the on-device download offer", () => {
       state.runtimeOnDisk = false;
       if (!savedYes) state.consentSavedMeanwhile = false;
 
-      await runEnvelope({ query: "count up" });
+      await runEnvelope({ query: "count up", "on-device": true });
 
       expect(state.runtimeInstalls).toBe(installs);
     },
   );
+
+  it("searches without installing a runtime missing beside a ready model", async () => {
+    state.runtimeOnDisk = false;
+
+    const envelope = await runEnvelope({ query: "count up" });
+
+    expect([state.runtimeInstalls, state.downloads, state.vectorFetches]).toEqual([0, 0, 0]);
+    expect(envelope.tier).toBe("words");
+    expect(envelope.shown).toBeGreaterThan(0);
+    expect(envelope.warnings).toEqual([
+      "on-device search is off until its runtime is installed: run `hyperframes catalog --on-device` once.",
+    ]);
+  });
 
   it("installs nothing when a person's yes cannot be saved", async () => {
     state.consentRecorded = [false];
