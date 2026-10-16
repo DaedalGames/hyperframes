@@ -3,7 +3,7 @@ import { parseStrictFiniteTimingNumber } from "./playbackRate";
 import { skipsHiddenImages } from "./timedClipHide";
 
 /** How far ahead of the playhead a held scene's scripts run, so they finish before it shows. */
-export const SCENE_LEAD_SECONDS = 10;
+const SCENE_LEAD_SECONDS = 10;
 
 export interface HeldScene {
   host: Element;
