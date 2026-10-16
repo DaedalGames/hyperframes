@@ -108,6 +108,10 @@ function mount(payload: ElementClipboard) {
   };
 }
 
+function mountSvg(html: string, css: string) {
+  return mount({ html, css, width: 100, height: 100, warnings: [] });
+}
+
 function embeddedSelectors(clip: Element): string[] {
   const selectors: string[] = [];
   postcss.parse(clip.querySelector("style")!.textContent!).walkRules((rule) => {
@@ -229,13 +233,10 @@ it("rebinds fragment predicates on cross-file clones while preserving unrelated 
 });
 
 it("preserves the clone's own SVG gradient while the original still exists after same-file Copy/Paste", async () => {
-  const view = mount({
-    html: '<svg><defs><linearGradient id="paint"><stop stop-color="red"/></linearGradient></defs><rect class="painted" width="100" height="100"/></svg>',
-    css: ".painted{fill:url(#paint)}",
-    width: 100,
-    height: 100,
-    warnings: [],
-  });
+  const view = mountSvg(
+    '<svg><defs><linearGradient id="paint"><stop stop-color="red"/></linearGradient></defs><rect class="painted" width="100" height="100"/></svg>',
+    ".painted{fill:url(#paint)}",
+  );
   await view.api().handlePaste();
   const originalId = view.doc().querySelector(".clip")!.id;
   view.select(originalId);
@@ -432,13 +433,10 @@ it.each(["shape", "element-1-fixed-node-2"])(
   "preserves aggregate dual-attribute predicates, including unchanged accepted href: %s",
   async (shape) => {
     vi.stubGlobal("crypto", { randomUUID: () => "fixed" });
-    const view = mount({
-      html: `<svg><defs><path id="${shape}" d="M0 0L1 1"/></defs><use role="img" href="#${shape}" xlink:href="#${shape}"/></svg>`,
-      css: `use[|href]{opacity:.25}use[|href="#${shape}"]{color:red}use[*|href="#${shape}"]{stroke:green}use[role="img"]{fill:blue}`,
-      width: 100,
-      height: 100,
-      warnings: [],
-    });
+    const view = mountSvg(
+      `<svg><defs><path id="${shape}" d="M0 0L1 1"/></defs><use role="img" href="#${shape}" xlink:href="#${shape}"/></svg>`,
+      `use[|href]{opacity:.25}use[|href="#${shape}"]{color:red}use[*|href="#${shape}"]{stroke:green}use[role="img"]{fill:blue}`,
+    );
     await view.api().handlePaste();
     const originalId = view.doc().querySelector(".clip")!.id;
     view.select(originalId);
