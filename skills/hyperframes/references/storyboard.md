@@ -2,6 +2,8 @@
 
 Use it whenever a run makes or changes a storyboard: when the person asks for one, or when you want their go on the shots before animating. This file owns **how to make the board**; `storyboard-format.md` owns the `STORYBOARD.md` file the tools parse.
 
+A film over about 15 s gets a `STORYBOARD.md` even without stills: one frame per beat of the picked storyline, each with its `reads` and `sound` (`storyboard-format.md`), written before the first scene. It is the plan the build and the review (`review.md`) check against.
+
 The person sees the plan as stills on the board, comments or draws on a frame, and says go. The board is `boards/storyboard.html`, and tools that show it find its frames by the classes in § 2; boxes marked any other way (`cell` boxes, `id="frame-NN"` markers) are not found.
 
 ## 1. The run
@@ -22,7 +24,7 @@ One `class="frame"` box per still, in film order, holding its image, a `class="t
   <img src="stills/frame-00-at-1.5s.png" alt="" />
   <div class="title">01: The hook</div>
   <div class="time">0.0 to 3.0s</div>
-  <p class="words">The headline pushes in on a dark canvas.</p>
+  <p class="words">The cursor drops the photo on the timeline; the title lands on the drop.</p>
 </div>
 ```
 

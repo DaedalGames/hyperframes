@@ -1,6 +1,6 @@
 # The look
 
-Left alone, the same brief comes out with the same look run after run. Outside input breaks that: the project's design spec, a real brand, reference images the person gave you, or a preset chosen on purpose. Settle it before the first scene.
+Left alone, the same brief comes out with the same look run after run, and banning that look only moves it to the next default. Outside input breaks it, in this order: the project's design spec, a real brand, a reference image or film the person gave you, the subject's own world. Settle it before the first scene, in a written design plan (below).
 
 ## The project's design spec
 
@@ -18,9 +18,13 @@ Read the first of `frame.md`, `design.md`, `DESIGN.md` at the project root that 
 
 Use the brand's own fonts when the capture shipped their files or they are bundled (`format.md`); otherwise download the family's `.woff2` into `assets/fonts/` with an `@font-face`, or pick the closest bundled family and say so.
 
+## From a reference
+
+A reference film or image gives its grammar, never its content: shot lengths, how titles enter and leave, the transitions, the palette roles, the type's scale and weight. Snapshot it next to yours (`snapshot --at <t,…> --against ref.mp4`) and write the grammar down, marking what you measured apart from what you guessed.
+
 ## Presets
 
-Each folder in `../assets/frame-presets/` holds a `FRAME.md` spec, a `caption-skin.html` and a `frame-showcase.html` contact sheet. To use one, copy its `FRAME.md` to the project root as `frame.md`, then read it as above; its fonts that aren't bundled need `@font-face` files. The two HTML files are reference code: read them for treatments, never mount them.
+The presets are slide-deck looks: use one when the person names it, or for a deck (`/slideshow`), never as the fallback for a film without a brand. Each folder in `../assets/frame-presets/` holds a `FRAME.md` spec, a `caption-skin.html` and a `frame-showcase.html` contact sheet. To use one, copy its `FRAME.md` to the project root as `frame.md`, then read it as above; its fonts that aren't bundled need `@font-face` files. The two HTML files are reference code: read them for treatments, never mount them.
 
 | Preset              | Look                                                                                           |
 | ------------------- | ---------------------------------------------------------------------------------------------- |
@@ -38,9 +42,16 @@ Each folder in `../assets/frame-presets/` holds a `FRAME.md` spec, a `caption-sk
 | `daisy-days`        | Picture book: charcoal outlines, sunny pastels, Fredoka One, hand-drawn ornaments              |
 | `editorial-forest`  | Literary: green, pink and cream, Source Serif display, mono chrome, flat paper                 |
 
-## Without a brand or preset
+## The design plan
 
-Choose a direction from the subject itself (its era, materials, where it would be shown) and hold it in every scene: palette roles (ground, ink, one accent), a display face and a body face, one rule for the frame.
+Before the first scene, write the look down (into `frame.md` when there is none), taken from the brand, the reference or the subject itself: its era, its materials, where it would be shown.
+
+- **Colours**: 4–6, each named for its role (ground, ink, accent, one or two supports). Each world may have its own ground; the palette and type stay.
+- **Type**: a display face and a body face, chosen for this subject. Inter, Space Grotesk, Instrument Serif, Geist and JetBrains Mono are where generated design lands; use them when the brand does, not by default. Titles 4–9% of the frame height; nothing meant to be read under 2.6% of the short side.
+- **A material or treatment**: what the frames are made of (photographs, paper, ink, glass, the product's own UI, footage, a 3D set), so the look comes from a medium, not from effects.
+- **One rule for the frame**, and the one bold thing the film will be remembered by.
+
+Then read the plan against the tells (`story.md` §8) and change anything it hits.
 
 ## Video facts
 
@@ -54,10 +65,10 @@ Declare palette and fonts as variables on the root `<html>` and use them everywh
 ```html
 <html
   data-composition-variables='[
-  {"id":"color-ground","type":"color","label":"Background","default":"#ffffff"},
-  {"id":"color-ink","type":"color","label":"Text","default":"#101010"},
-  {"id":"color-accent","type":"color","label":"Accent","default":"#0055ff"},
-  {"id":"font-display","type":"string","label":"Display font","default":"Montserrat"}
+  {"id":"color-ground","type":"color","label":"Background","default":"<ground from the plan>"},
+  {"id":"color-ink","type":"color","label":"Text","default":"<ink from the plan>"},
+  {"id":"color-accent","type":"color","label":"Accent","default":"<accent from the plan>"},
+  {"id":"font-display","type":"string","label":"Display font","default":"<display face from the plan>"}
 ]'
 ></html>
 ```

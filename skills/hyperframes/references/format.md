@@ -52,7 +52,12 @@ The detail behind the contract in `SKILL.md`. Full references: `npx hyperframes 
   </div>
   <script>
     const tl = gsap.timeline({ paused: true });
-    tl.fromTo("#headline", { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6 }, 0.4);
+    tl.fromTo(
+      "#headline",
+      { opacity: 0, filter: "blur(8px)" },
+      { opacity: 1, filter: "blur(0px)", duration: 0.18, ease: "power4.out" },
+      0.4,
+    );
     window.__timelines["intro"] = tl;
   </script>
 </template>

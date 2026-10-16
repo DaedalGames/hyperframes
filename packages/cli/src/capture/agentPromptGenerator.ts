@@ -7,7 +7,7 @@
  *
  * This file generates a DATA INVENTORY that tells the AI agent what files
  * exist and what they contain. How to make a film from it lives in the
- * hyperframes skill's references/film.md — this file points agents there.
+ * hyperframes skill's references/film.md and references/types/launch.md — this file points agents there.
  */
 
 import { readdirSync, existsSync } from "node:fs";
@@ -199,7 +199,7 @@ function buildPrompt(
 
 Source: ${url}
 
-To create a video from this capture, use the \`hyperframes\` skill and read its \`references/film.md\`.
+To create a video from this capture, use the \`hyperframes\` skill and read its \`references/film.md\` (From a website) and \`references/types/launch.md\`.
 
 ## What's in This Capture
 

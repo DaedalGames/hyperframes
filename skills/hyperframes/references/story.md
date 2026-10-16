@@ -2,7 +2,7 @@
 
 Read before building any video that tells something over about 15 s: a launch or promo, an explainer, a pull-request or changelog video, a recap, a music video with a narrative. Most weak films are good motion around no story: a list of features, three cards in a row, a logo, a URL.
 
-Skip it for an edit to an existing project, captions or overlays on footage, and a short single-idea piece (one kinetic line, a map move, a highlight on an image), where the request is the story. When the person gave a script, a storyboard or a reference film, follow theirs.
+Skip it for an edit to an existing project, captions or overlays on footage, and a short single-idea piece (one kinetic line, a map move, a highlight on an image), where the request is the story. When the person gave a script, a storyboard or a reference film, follow theirs. The shape of each kind of film (launch, explainer, music, data, vertical, 3D, character) is in `types/`.
 
 ## 1. The one thing
 
@@ -10,6 +10,7 @@ Skip it for an edit to an existing project, captions or overlays on footage, and
 - **The one thing to remember** after the film ends, in the viewer's words, not the brand slogan.
 - **One viewer doing one real task**, from the moment they need it to the result. That task is the spine, and one real piece of data (a query, a file, a prompt, a number) travels through it from the hook to the payoff. An explainer's spine is one concrete example worked through.
 - Keep facts (what it does, real numbers, real labels) apart from creative choices (angle, tone, look). Every claim on screen traces to the source: the site, the PR, the docs or the person's words. Use the person's own copy verbatim.
+- What the source does not say stays unsaid: never derive a claim it did not make ("40 min to 2 min" is not "20× faster"), mark an example number as illustrative, and show a screen you cannot get as a labelled placeholder, not a drawn one.
 
 ## 2. Three storylines, then one
 
@@ -17,7 +18,11 @@ Write three. They are three different films, not three titles on one film: each 
 
 - its name and, in two sentences, what the viewer sees and feels;
 - the first two seconds, exactly;
-- its beats in one line (`hook → … → end card`).
+- its beats in one line (`hook → … → end card`);
+- its look in one line: ground, type, the one material or treatment, taken from the subject or the brand (`look.md`);
+- its sound in one line (`sound.md` §1).
+
+Picking a storyline picks its look and its sound.
 
 Put your recommendation first, with the reason in one clause, and save all three in the project as `STORYLINES.md` so a later turn can switch.
 
@@ -25,27 +30,28 @@ Put your recommendation first, with the reason in one clause, and save all three
 - **They asked for the file or for no stops:** take your recommendation, build it, and name the other two in one line each in your reply.
 - With a storyboard (`storyboard.md`), the picked storyline becomes the board's frames.
 
-| Device                    | What the viewer sees                                                                    |
-| ------------------------- | --------------------------------------------------------------------------------------- |
-| A moment in someone's day | a person, a time stamp, the message that creates the need ("launch is tomorrow")        |
-| A character does the work | a mascot or a cursor carries, drags, draws and reacts; every cut has a cause            |
-| The feature as the hook   | the feature happening to a recognisable image in the first half second                  |
-| The result first          | the finished output plays, then the camera pulls back to show where it came from        |
-| One object across apps    | the thing being made travels from one app into the product, which keeps working on it   |
-| Life before and after     | the old way as a scene (one person drowning in tabs), then the new way                  |
-| Type carries the argument | giant kinetic type, colour fields and grids that cut on the beat                        |
-| A number lands            | one real number earned by a scene, then made physical                                   |
-| A question with the input | "What if you could make a video from your ⟨website⟩?", the blank filled by a real input |
+| Device                        | What the viewer sees                                                                    |
+| ----------------------------- | --------------------------------------------------------------------------------------- |
+| A moment in someone's day     | a person, a time stamp, the message that creates the need ("launch is tomorrow")        |
+| A character does the work     | a mascot or a cursor carries, drags, draws and reacts; every cut has a cause            |
+| The feature as the hook       | the feature happening to a recognisable image in the first half second                  |
+| The result first              | the finished output plays, then the camera pulls back to show where it came from        |
+| One object across apps        | the thing being made travels from one app into the product, which keeps working on it   |
+| Life before and after         | the old way as a scene (one person drowning in tabs), then the new way                  |
+| Type carries the argument     | giant kinetic type, colour fields and grids that cut on the beat                        |
+| A number lands                | one real number earned by a scene, then made physical                                   |
+| A question with the input     | "What if you could make a video from your ⟨website⟩?", the blank filled by a real input |
+| The object is the explanation | a machine or model whose working is the idea; the camera tours through it               |
 
 Before and after: the new side moves calmly while the old side churns; never mock a named competitor. A recap asks one question first so each piece answers it.
 
 ## 3. The hook
 
-The first two seconds are the densest of the film. Open on the feature working on something recognisable, a real moment that creates the need, a question with the input inside it, a sentence whose last word becomes the picture, or the bug itself. Then let the old way fail on screen (the wait, the wall of text, the wrong result) before the product brings relief; the proof is often the same shot improved in front of the viewer. Typing into a prompt box as the opener, with nothing else on screen, is the tell of a generated film; as a story step a few seconds in, it is fine.
+The first two seconds are the densest of the film, and frame 0 is the thumbnail: never black, never a logo alone. Open on the feature working on something recognisable, a real moment that creates the need, a question with the input inside it, a sentence whose last word becomes the picture, or the bug itself. Then let the old way fail on screen (the wait, the wall of text, the wrong result) before the product brings relief; the proof is often the same shot improved in front of the viewer. Typing into a prompt box as the opener, with nothing else on screen, is the tell of a generated film; as a story step a few seconds in, it is fine.
 
 ## 4. Beats
 
-A common shape for about 35 s; scale it, and let the device bend it:
+A common shape for a launch of about 35 s; scale it, let the device bend it, and take another type's shape from its file in `types/`:
 
 | Beat     | Share | Job                                                                                       |
 | -------- | ----- | ----------------------------------------------------------------------------------------- |
@@ -65,11 +71,11 @@ A film visits several worlds, each with its own background, light and scale (a d
 
 ## 6. Copy and voice
 
-- At most 6 words a line, one line on screen at a time, no trailing periods; a line holds about 0.3 s a word plus 0.5 s.
+- Titles take at most 6 words a line, one line on screen at a time, no trailing periods; an explainer's lines may run to about 10. A line holds about 0.3 s a word plus 0.5 s, and the last line at least 2 s.
 - Show, don't list: no bullet slides or three-card rows. When similar things repeat, each gets its own idea and layout.
 - Real numbers only, from the source. The first line is never "Introducing", "Meet" or the logo; after the pain, "Introducing X" is fine. Never "unlock", "seamless", "supercharge", "game-changer", "revolutionize", "effortless", or "in seconds" unless measured.
 - Read the lines alone: a stranger gets the pitch. Watch the pictures alone: they tell the same story.
-- No voiceover unless the request or the source calls for one; then the screen never repeats the spoken sentence word for word. Without a voice, large titles and the product's own text carry the words.
+- No voiceover unless the request or the source calls for one; then the screen never repeats the spoken sentence word for word. Without a voice, large titles and the product's own text carry the words, over music and effects (`sound.md`).
 
 ## 7. The brand
 
@@ -83,5 +89,9 @@ Defaults, not bans; a reference that does one on purpose wins:
 - every scene entering the same way, or the same move beat after beat;
 - side-by-side panels, floating cards, three cards in a row, four corner brackets, click rings;
 - a title over a dimmed screenshot of the product;
-- titles that keep sliding or shrinking after they land; breathing or floating loops standing in for motion;
-- the logo docked small in a corner for the whole film.
+- titles that keep sliding or shrinking after they land; breathing or floating loops standing in for motion on titles and UI (a character's idle breath is acting, `types/character.md`);
+- every title fading and sliding up into place;
+- the logo docked small in a corner for the whole film;
+- the second default, reached once the first is banned: a cream or paper ground with a serif display, one italic accent word, a terracotta or cobalt accent, small caps-mono labels ("001 —", "FIG. 01"), hairline rules and a coloured full stop on the end title. Any one of these can be right for a brand or a subject; all of them together, chosen for no reason, is the house style of generated design.
+
+When a first snapshot shows any of these, name which, take the replacement from the subject, the brand or the medium, and add what you replaced to the project's `frame.md` Don'ts so later scenes keep away from it.

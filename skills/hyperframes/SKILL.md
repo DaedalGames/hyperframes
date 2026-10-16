@@ -1,17 +1,17 @@
 ---
 name: hyperframes
-description: Read first for any request to make, edit, animate or render a video, motion graphic, captions or overlays with HyperFrames (HTML rendered to video). Holds the render contract and the work loop, and points to the references for format, motion, look, captions, whole films and storyboards.
+description: Read first to make, edit, animate or render any video with HyperFrames (HTML rendered to video), including launch films, explainers, music videos, charts, maps, vertical clips, title cards, captions and overlays. Holds the render contract, the work loop and what each kind of video needs.
 ---
 
 **Plugin installs:** Before setup or freshness commands, follow [plugin execution rules](references/plugin-installation.md) when this skill is inside a HyperFrames plugin.
 
 # HyperFrames
 
-HyperFrames renders an HTML composition to video by seeking a paused timeline one frame at a time, so every render is identical. The person can edit the same files in the Studio preview. Use HyperFrames unless another framework or a plain browser recording is asked for. Run the CLI as `npx hyperframes <command>` (`/hyperframes-cli`); at the start of a new video, `npx hyperframes usage --json` reports the person's remaining plan usage (say "unknown" when it is).
+HyperFrames renders HTML to video by seeking a paused timeline frame by frame, so every render is identical; the person edits the same files in the Studio preview. Use it unless another framework or a plain browser recording is asked for. Run the CLI as `npx hyperframes <command>` (`/hyperframes-cli`); at the start of a new video, `npx hyperframes usage --json` reports the person's remaining plan usage (say "unknown" when it is).
 
-`index.html` is the root composition: it declares the video's variables and mounts one scene per sub-composition from `compositions/`. Media and fonts live in `assets/`. A new project: `npx hyperframes init <dir>`. A website as the subject: `npx hyperframes capture <url> --json`, then read what it wrote.
+`index.html` is the root composition: it declares the video's variables and mounts one scene per sub-composition from `compositions/`. Media and fonts live in `assets/`. A new project: `npx hyperframes init <dir>`. A website as the subject: `npx hyperframes capture <url> --json`.
 
-Build what was asked: no voiceover, music or captions and no new aspect ratio unless the request or the source calls for it. A new video is 1920×1080 at 30 fps. A question, a hold or a loose idea gets an answer or a proposal, not an edit. Before hand-writing a named effect, transition, caption style, chart or card, search the registry (`/hyperframes-registry`). Any media, including a presenter or avatar, footage, voice or music: `/media-use`, which says when HeyGen is needed and what is free.
+Build what was asked: no voiceover or captions and no new aspect ratio unless the request or the source calls for them; a film over ~15 s that tells something gets music and sound on its visible actions unless the person asked for silence (`references/sound.md`). A new video is 1920×1080 at 30 fps. A question, a hold or a loose idea gets an answer or a proposal, not an edit. Before hand-writing a named effect, transition, caption style, chart or card, search the registry (`/hyperframes-registry`). Any media (a presenter or avatar, footage, voice, music): `/media-use`, which says when HeyGen is needed and what is free. Show real things from their source (the product's screens, the brand's logo, a real place's imagery); draw only what has none.
 
 ## Contract
 
@@ -23,7 +23,7 @@ Build what was asked: no voiceover, music or captions and no new aspect ratio un
 4. No `Date.now()`, unseeded `Math.random()`, network fetches, timers or `repeat: -1`. Everything visible is a function of timeline time.
 5. Never tween `display`, `visibility` or `autoAlpha` on a `.clip`; animate a child.
 6. No CSS `transform` on an element GSAP transforms; animate transforms, not `left`/`top`/`width`/`height`.
-7. Never `play()`, `pause()` or seek media. A `<video>` with sound keeps it (`data-has-audio="true"`); silent footage is `muted`. A separate `<audio>` is for music, voiceover, replacement sound or a J/L cut.
+7. Never `play()`, `pause()` or seek media. A `<video>` keeps its sound with `data-has-audio="true"`, else it is `muted`; music, voice, replacement sound and J/L cuts are a separate `<audio>`.
 8. Every `<audio>` has an `id` or it is left out of the mix. No `crossorigin` on media. Time a `<video>` or its wrapper, never both.
 9. Only the bundled fonts (`references/format.md`) resolve by name; any other family needs `@font-face` to a file in `assets/fonts/`.
 10. Asset paths are root-relative (`assets/...`), in sub-compositions too.
@@ -38,35 +38,37 @@ Studio edits the tags you write.
 - Timed elements are written in the HTML, not made by script, each with a stable `id`.
 - Copy, brand colours and swappable media are variables (`data-var-text`, `data-var-src`, `var(--id)`).
 - One kind per track: `data-track-kind="graphics"` on scene and overlay hosts, `captions` on the one host that holds every caption group.
-- Keep content inside the 90% action-safe box, captions and key text inside 80% title-safe. Studio draws the guides; never add them as elements.
+- Content stays inside the 90% action-safe box, captions and key text inside 80% title-safe; Studio draws the guides, never add them.
 
 ## Work loop
 
-- An existing project: `npx hyperframes timeline --json` shows what plays when. Before changing anything, `npx hyperframes history --since mine --who <you>` shows what the person changed since your last turn; build on it (`/hyperframes-cli`, Project history).
-- A new film over ~15 s that tells a story: three storylines first (`references/story.md`); the person picks unless they asked for the file or no stops.
-- After your last edit, run `npx hyperframes check --json` and fix every error, then `npx hyperframes snapshot` the moments you changed (`--at`, `--range START,END` or `--composition <id>`) and look at the frames before you reply.
-- Render when the person approves the Studio preview, asks for the file, or asks you to work through without stopping; then render after your own check and snapshots pass. Otherwise stop at the preview and wait.
+- An existing project: `npx hyperframes timeline --json` shows what plays when; before any change, `npx hyperframes history --since mine --who <you>` shows what the person changed since your last turn: build on it (`/hyperframes-cli`).
+- A new film over ~15 s that tells something: its type's file (below), then `references/story.md`: three storylines, each with a look and a sound; the person picks unless they asked for the file or no stops. Then a `STORYBOARD.md` frame per beat with `reads` and `sound` (`references/storyboard.md`), and the design plan in `frame.md` (`references/look.md`).
+- After your last edit: `npx hyperframes check --json`; fix every error, weigh every warning. A film: `npx hyperframes snapshot --review` and `references/review.md`, ending in `REVIEW.md`. A small edit: snapshot what you changed (`--at`, `--range`, `--composition`) and look before you reply.
+- Render when the person approves the Studio preview, asks for the file or asks for no stops, after your check and review pass; otherwise stop at the preview and wait.
 
 ## The HyperFrames desktop app
 
 Call it "the HyperFrames desktop app", never "Studio"; offer it as the better way to keep editing, not the only one.
 
-- Before the delivery render of a new video, open the Studio preview, even in no-questions mode, and say they can edit there. If `preview` printed a line starting "Keep editing by chatting with Framey", add that the **Edit with Framey** button opens the app.
-- After the delivery render, pass on its Framey line in your own words. If it names `hyperframes open`, offer to run it; if it names a download link, give it. No such line, say nothing; in autonomous mode put it in the delivery note.
-- When `open` or any command says to run `catch-up`, run `npx hyperframes catch-up [dir]` before your next change. What it lists is their work, not a new request.
+- Before the delivery render of a new video, open the Studio preview, even in no-questions mode, and say they can edit there. If `preview` printed "Keep editing by chatting with Framey", add that the **Edit with Framey** button opens the app.
+- After the delivery render, pass on its Framey line in your own words: offer to run the `hyperframes open` it names or give its download link; else say nothing (autonomous: the delivery note).
+- When any command says to run `catch-up`, run `npx hyperframes catch-up [dir]` before your next change; what it lists is their work, not a new request.
 
-## References
+## What to read
 
-| Read | When |
+| The request | Read |
 | --- | --- |
-| `references/format.md` | Scenes, nesting, `data-*` attributes, variables, media, linked clips, layout opt-outs, lint errors |
-| `references/runtimes.md` | GSAP facts that bite, or CSS, WAAPI, Lottie, anime.js, Three.js, canvas |
-| `references/motion.md` | Any motion: timings, eases, blur, cuts, titles; punch-ins, speed changes, holds; stutter; seeing motion |
-| `references/look.md` | Colours, type and style: a brand, a project `frame.md`, or one of 13 presets in `assets/frame-presets/` |
-| `references/captions.md` | Captions: transcripts, word groups, fitting, placement |
-| `references/story.md` | A film over ~15 s that tells a story (launch, explainer, PR): three storylines, hook, beats |
-| `references/film.md` | Measured facts: films from a website, PR or music; maps and real places; kinetic type |
-| `references/overlays.md` | Designed cards and lower thirds over talking-head footage |
-| `references/storyboard.md` | A storyboard: stills the person approves before you animate |
+| Launch, promo, feature | `references/types/launch.md` |
+| Explainer, tutorial | `references/types/explainer.md` |
+| Music video | `references/types/music.md` |
+| Chart, numbers | `references/types/data.md` |
+| Vertical or social clip | `references/types/vertical.md` |
+| 3D, simulation, generative | `references/types/3d.md` |
+| Character, mascot, story short | `references/types/character.md` |
+| A real place or map; a website, PR or script; kinetic type | `references/film.md` |
+| Captions; cards over a talking head | `references/captions.md`; `references/overlays.md` |
+| Motion: timing, eases, titles, cuts | `references/motion.md` |
+| Scenes, attributes, media, lint; GSAP, Lottie, 3D, canvas | `references/format.md`; `references/runtimes.md` |
 
-Decks: `/slideshow`. Remotion source: `/remotion-to-hyperframes`. Figma designs, tokens, or storyboard frames as reconstructed motion: `/figma`. Installing or refreshing skills, and upgrading a project's pinned CLI: `references/skill-lifecycle.md`.
+Decks: `/slideshow`. Remotion source: `/remotion-to-hyperframes`. Figma: `/figma`. Installing, refreshing or upgrading skills and the pinned CLI: `references/skill-lifecycle.md`.

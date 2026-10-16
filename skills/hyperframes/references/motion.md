@@ -6,11 +6,38 @@ Measured frame by frame from the official HyperFrames launch films. These are de
 
 - **Moves**: a fast move takes 0.3–0.6 s and carries motion blur on its own ease, peaking at its fastest frame: 6–12 px on text-sized elements, 15–20 px full-frame, horizontal-only on a horizontal move. One move is one tween.
 - **Arrive slow, leave clean**: long-tailed ease-outs on arrivals; landing takes longer than leaving. An exit is one smooth motion, never slide, stop, then leave. Entrances that are too snappy read as glitches; slowing the whole video by about a second often fixes it.
+- **Ease by role**: an arrival lands on a long tail (`expo.out`, `power4.out`), a camera move or a colour flood eases both ways (`power2.inOut`), a zoom through or an exit accelerates (`power3.in`). The same `power2.out` at 0.5 s on everything is the flat default that makes a film feel generated.
 - **Cuts**: cut at the fastest frame of a move, with matching direction and speed on both sides. A click into a new screen is a match cut on the click's rebound; the new screen comes in slightly large and settles.
-- **Titles**: a landed title is dead still; the motion moves to the next element, the camera or the world behind. Enter by word, not by sliding: each word `blur(6px)` → 0 and opacity 0 → 1 in 0.13 s, 0.067 s apart, or the whole line 8 px → 0 in 0.13–0.2 s. Hold 1–2 s (0.4 s for a quick line), then exit with a blur-out and fade of 0.13–0.25 s.
+- **Titles**: a landed title is dead still; the motion moves to the next element, the camera or the world behind. Vary the entrance within a film, never a fade and slide-up for each:
+  - per word: `blur(6px)` → 0 and opacity 0 → 1 in 0.13 s, 0.067 s apart, no translate;
+  - per word from light grey to ink, 0.07–0.1 s apart, no position change;
+  - the whole line blurring in, 8 px → 0 in 0.13–0.2 s;
+  - per letter for a name, 0.1 s apart, opacity 0.3 → 1 with a slight blur;
+  - behind the subject: the title between the plate and a matte of the person;
+  - one word of the sentence rolling through options like a slot machine, about 0.1 s a roll.
+- **Holds**: a line the viewer must read holds about 0.5 s plus 0.3 s a word, the film's last line at least 2 s; a one- or two-word chapter line may hold 0.4 s. Then exit with a blur-out and fade of 0.13–0.25 s, word by word, or with the scene's move.
+- **Title size**: 4–9% of the frame height, one or two lines; quiet lines at 2.5–4% against hero words that fill 60–90% of the width. One highlighted word in the accent colour, which carries meaning.
 - **Rhythm**: contrast speeds. Montages cut every 0.13–0.8 s; a demo holds one framing for 7–10 s while the UI acts; shots average 1.8–3 s with motion inside them. Hold 0.3–0.75 s before the payoff, which plays at normal speed.
 - **Continuous motion that works**: the product's UI working, footage playing, a character acting, a 3D world turning, a slow orbit of a background stage (3–5° a second).
-- **Defaults that look generated**: breathing, floating or pulsing loops standing in for motion; titles that keep sliding or scaling after they land; a slow creeping scale on a title or a slow push late in a scene; bounce; click rings; every scene entering the same way.
+- **Defaults that look generated**: breathing, floating or pulsing loops standing in for motion on titles and UI; titles that keep sliding or scaling after they land; a slow creeping scale on a title or a slow push late in a scene; bounce on UI; click rings; every scene entering the same way; every element fading and sliding up. A character's idle and overshoot are acting, not these (`types/character.md`).
+
+## Transitions with a cause
+
+Use 3–5 kinds in a film, each caused by something on screen. Hard cuts belong inside a scene (punch-ins); at most a third of the seams between beats are hard cuts, and worlds never crossfade into each other. Measured on the official films:
+
+| Transition               | How it is built                                                                                                                                                                     |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Zoom through a button    | the camera tracks to the button with blur (0.6 s), then the button scales from ~8% to ~250% of the frame in 0.35 s, strong ease-in; its fill becomes the next frame                 |
+| Object becomes the world | a pill or card grows past the frame in 0.65 s, ease-in-out, its radius shrinking; what was around it blurs ~15 px and fades in 0.3 s; the new content fades in while it still grows |
+| Morph                    | one container widens into the next (icon card → prompt box, ~110 → ~880 px in 0.2 s `power3.out`) with a horizontal blur 12 → 0                                                     |
+| Carry across             | the result shrinks 1 → 0.6 with blur peaking at 6 px mid-move and lands inside the next app as it builds around it                                                                  |
+| Colour flood             | the hero object stays while the whole ground changes colour in ~0.4 s `power2.inOut`                                                                                                |
+| Whip                     | a horizontal or vertical smear of 0.13–0.3 s; the arriving element lands blurred and sharpens in ~0.13 s                                                                            |
+| Iris from the click      | `clip-path: circle()` opens from the clicked point onto the next world in 0.15 s                                                                                                    |
+| Dip cut                  | the outgoing frame darkens ~40% for 3 frames before a hard cut, so the cut reads as meant                                                                                           |
+| Blur swap on one stage   | out: opacity → 0 with ~8 px blur in 0.13–0.2 s; in: blur → 0 in 0.13 s; the ground never cuts                                                                                       |
+
+Registry versions: `npx hyperframes catalog --tag transition --json`.
 
 | The person says        | Change                                                                         |
 | ---------------------- | ------------------------------------------------------------------------------ |
@@ -32,6 +59,8 @@ Measured frame by frame from the official HyperFrames launch films. These are de
 Ready-made moves: `npx hyperframes catalog --tag camera --json`, or `catalog --query "<the move>" --tag motion-primitive --json`.
 
 ## Seeing motion
+
+The whole-film pass (beat sheet, cuts, phone width, the craft warnings) is `review.md`. For one move:
 
 - `npx hyperframes keyframes --json [--selector '#id'] [--runtime all]` lists keyframes and motion paths (GSAP, CSS, anime.js): property, time, value, ease.
 - `npx hyperframes keyframes --shot motion.png --selector '#id'` draws the real element's samples over time with its path (9 samples; `--samples N`). `--layout strip` for motion in place, `--from`/`--to` for one stretch, `--angle iso|top|side|'yaw,pitch'` for 3D, `--ghost` for a `<canvas>`.

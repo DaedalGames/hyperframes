@@ -1,6 +1,6 @@
 # Storyboard format — `STORYBOARD.md` + parsed manifest
 
-Defines the storyboard's **base data format** only: the `STORYBOARD.md` file shape and the `StoryboardManifest` it parses into. Planning the film itself is in [film.md](film.md); the optional narration/TTS file (`SCRIPT.md`) is a separate concern, not here.
+Defines the storyboard's **base data format** only: the `STORYBOARD.md` file shape and the `StoryboardManifest` it parses into. Planning the film itself is in [story.md](story.md); the optional narration/TTS file (`SCRIPT.md`) is a separate concern, not here.
 
 A storyboard is the **plan layer** for a video — an ordered set of **frames** (key moments) in one markdown file. Parser: `@hyperframes/core/storyboard` → `StoryboardManifest`.
 
@@ -33,6 +33,13 @@ One `## Frame N — Title` heading per frame (`Frame` / `Beat` / `Scene` accepte
 | `voiceover`     | the frame's narration _guide_ (aliases `vo` / `voice_over` / `narration`)                                           |
 | `poster`        | seconds to seek for the tile poster (past the intro animation)                                                      |
 | _any other key_ | kept verbatim under the frame's `extra` — carry your own per-frame data (effects, assets, …) here                   |
+
+Two `extra` keys every film plan carries, so the build and the review check the same thing:
+
+| Key     | Meaning                                                                                                                                                                                                                          |
+| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reads` | what the viewer must understand in this frame, in order, each with its window: `the cursor finds the button (0.4-1.2s); "Export" lands (1.2-2.6s)`. Windows never overlap, and each is long enough for its words (`story.md` §6) |
+| `sound` | the bed, the effects on visible actions, or silence: `bed enters strong; click on Export; whoosh on the cut`                                                                                                                     |
 
 ## Parsed manifest
 
@@ -75,6 +82,8 @@ audience: indie devs on X
 - transition_in: cut
 - status: animated
 - voiceover: "Ship a launch video in an afternoon."
+- reads: "Ship a launch video" lands (0.3-1.6s); "in an afternoon" (1.6-3.0s)
+- sound: bed enters on its strongest bar; impact on "afternoon"
 - src: compositions/frames/01-hook.html
 
 Open cold on the promise. This is the thesis — everything after pays it off.

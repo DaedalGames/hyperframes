@@ -1,6 +1,6 @@
-# Whole films
+# Films from a source: measured facts
 
-What is specific to HyperFrames, or was measured on shipped films, when one video is made from a website, a topic, a pull request, a music track or a short motion brief. The story comes first, from `story.md`: the one thing, three storylines, the hook. Motion craft is in `motion.md`, look in `look.md`, captions in `captions.md`.
+What is specific to HyperFrames, or was measured on shipped films, when one video is made from a website, a script, a pull request, a music track, a real place or a short motion brief. The story comes first, from `story.md`; the shape of each kind of film is in `types/`. Motion craft is in `motion.md`, look in `look.md`, sound in `sound.md`, captions in `captions.md`.
 
 ## Script and pacing
 
