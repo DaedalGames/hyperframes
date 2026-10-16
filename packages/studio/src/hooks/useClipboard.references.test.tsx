@@ -483,3 +483,57 @@ it.each(["duplicate", "paste"] as const)(
     expect(view.records[0]!.files["index.html"]!.after).toBe(view.files["index.html"]);
   },
 );
+
+it.each([
+  { label: "absent", attribute: "", present: false, empty: false },
+  { label: "empty", attribute: ' style=""', present: true, empty: true },
+  { label: "authored", attribute: ' style="color:black"', present: true, empty: false },
+])(
+  "preserves $label root style predicates through geometry, clone and reload",
+  async ({ attribute, present, empty }) => {
+    const view = mount({
+      html: `<div${attribute}><span>Text</span><i style="color:blue">Styled</i></div>`,
+      css: '[style]{display:none}div:not([style]){background:red;color:white}[style=""]{opacity:.25}div:not([style=""]){border-width:2px}span:not([style]){color:green}i[style]{color:blue}',
+      width: 100,
+      height: 50,
+      warnings: [],
+    });
+    await view.api().handlePaste();
+    const id = view.doc().querySelector(".clip")!.id;
+    view.select(id);
+    await view.api().handleDuplicate();
+    for (const doc of [view.doc(), view.preview()]) {
+      for (const clip of doc.querySelectorAll(".clip")) {
+        const captured = clip.querySelector("div")!;
+        expect(captured.hasAttribute("style")).toBe(true);
+        expect(matchingDeclarations(doc, captured, "display").includes("none")).toBe(present);
+        expect(matchingDeclarations(doc, captured, "background").includes("red")).toBe(!present);
+        expect(matchingDeclarations(doc, captured, "opacity").includes(".25")).toBe(empty);
+        expect(matchingDeclarations(doc, captured, "border-width").includes("2px")).toBe(!empty);
+        expect(matchingDeclarations(doc, clip.querySelector("span")!, "display")).toEqual([]);
+        expect(matchingDeclarations(doc, clip.querySelector("span")!, "color")).toContain("green");
+        expect(matchingDeclarations(doc, clip.querySelector("i")!, "display")).toContain("none");
+        expect(matchingDeclarations(doc, clip.querySelector("i")!, "color")).toContain("blue");
+      }
+    }
+    expect(view.records[1]!.files["index.html"]!.after).toBe(view.files["index.html"]);
+  },
+);
+
+it.each(["", ' type="button"'])(
+  "preserves synthesized button type absence: %s",
+  async (attribute) => {
+    const view = mountSvg(
+      `<button${attribute}>Text</button>`,
+      "[type]{opacity:.25}button:not([type]){color:red}",
+    );
+    await view.api().handlePaste();
+    for (const doc of [view.doc(), view.preview()]) {
+      const button = doc.querySelector("button")!;
+      expect(button.getAttribute("type")).toBe("button");
+      expect(matchingDeclarations(doc, button, "opacity").includes(".25")).toBe(!!attribute);
+      expect(matchingDeclarations(doc, button, "color").includes("red")).toBe(!attribute);
+    }
+    expect(view.records[0]!.files["index.html"]!.after).toBe(view.files["index.html"]);
+  },
+);

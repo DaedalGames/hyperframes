@@ -64,3 +64,26 @@ it("moves an explicit named-namespace predicate to the accepted output attribute
   use.setAttribute("href", "#copy-paint");
   expect(rewritten).toContain('[href="#copy-paint"]');
 });
+
+it.each(["[style]", '[style=""]', ":not([style])", ':not([style=""])'])(
+  "distinguishes absent from empty before adding attributes: %s",
+  (selector) => {
+    for (const before of [null, ""]) {
+      const original = document.createElement("div");
+      if (before !== null) original.setAttribute("style", before);
+      const output = document.createElement("div");
+      output.id = "capture-root";
+      output.setAttribute("style", "position:relative");
+      const rewritten = rebindClipboardSelector(selector, new Map(), [
+        {
+          name: "style",
+          before,
+          after: "position:relative",
+          target: "#capture-root",
+        },
+      ]);
+      expect(output.matches(rewritten)).toBe(original.matches(selector));
+      if (rewritten !== selector) expect(rewritten).toContain(":where(");
+    }
+  },
+);

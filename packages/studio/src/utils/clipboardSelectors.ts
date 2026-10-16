@@ -11,7 +11,7 @@ export interface ClipboardAttributeRewrite {
   name: string;
   afterName?: string;
   target?: string;
-  before: string;
+  before: string | null;
   after: string;
 }
 
@@ -88,7 +88,9 @@ function predicateChanges(parsed: Predicate, references: readonly ClipboardAttri
   for (const group of attributeGroups(references)) {
     const before = group.some(
       (reference) =>
-        attributeMatches(parsed, reference.name) && valueMatches(parsed, reference.before),
+        reference.before !== null &&
+        attributeMatches(parsed, reference.name) &&
+        valueMatches(parsed, reference.before),
     );
     const after = group.some(
       (reference) =>

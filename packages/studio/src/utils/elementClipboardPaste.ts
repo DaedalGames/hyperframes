@@ -64,6 +64,18 @@ function writeAttribute(
   });
 }
 
+function writeSynthesizedAttribute(
+  clean: Element,
+  name: string,
+  value: string,
+  context: CopyContext,
+): void {
+  const before = clean.getAttribute(name);
+  clean.setAttribute(name, value);
+  if (!context.attributes.some((attr) => attr.node === clean && attr.afterName === name))
+    context.attributes.push({ node: clean, name, afterName: name, before, after: value });
+}
+
 function copyResource(node: Element, clean: Element, attr: Attr, context: CopyContext): void {
   const fragment = context.ids.get(attr.value.slice(1));
   if (attr.value.startsWith("#") && fragment)
@@ -118,7 +130,7 @@ function cleanElement(node: Element, context: CopyContext): Element | null {
   const id = context.nodeIds.get(node);
   if (id) clean.id = id;
   for (const attr of Array.from(node.attributes)) copyAttribute(node, clean, attr, context);
-  if (node.localName === "button") clean.setAttribute("type", "button");
+  if (node.localName === "button") writeSynthesizedAttribute(clean, "type", "button", context);
   return clean;
 }
 
@@ -178,9 +190,11 @@ export function prepareElementClipboard(
   const capturedRoot = wrapper.firstElementChild;
   if (capturedRoot && capturedRoot.namespaceURI !== SVG_NS) {
     const style = capturedRoot.getAttribute("style") ?? "";
-    capturedRoot.setAttribute(
+    writeSynthesizedAttribute(
+      capturedRoot,
       "style",
       `${style};position:relative!important;left:0px!important;top:0px!important;right:auto!important;bottom:auto!important;width:${payload.width}px!important;height:${payload.height}px!important;margin:0!important;`,
+      context,
     );
   }
   const finalAttributes = attributes.map((reference) => ({
