@@ -93,13 +93,13 @@ describe("external element preparation", () => {
     const result = paste.prepareElementClipboard(
       {
         ...base,
-        html: '<div style="font-family:Test"><svg><text font-family="Test">Text</text></svg></div>',
+        html: '<div class="font-root" style="font-family:Test"><svg><text font-family="Test">Text</text></svg></div>',
         css: '@font-face{font-family:Test;src:url("data:font/woff2;base64,d09GMg==")}',
       },
       "element-1",
     );
     const doc = new DOMParser().parseFromString(result.html, "text/html");
-    expect(doc.querySelector("div div")?.getAttribute("style")).toContain("element-1-font-0");
+    expect(doc.querySelector(".font-root")?.getAttribute("style")).toContain("element-1-font-0");
     expect(doc.querySelector("text")?.getAttribute("font-family")).toContain("element-1-font-0");
   });
   it("keeps only numeric serializer node markers for computed CSS", () => {
@@ -159,7 +159,7 @@ it("isolates mixed-case font faces and descriptors and remaps shorthand fonts", 
   const result = paste.prepareElementClipboard(
     {
       ...base,
-      html: '<div style="font:16px Test">Text</div>',
+      html: '<div class="font-root" style="font:16px Test">Text</div>',
       css: '@FONT-FACE{FONT-FAMILY:Test;src:url("data:font/woff2;base64,d09GMg==")} div{font:16px Test}',
     },
     "element-1",
@@ -167,5 +167,5 @@ it("isolates mixed-case font faces and descriptors and remaps shorthand fonts", 
   const doc = new DOMParser().parseFromString(result.html, "text/html");
   expect(doc.querySelector("style")?.textContent).not.toMatch(/font-family:\s*Test/i);
   expect(doc.querySelector("style")?.textContent).toContain('font:16px "element-1-font-0"');
-  expect(doc.querySelector("div div")?.getAttribute("style")).toContain("element-1-font-0");
+  expect(doc.querySelector(".font-root")?.getAttribute("style")).toContain("element-1-font-0");
 });

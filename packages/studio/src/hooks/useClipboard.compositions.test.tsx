@@ -65,7 +65,7 @@ it("isolates parent and child pasted styles after the compiler inlines both comp
     });
     await clipboard!.handlePaste();
     const parent = parse(files[path]!);
-    const parentStyle = parent.querySelector(".clip style")!.textContent!;
+    const parentStyle = parent.querySelector("style[data-hf-element-style]")!.textContent!;
     path = "compositions/sub.html";
     act(() => root.render(<Harness />));
     systemText = encodeElementClipboard({

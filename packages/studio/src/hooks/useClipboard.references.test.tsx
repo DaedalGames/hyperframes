@@ -6,6 +6,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { encodeElementClipboard, type ElementClipboard } from "@hyperframes/core/element-clipboard";
 import { useClipboard } from "./useClipboard";
 import { usePlayerStore } from "../player";
+import { resolveDomEditSelection, type DomEditSelection } from "../components/editor/domEditing";
 
 const parse = (html: string) => new DOMParser().parseFromString(html, "text/html");
 const SOURCE =
@@ -37,11 +38,12 @@ function mount(payload: ElementClipboard) {
     iframe.contentDocument!.close();
   };
   let clipboard: ReturnType<typeof useClipboard> | undefined;
+  const domEditSelectionRef: React.MutableRefObject<DomEditSelection | null> = { current: null };
   function Harness() {
     clipboard = useClipboard({
       projectId: "p",
       activeCompPath: path,
-      domEditSelectionRef: { current: null },
+      domEditSelectionRef,
       showToast: () => {},
       writeProjectFile: async (file, content) => {
         files[file] = content;
@@ -98,6 +100,19 @@ function mount(payload: ElementClipboard) {
     files,
     records,
     select,
+    selectDom: async (id: string) => {
+      usePlayerStore.setState({ selectedElementId: null, selectedElementIds: new Set() });
+      domEditSelectionRef.current = await resolveDomEditSelection(
+        iframe.contentDocument!.getElementById(id),
+        {
+          activeCompositionPath: path,
+          isMasterView: true,
+          exactTarget: true,
+          skipSourceProbe: true,
+        },
+      );
+      expect(domEditSelectionRef.current).not.toBeNull();
+    },
     doc: () => parse(files[path]!),
     preview: () => iframe.contentDocument!,
     navigate: (next: string) => {
@@ -112,9 +127,83 @@ function mountSvg(html: string, css: string) {
   return mount({ html, css, width: 100, height: 100, warnings: [] });
 }
 
+it("does not add matching ancestor context while preserving sibling styles", async () => {
+  const view = mountSvg(
+    '<div class="card"><span>Text</span></div>',
+    "div div div div.card{display:none}.card:only-child{color:red}",
+  );
+  await view.api().handlePaste();
+  const id = view.doc().querySelector(".clip")!.id;
+  view.select(id);
+  await view.api().handleDuplicate();
+  await view.api().handleCopy();
+  await pasteTwiceInOtherFile(view);
+  for (const file of Object.values(view.files)) {
+    const doc = parse(file);
+    for (const card of doc.querySelectorAll(".card")) {
+      expect(matchingDeclarations(doc, card, "display")).toEqual([]);
+      expect(matchingDeclarations(doc, card, "color")).toContain("red");
+    }
+  }
+  expect(
+    matchingDeclarations(view.preview(), view.preview().querySelector(".card")!, "display"),
+  ).toEqual([]);
+});
+
+it.each(["timeline", "dom"])(
+  "keeps edited owned styles with %s copies without importing unrelated head styles",
+  async (selection) => {
+    const view = mountSvg(
+      '<div class="card"><button type="BUTTON">Text</button></div>',
+      '.card{color:red}.card:not([style]){background:red}button[type^="but"]{opacity:.25}',
+    );
+    await view.api().handlePaste();
+    const id = view.doc().querySelector(".clip")!.id;
+    expect(view.doc().head.querySelector("style")?.textContent).toContain("color:red");
+    expect(view.doc().querySelector(".clip style")).toBeNull();
+    view.files["index.html"] = view.files["index.html"]!.replace("color:red", "color:blue").replace(
+      "</head>",
+      "<style>.unrelated{opacity:.3}</style></head>",
+    );
+    view.navigate("index.html");
+    if (selection === "dom") await view.selectDom(id);
+    else view.select(id);
+    await view.api().handleCopy();
+    await pasteTwiceInOtherFile(view);
+    for (const doc of [view.doc(), view.preview()]) {
+      const clips = Array.from(doc.querySelectorAll(".clip"));
+      expect(clips).toHaveLength(2);
+      expect(doc.head.querySelectorAll("style")).toHaveLength(2);
+      expect(doc.querySelector(".clip style")).toBeNull();
+      expect(doc.head.textContent).not.toContain(".unrelated");
+      for (const clip of clips) {
+        expect(matchingDeclarations(doc, clip.querySelector(".card")!, "color")).toContain("blue");
+        expect(matchingDeclarations(doc, clip.querySelector(".card")!, "background")).toContain(
+          "red",
+        );
+        expect(matchingDeclarations(doc, clip.querySelector("button")!, "opacity")).toContain(
+          ".25",
+        );
+      }
+    }
+    expect(view.records.at(-1)!.files["compositions/b.html"]!.after).toBe(
+      view.files["compositions/b.html"],
+    );
+  },
+);
+
+function clipCss(clip: Element): string {
+  return Array.from(clip.ownerDocument.querySelectorAll("style"))
+    .filter(
+      (style) => clip.contains(style) || style.getAttribute("data-hf-element-style") === clip.id,
+    )
+    .map((style) => style.textContent)
+    .join("\n");
+}
+
 function embeddedSelectors(clip: Element): string[] {
   const selectors: string[] = [];
-  postcss.parse(clip.querySelector("style")!.textContent!).walkRules((rule) => {
+  postcss.parse(clipCss(clip)).walkRules((rule) => {
     selectors.push(rule.selector);
   });
   return selectors;
@@ -164,7 +253,12 @@ it.each([".title{color:red}", "@media all{@supports (display:block){.title{color
         ),
       ).toBe(false);
     }
-    expect(doc.head.textContent).toBe(`#${original.id}{background:blue}`);
+    expect(
+      Array.from(
+        doc.head.querySelectorAll("style:not([data-hf-element-style])"),
+        (style) => style.textContent,
+      ),
+    ).toEqual([`#${original.id}{background:blue}`]);
     expect(view.records).toHaveLength(3);
     expect(view.records[2]!.files["compositions/b.html"]!.after).toBe(
       view.files["compositions/b.html"],
@@ -199,7 +293,7 @@ it("keeps duplicated SVG definitions and all accepted local fragment consumers a
       if (attr.name.endsWith("href") && attr.value.startsWith("#")) refs.push(attr.value.slice(1));
       for (const match of attr.value.matchAll(/url\(["']?#([^"')]+)["']?\)/g)) refs.push(match[1]!);
     }
-  postcss.parse(duplicate.querySelector("style")!.textContent!).walkDecls((decl) => {
+  postcss.parse(clipCss(duplicate)).walkDecls((decl) => {
     for (const match of decl.value.matchAll(/url\(["']?#([^"')]+)["']?\)/g)) refs.push(match[1]!);
   });
   expect(refs.length).toBeGreaterThanOrEqual(14);
@@ -376,6 +470,116 @@ it.each(["duplicate", "paste"] as const)(
   },
 );
 
+it.each([
+  {
+    selector: ".card:first-child",
+    html: '<div class="card"><span>Text</span></div>',
+    matches: [true],
+  },
+  {
+    selector: ".card:last-child",
+    html: '<div class="card"><span>Text</span></div>',
+    matches: [true],
+  },
+  {
+    selector: ".card:only-child",
+    html: '<div class="card"><span>Text</span></div>',
+    matches: [true],
+  },
+  {
+    selector: ".card:nth-child(1)",
+    html: '<div class="card"><span>Text</span></div>',
+    matches: [true],
+  },
+  {
+    selector: ".card:nth-last-child(1)",
+    html: '<div class="card"><span>Text</span></div>',
+    matches: [true],
+  },
+  {
+    selector: ".card:not(:first-child)",
+    html: '<div class="card"><span>Text</span></div>',
+    matches: [false],
+  },
+  {
+    selector: ".card:not(:last-child)",
+    html: '<div class="card"><span>Text</span></div>',
+    matches: [false],
+  },
+  {
+    selector: ".card:not(:only-child)",
+    html: '<div class="card"><span>Text</span></div>',
+    matches: [false],
+  },
+  {
+    selector: ".card:first-child",
+    html: '<div class="card"><span>First</span></div><p class="card"><span>Last</span></p>',
+    matches: [true, false],
+  },
+  {
+    selector: ".card:last-child",
+    html: '<div class="card"><span>First</span></div><p class="card"><span>Last</span></p>',
+    matches: [false, true],
+  },
+  {
+    selector: ".card:only-child",
+    html: '<div class="card"><span>First</span></div><p class="card"><span>Last</span></p>',
+    matches: [false, false],
+  },
+  {
+    selector: ".card:nth-child(2)",
+    html: '<div class="card"><span>First</span></div><p class="card"><span>Last</span></p>',
+    matches: [false, true],
+  },
+])(
+  "preserves captured sibling structure for $selector in $html",
+  async ({ selector, html, matches }) => {
+    const view = mountSvg(
+      html,
+      `${selector}{color:red}span:first-child{opacity:.25}*{box-sizing:border-box}div{border-width:3px}`,
+    );
+    const check = () => {
+      for (const doc of [view.doc(), view.preview()]) {
+        for (const clip of doc.querySelectorAll(".clip")) {
+          const cards = Array.from(clip.querySelectorAll(".card"));
+          expect(
+            cards.map((card) => matchingDeclarations(doc, card, "color").includes("red")),
+          ).toEqual(matches);
+          for (const card of cards) {
+            expect(matchingDeclarations(doc, card, "box-sizing")).toContain("border-box");
+            if (card.localName === "div")
+              expect(matchingDeclarations(doc, card, "border-width")).toContain("3px");
+            expect(matchingDeclarations(doc, card.querySelector("span")!, "opacity")).toContain(
+              ".25",
+            );
+            for (
+              let parent = card.parentElement;
+              parent && parent !== clip;
+              parent = parent.parentElement
+            ) {
+              expect(matchingDeclarations(doc, parent, "box-sizing")).toEqual([]);
+              expect(matchingDeclarations(doc, parent, "border-width")).toEqual([]);
+            }
+          }
+        }
+      }
+      const record = view.records.at(-1)!;
+      const path = Object.keys(record.files)[0]!;
+      expect(record.files[path]!.after).toBe(view.files[path]);
+    };
+    await view.api().handlePaste();
+    check();
+    const id = view.doc().querySelector(".clip")!.id;
+    view.select(id);
+    await view.api().handleDuplicate();
+    check();
+    view.select(id);
+    await view.api().handleCopy();
+    await pasteTwiceInOtherFile(view);
+    check();
+  },
+);
+
 it.each(["duplicate", "paste"] as const)(
   "keeps false authored fragment predicates false through same-file %s",
   async (action) => {
@@ -492,7 +696,7 @@ it.each([
   "preserves $label root style predicates through geometry, clone and reload",
   async ({ attribute, present, empty }) => {
     const view = mount({
-      html: `<div${attribute}><span>Text</span><i style="color:blue">Styled</i></div>`,
+      html: `<div class="captured-root"${attribute}><span>Text</span><i style="color:blue">Styled</i></div>`,
       css: '[style]{display:none}div:not([style]){background:red;color:white}[style=""]{opacity:.25}div:not([style=""]){border-width:2px}span:not([style]){color:green}i[style]{color:blue}',
       width: 100,
       height: 50,
@@ -504,7 +708,7 @@ it.each([
     await view.api().handleDuplicate();
     for (const doc of [view.doc(), view.preview()]) {
       for (const clip of doc.querySelectorAll(".clip")) {
-        const captured = clip.querySelector("div")!;
+        const captured = clip.querySelector(".captured-root")!;
         expect(captured.hasAttribute("style")).toBe(true);
         expect(matchingDeclarations(doc, captured, "display").includes("none")).toBe(present);
         expect(matchingDeclarations(doc, captured, "background").includes("red")).toBe(!present);

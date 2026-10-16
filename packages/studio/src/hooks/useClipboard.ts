@@ -12,6 +12,10 @@ import {
   insertAsSibling,
 } from "../utils/clipboardPayload";
 import { carryLook, renamedIds } from "../utils/clipboardLook";
+import {
+  hoistElementClipboardStyles,
+  includeElementClipboardStyles,
+} from "../utils/elementClipboardStyles";
 import { collectHtmlIds } from "../utils/studioHelpers";
 import { insertTimelineAssetIntoSource } from "../utils/timelineAssetDrop";
 import { extendRootDurationInSource } from "../utils/rootDuration";
@@ -114,9 +118,10 @@ function getSelectedDomElement(
 
 function savedMarkupElseLive(saved: Document, live: Element, sourceFile: string): string {
   const authored = findAuthoredElement(saved, live) ?? findAuthoredElementById(saved, live);
-  return authored
+  const html = authored
     ? authoredMarkup(authored, live, sourceFile)
     : liveMarkupWithoutPreviewMarks(live);
+  return includeElementClipboardStyles(saved, html);
 }
 
 async function readSavedMarkup(
@@ -187,13 +192,15 @@ export function pasteElementHtml(
 ): string {
   const reminted = remintHfIds(payload.html, new DOMParser(), hfIdsInFile(content));
   const deduped = deduplicateIds(reminted, collectHtmlIds(content));
+  const renames = renamedIds(reminted, deduped);
+  const prepared = hoistElementClipboardStyles(content, deduped, renames);
   const result = insertAsSibling(
-    content,
-    deduped,
+    prepared.content,
+    prepared.html,
     payload.originSelector,
     payload.originSelectorIndex,
   );
-  return fromThisFile ? carryLook(result, renamedIds(reminted, deduped), 0) : result;
+  return fromThisFile ? carryLook(result, renames, 0) : result;
 }
 
 /** Shared insertion path for paste and duplicate, anchored at the playhead or the selection's end. Returns the
@@ -240,7 +247,14 @@ export function pasteTimelineClips(
       .replace(/data-start="[^"]*"/, `data-start="${formatTimelineAttributeNumber(newStart)}"`)
       .replace(/data-track-index="[^"]*"/, `data-track-index="${newTrack}"`);
     const withPatched = patchedRootTag + deduped.slice(rootTagEnd + 1);
-    result = insertTimelineAssetIntoSource(result, withPatched, { preserveWhitespace: true });
+    const prepared = hoistElementClipboardStyles(
+      result,
+      withPatched,
+      renamedIds(reminted, deduped),
+    );
+    result = insertTimelineAssetIntoSource(prepared.content, prepared.html, {
+      preserveWhitespace: true,
+    });
     if (fromThisFile) {
       const authored = Number(rootTag.match(/data-start="([^"]*)"/)?.[1]);
       const authoredStart = Number.isFinite(authored) ? authored : clip.start;

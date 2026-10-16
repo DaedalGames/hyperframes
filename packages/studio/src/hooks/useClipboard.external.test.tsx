@@ -162,7 +162,7 @@ it.each([
     const doc = new DOMParser().parseFromString(view.file(), "text/html");
     const scope = doc.querySelector(".clip")?.id;
     expect(scope).toMatch(/^element-2-[\da-f-]{36}$/);
-    expect(doc.querySelector(".clip div")?.id).toBe(`${scope}-node-0`);
+    expect(doc.querySelector('.clip [id$="-node-0"]')?.id).toBe(`${scope}-node-0`);
     expect(doc.querySelector("style")?.textContent).toContain(`#${scope}-node-0`);
     expect(doc.querySelectorAll(`#${existingId}`)).toHaveLength(1);
   },
@@ -186,7 +186,7 @@ it("does not replace an existing composition font with the pasted font", async (
   await view.api().handlePaste();
   const doc = new DOMParser().parseFromString(view.file(), "text/html");
   expect(doc.head.textContent).toContain("font-family:element-2-font-0");
-  const added = doc.querySelector(".clip style")?.textContent ?? "";
+  const added = doc.querySelector("style[data-hf-element-style]")?.textContent ?? "";
   expect(added).toContain("font-family:");
   expect(added).not.toContain('"element-2-font-0"');
 });

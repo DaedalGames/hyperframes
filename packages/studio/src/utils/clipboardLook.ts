@@ -1,4 +1,5 @@
 import { copyAnimationsInScript } from "@hyperframes/parsers/gsap-writer-acorn";
+import { scanHtmlOpeningTags } from "@hyperframes/parsers/html-attribute-spans";
 import { clipboardAttributeRewrites, rebindClipboardUrls } from "./clipboardReferences";
 import { rebindClipboardSelector, type ClipboardAttributeRewrite } from "./clipboardSelectors";
 import { ID_ATTR_RE } from "./clipboardPayload";
@@ -8,6 +9,14 @@ const ID_ATTRS = new RegExp(ID_ATTR_RE.source, "g");
 // One pass over both, so a `<style>` written inside a script's text is left as script.
 const BLOCKS =
   /(<script\b(?![^>]*\bsrc=)[^>]*>)([\s\S]*?)(<\/script>)|(<style\b[^>]*>)([\s\S]*?)(<\/style>)/gi;
+
+function ownedStyle(opening: string): boolean {
+  return (
+    scanHtmlOpeningTags(opening)[0]?.attributes.some(
+      (attr) => attr.name === "data-hf-element-style",
+    ) ?? false
+  );
+}
 
 /** Each id a paste renamed (`goodbye` to `goodbye-2`), from the same markup before and after the rename. */
 export function renamedIds(before: string, after: string): Map<string, string> {
@@ -36,7 +45,7 @@ export function carryLook(
       (block, scriptOpen, script, scriptClose, styleOpen, css, styleClose) =>
         scriptOpen !== undefined
           ? scriptOpen + copyAnimationsInScript(script, `#${from}`, `#${to}`, delta) + scriptClose
-          : styleOpen !== undefined
+          : styleOpen !== undefined && !ownedStyle(styleOpen)
             ? styleOpen + withCopiedRules(css, from, renames, attributes) + styleClose
             : block,
     );

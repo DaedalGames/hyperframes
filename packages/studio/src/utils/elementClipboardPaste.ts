@@ -219,8 +219,9 @@ export function prepareElementClipboard(
   const css = sanitizeElementCss(cssSource, scope, ids, warn, fonts, writes);
   if (css) {
     const style = output.createElement("style");
+    style.setAttribute("data-hf-element-style", scope);
     style.textContent = css;
-    wrapper.prepend(style);
+    wrapper.append(style);
   }
   return { html: wrapper.outerHTML, warnings: [...warnings] };
 }
