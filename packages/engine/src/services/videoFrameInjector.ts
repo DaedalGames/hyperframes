@@ -707,19 +707,37 @@ export async function queryElementStacking(
         );
       }
 
+      function isRenderFrameVisible(id: string): boolean {
+        const renderFrame = document.getElementById(`${prefix}${id}${suffix}`);
+        return renderFrame ? isElementPaintable(renderFrame) : false;
+      }
+
+      // For HDR elements, use the full accumulated viewport matrix so the
+      // affine blit can apply rotation/scale/translate properly. For DOM
+      // elements, the element-level transform is sufficient for reference.
+      function blitGeometry(
+        el: Element,
+        style: CSSStyleDeclaration,
+        isHdrEl: boolean,
+      ): Pick<ElementStackingInfo, "transform" | "borderRadius" | "clipRect"> {
+        if (!isHdrEl) {
+          return {
+            transform: style.transform || "none",
+            borderRadius: [0, 0, 0, 0],
+            clipRect: null,
+          };
+        }
+        return {
+          transform: getViewportMatrix(el),
+          borderRadius: getEffectiveBorderRadius(el),
+          clipRect: getClipRect(el),
+        };
+      }
+
       function describe(el: Element, id: string): ElementStackingInfo {
         const rect = el.getBoundingClientRect();
         const style = window.getComputedStyle(el);
-        const zIndex = getEffectiveZIndex(el);
         const isHdrEl = hdrSet.has(id);
-        // The frame injector now uses `visibility: hidden` (without `opacity: 0`)
-        // to hide native <video> elements, so the element's own computed opacity
-        // remains the GSAP-controlled value. Walk from the element itself to
-        // multiply through any ancestor opacity stacks.
-        const opacity = getEffectiveOpacity(el);
-        const visible = isElementPaintable(el);
-        const renderFrame = document.getElementById(`${prefix}${id}${suffix}`);
-        const renderFrameVisible = renderFrame ? isElementPaintable(renderFrame) : false;
         // offsetWidth/offsetHeight only exist on HTMLElement (not on
         // SVGElement, MathMLElement, etc.). Fall back to the bounding rect
         // dimensions for non-HTML elements so callers always get sensible
@@ -727,28 +745,27 @@ export async function queryElementStacking(
         const htmlEl = el instanceof HTMLElement ? el : null;
         return {
           id,
-          zIndex,
+          zIndex: getEffectiveZIndex(el),
           x: Math.round(rect.x),
           y: Math.round(rect.y),
           width: Math.round(rect.width),
           height: Math.round(rect.height),
           layoutWidth: htmlEl?.offsetWidth || Math.round(rect.width),
           layoutHeight: htmlEl?.offsetHeight || Math.round(rect.height),
-          opacity,
-          visible,
-          renderFrameVisible,
-          isHdr: hdrSet.has(id),
-          // For HDR elements, use the full accumulated viewport matrix so the
-          // affine blit can apply rotation/scale/translate properly. For DOM
-          // elements, the element-level transform is sufficient for reference.
-          transform: isHdrEl ? getViewportMatrix(el) : style.transform || "none",
-          borderRadius: isHdrEl ? getEffectiveBorderRadius(el) : [0, 0, 0, 0],
+          // The frame injector now uses `visibility: hidden` (without `opacity: 0`)
+          // to hide native <video> elements, so the element's own computed opacity
+          // remains the GSAP-controlled value. Walk from the element itself to
+          // multiply through any ancestor opacity stacks.
+          opacity: getEffectiveOpacity(el),
+          visible: isElementPaintable(el),
+          renderFrameVisible: isRenderFrameVisible(id),
+          isHdr: isHdrEl,
+          ...blitGeometry(el, style, isHdrEl),
           // `getComputedStyle` returns "" when the property doesn't apply (e.g.
           // for non-replaced elements); normalize to the CSS defaults so callers
           // can rely on a populated value.
           objectFit: style.objectFit || "fill",
           objectPosition: style.objectPosition || "50% 50%",
-          clipRect: isHdrEl ? getClipRect(el) : null,
         };
       }
 
