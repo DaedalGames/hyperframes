@@ -1,3 +1,4 @@
+import { rebindClipboardSelector, type ClipboardAttributeRewrite } from "./clipboardSelectors";
 import postcss, { type AtRule, type Rule, type Container, type Declaration } from "postcss";
 
 const FUNCTIONS = new Set(
@@ -55,6 +56,7 @@ interface CssContext {
   ids: ReadonlyMap<string, string>;
   warn: () => void;
   fonts: ReadonlyMap<string, string>;
+  attributes?: readonly ClipboardAttributeRewrite[];
 }
 function declaration(decl: Declaration, context: CssContext, font = false): void {
   const prop = canonical(decl.prop).toLowerCase();
@@ -101,12 +103,7 @@ function sanitizeRule(node: Rule, context: CssContext): void {
     context.warn();
     return;
   }
-  let selector = node.selector;
-  for (const [from, to] of context.ids)
-    selector = selector.replace(
-      new RegExp(`#${from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`, "g"),
-      `#${to}`,
-    );
+  const selector = rebindClipboardSelector(node.selector, context.ids, context.attributes);
   node.selector = `#${context.scope} :is(${selector})`;
   node.walkDecls((decl) => declaration(decl, context));
 }
@@ -139,10 +136,11 @@ export function sanitizeElementCss(
   ids: ReadonlyMap<string, string>,
   warn: () => void,
   fonts: ReadonlyMap<string, string>,
+  attributes: readonly ClipboardAttributeRewrite[] = [],
 ): string {
   try {
     const root = postcss.parse(css);
-    rules(root, { scope, ids, warn, fonts });
+    rules(root, { scope, ids, warn, fonts, attributes });
     return root.toString().replace(/</g, "");
   } catch {
     warn();

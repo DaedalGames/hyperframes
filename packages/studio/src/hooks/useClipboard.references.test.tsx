@@ -68,6 +68,7 @@ function mount(payload: ElementClipboard) {
   }
   root = createRoot(document.createElement("div"));
   act(() => root?.render(<Harness />));
+  reload();
   usePlayerStore.setState({
     currentTime: 0,
     elements: [],
@@ -107,6 +108,21 @@ function mount(payload: ElementClipboard) {
   };
 }
 
+function embeddedSelectors(clip: Element): string[] {
+  const selectors: string[] = [];
+  postcss.parse(clip.querySelector("style")!.textContent!).walkRules((rule) => {
+    selectors.push(rule.selector);
+  });
+  return selectors;
+}
+
+async function pasteTwiceInOtherFile(view: ReturnType<typeof mount>) {
+  view.navigate("compositions/b.html");
+  usePlayerStore.setState({ elements: [], selectedElementId: null, selectedElementIds: new Set() });
+  await view.api().handlePaste();
+  await view.api().handlePaste();
+}
+
 it.each([".title{color:red}", "@media all{@supports (display:block){.title{color:red}}}"])(
   "rebinds only embedded styles when repeatedly pasting an imported clip into another file: %s",
   async (css) => {
@@ -125,23 +141,13 @@ it.each([".title{color:red}", "@media all{@supports (display:block){.title{color
       "<body>",
       `<head><style>#${original.id}{background:blue}</style></head><body>`,
     );
-    view.navigate("compositions/b.html");
-    usePlayerStore.setState({
-      elements: [],
-      selectedElementId: null,
-      selectedElementIds: new Set(),
-    });
-    await view.api().handlePaste();
-    await view.api().handlePaste();
+    await pasteTwiceInOtherFile(view);
     const doc = view.doc();
     const clips = Array.from(doc.querySelectorAll(".clip"));
     expect(clips).toHaveLength(2);
     expect(clips.map((clip) => clip.id)).toContain(`${original.id}-2`);
     for (const clip of clips) {
-      const selectors: string[] = [];
-      postcss.parse(clip.querySelector("style")!.textContent!).walkRules((rule) => {
-        selectors.push(rule.selector);
-      });
+      const selectors = embeddedSelectors(clip);
       expect(selectors.some((selector) => clip.querySelector(".title")!.matches(selector))).toBe(
         true,
       );
@@ -199,4 +205,93 @@ it("keeps duplicated SVG definitions and all accepted local fragment consumers a
   }
   expect(view.records[1]!.files["index.html"]!.after).toBe(duplicatedFile);
   expect(view.records[2]!.files["index.html"]!.before).toBe(duplicatedFile);
+});
+
+it("rebinds fragment predicates on cross-file clones while preserving unrelated title predicates", async () => {
+  const view = mount({ html: "<div>unused</div>", css: "", width: 100, height: 50, warnings: [] });
+  view.files["index.html"] = SOURCE.replace(
+    "</div></body>",
+    '<div id="authored" class="clip" data-start="0" data-duration="5" data-track-index="0"><style>use[href="#shape"]{opacity:.25}[title="#shape"]{color:red}</style><svg><symbol id="shape"><rect width="100" height="100"/></symbol><use href="#shape"/></svg><span title="#shape">Literal</span></div></div></body>',
+  );
+  view.navigate("index.html");
+  view.select("authored");
+  await view.api().handleCopy();
+  await pasteTwiceInOtherFile(view);
+  for (const clip of view.doc().querySelectorAll(".clip")) {
+    const selectors = embeddedSelectors(clip);
+    expect(selectors.some((selector) => clip.querySelector("use")!.matches(selector))).toBe(true);
+    expect(selectors).toContain('[title="#shape"]');
+    expect(clip.querySelector("span")!.getAttribute("title")).toBe("#shape");
+  }
+  expect(view.records[1]!.files["compositions/b.html"]!.after).toBe(
+    view.files["compositions/b.html"],
+  );
+});
+
+it("preserves the clone's own SVG gradient while the original still exists after same-file Copy/Paste", async () => {
+  const view = mount({
+    html: '<svg><defs><linearGradient id="paint"><stop stop-color="red"/></linearGradient></defs><rect class="painted" width="100" height="100"/></svg>',
+    css: ".painted{fill:url(#paint)}",
+    width: 100,
+    height: 100,
+    warnings: [],
+  });
+  await view.api().handlePaste();
+  const originalId = view.doc().querySelector(".clip")!.id;
+  view.select(originalId);
+  await view.api().handleCopy();
+  await view.api().handlePaste();
+  const doc = view.doc();
+  const clone = doc.getElementById(`${originalId}-2`)!;
+  expect(doc.querySelector(".clip")).toBe(clone);
+  const fills: string[] = [];
+  for (const style of doc.querySelectorAll("style"))
+    postcss.parse(style.textContent!).walkRules((rule) => {
+      if (clone.querySelector(".painted")!.matches(rule.selector))
+        rule.walkDecls("fill", (decl) => {
+          fills.push(decl.value);
+        });
+    });
+  const gradient = clone.querySelector("linearGradient")!;
+  expect(fills.at(-1)?.replace(/["']/g, "")).toBe(`url(#${gradient.id})`);
+  gradient.querySelector("stop")!.setAttribute("stop-color", "blue");
+  view.files["index.html"] = doc.documentElement.outerHTML;
+  view.navigate("index.html");
+  expect(
+    view.preview().getElementById(gradient.id)!.querySelector("stop")!.getAttribute("stop-color"),
+  ).toBe("blue");
+  expect(
+    view.preview().getElementById(originalId)!.querySelector("stop")!.getAttribute("stop-color"),
+  ).toBe("red");
+  expect(view.records[1]!.files["index.html"]!.after).toContain(`#${gradient.id}`);
+});
+
+it.each(["#title", '[id="title"]'])("preserves initial imported selector %s", async (selector) => {
+  const view = mount({
+    html: '<div><span id="title">Heading</span></div>',
+    css: `${selector}{color:red}`,
+    width: 100,
+    height: 50,
+    warnings: [],
+  });
+  await view.api().handlePaste();
+  const clip = view.doc().querySelector(".clip")!;
+  const selectors = embeddedSelectors(clip);
+  expect(selectors.some((rule) => clip.querySelector("span")!.matches(rule))).toBe(true);
+  expect(view.preview().querySelector(".clip span")!.id).toBe(clip.querySelector("span")!.id);
+  expect(view.records[0]!.files["index.html"]!.after).toBe(view.files["index.html"]);
+});
+
+it("preserves fragment-attribute predicates on the initial accepted SVG import", async () => {
+  const view = mount({
+    html: '<svg><symbol id="shape"><rect width="100" height="100"/></symbol><use href="#shape"/></svg>',
+    css: 'use[href="#shape"]{opacity:.25}',
+    width: 100,
+    height: 100,
+    warnings: [],
+  });
+  await view.api().handlePaste();
+  const clip = view.doc().querySelector(".clip")!;
+  const selectors = embeddedSelectors(clip);
+  expect(selectors.some((selector) => clip.querySelector("use")!.matches(selector))).toBe(true);
 });

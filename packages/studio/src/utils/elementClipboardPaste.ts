@@ -1,3 +1,5 @@
+import { rebindClipboardUrls } from "./clipboardReferences";
+import type { ClipboardAttributeRewrite } from "./clipboardSelectors";
 import {
   ELEMENT_CLIPBOARD_MAX_NODES,
   type ElementClipboard,
@@ -34,6 +36,7 @@ interface CopyContext {
   nodeIds: ReadonlyMap<Element, string>;
   fonts: ReadonlyMap<string, string>;
   warn: () => void;
+  attributes: ClipboardAttributeRewrite[];
 }
 
 function resourceAttribute(node: Element, attr: Attr): boolean {
@@ -68,6 +71,15 @@ function copyKnownAttribute(clean: Element, attr: Attr, context: CopyContext): v
   );
 }
 
+function recordFragmentAttribute(clean: Element, attr: Attr, context: CopyContext): void {
+  const fragment = attr.value.startsWith("#") && context.ids.has(attr.value.slice(1));
+  const urls = rebindClipboardUrls(attr.value, context.ids) !== attr.value;
+  if (!fragment && !urls) return;
+  const after = clean.getAttribute(attr.name);
+  if (after !== null && after !== attr.value)
+    context.attributes.push({ name: attr.name, before: attr.value, after });
+}
+
 function copyAttribute(node: Element, clean: Element, attr: Attr, context: CopyContext): void {
   if (attr.name === "id") return;
   if (attr.name === "data-hf-n" && /^\d{1,6}$/.test(attr.value))
@@ -79,6 +91,7 @@ function copyAttribute(node: Element, clean: Element, attr: Attr, context: CopyC
     );
   else if (resourceAttribute(node, attr)) copyResource(node, clean, attr, context);
   else copyKnownAttribute(clean, attr, context);
+  recordFragmentAttribute(clean, attr, context);
 }
 
 function cleanElement(node: Element, context: CopyContext): Element | null {
@@ -146,7 +159,8 @@ export function prepareElementClipboard(
     ...elements.filter((el) => el.localName === "style").map((el) => el.textContent ?? ""),
   ].join("\n");
   const fonts = elementFontNames(cssSource, fontScope);
-  const context = { output, ids, nodeIds, fonts, warn };
+  const attributes: ClipboardAttributeRewrite[] = [];
+  const context = { output, ids, nodeIds, fonts, warn, attributes };
   for (const child of Array.from(template.content.childNodes)) copyNode(child, wrapper, context);
   if (!wrapper.firstChild) throw new Error("Element has no supported content");
   const capturedRoot = wrapper.firstElementChild;
@@ -157,7 +171,7 @@ export function prepareElementClipboard(
       `${style};position:relative!important;left:0px!important;top:0px!important;right:auto!important;bottom:auto!important;width:${payload.width}px!important;height:${payload.height}px!important;margin:0!important;`,
     );
   }
-  const css = sanitizeElementCss(cssSource, scope, ids, warn, fonts);
+  const css = sanitizeElementCss(cssSource, scope, ids, warn, fonts, attributes);
   if (css) {
     const style = output.createElement("style");
     style.textContent = css;

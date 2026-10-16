@@ -1,5 +1,5 @@
 import postcss from "postcss";
-import { escapeCssIdentifier, replaceSelectorIdTokens } from "@hyperframes/core/selector-id-tokens";
+import { rebindClipboardSelector, type ClipboardAttributeRewrite } from "./clipboardSelectors";
 import {
   decodeAuthoredAttribute,
   scanHtmlOpeningTags,
@@ -21,25 +21,25 @@ const URL_ATTRIBUTES = new Set([
 const VALUE_TOKENS =
   /"(?:[^"\\]|\\[\s\S])*"|'(?:[^'\\]|\\[\s\S])*'|\/\*[\s\S]*?\*\/|(?<![\w-])(url\(\s*)(["']?)#([^"')\s]+)\2(\s*\))/gi;
 
-function localUrls(value: string, renames: ReadonlyMap<string, string>): string {
+export function rebindClipboardUrls(value: string, renames: ReadonlyMap<string, string>): string {
   return value.replace(VALUE_TOKENS, (full, open, quote, id: string, close) => {
     const renamed = open && renames.get(id);
     return renamed ? `${open}${quote}#${renamed}${quote}${close}` : full;
   });
 }
 
-function stylesheet(css: string, renames: ReadonlyMap<string, string>): string {
+function stylesheet(
+  css: string,
+  renames: ReadonlyMap<string, string>,
+  attributes: readonly ClipboardAttributeRewrite[],
+): string {
   try {
     const root = postcss.parse(css);
     root.walkRules((rule) => {
-      rule.selector = replaceSelectorIdTokens(
-        rule.selector,
-        [...renames.keys()],
-        (id) => `#${escapeCssIdentifier(renames.get(id) ?? id)}`,
-      );
+      rule.selector = rebindClipboardSelector(rule.selector, renames, attributes);
     });
     root.walkDecls((decl) => {
-      decl.value = localUrls(decl.value, renames);
+      decl.value = rebindClipboardUrls(decl.value, renames);
     });
     return root.toString();
   } catch {
@@ -52,7 +52,7 @@ function attributeValue(name: string, value: string, renames: ReadonlyMap<string
     const renamed = renames.get(value.slice(1));
     return renamed ? `#${renamed}` : value;
   }
-  return URL_ATTRIBUTES.has(name) ? localUrls(value, renames) : value;
+  return URL_ATTRIBUTES.has(name) ? rebindClipboardUrls(value, renames) : value;
 }
 
 interface SourceEdit {
@@ -64,7 +64,7 @@ interface SourceEdit {
 function attributeEdit(
   attr: HtmlAttributeSpan,
   renames: ReadonlyMap<string, string>,
-): SourceEdit | null {
+): (SourceEdit & { reference: ClipboardAttributeRewrite }) | null {
   if (attr.kind !== "value") return null;
   const value = decodeAuthoredAttribute(attr.value);
   const rewritten = attributeValue(attr.name, value, renames);
@@ -77,6 +77,7 @@ function attributeEdit(
     start: attr.valueStart,
     end: attr.valueEnd,
     text: attr.quote ? encoded : `"${encoded}"`,
+    reference: { name: attr.name, before: value, after: rewritten },
   };
 }
 
@@ -87,16 +88,21 @@ export function rebindClipboardReferences(
 ): string {
   if (!renames.size) return html;
   const edits: SourceEdit[] = [];
-  for (const tag of scanHtmlOpeningTags(html)) {
-    if (tag.name === "style" && tag.rawTextEnd !== null) {
-      const css = html.slice(tag.end, tag.rawTextEnd);
-      const text = stylesheet(css, renames);
-      if (text !== css) edits.push({ start: tag.end, end: tag.rawTextEnd, text });
-    }
+  const attributes: ClipboardAttributeRewrite[] = [];
+  const tags = scanHtmlOpeningTags(html);
+  for (const tag of tags)
     for (const attr of tag.attributes) {
       const edit = attributeEdit(attr, renames);
-      if (edit) edits.push(edit);
+      if (edit) {
+        edits.push(edit);
+        attributes.push(edit.reference);
+      }
     }
+  for (const tag of tags) {
+    if (tag.name !== "style" || tag.rawTextEnd === null) continue;
+    const css = html.slice(tag.end, tag.rawTextEnd);
+    const text = stylesheet(css, renames, attributes);
+    if (text !== css) edits.push({ start: tag.end, end: tag.rawTextEnd, text });
   }
   for (const edit of edits.sort((a, b) => b.start - a.start))
     html = html.slice(0, edit.start) + edit.text + html.slice(edit.end);
