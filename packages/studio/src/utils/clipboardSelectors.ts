@@ -53,16 +53,39 @@ function outputPredicate(parsed: Predicate, reference: ClipboardAttributeRewrite
   return `${guard}[${name}="${escapeCssAttributeValue(reference.after)}"${flag}]`;
 }
 
+function attributeGroups(references: readonly ClipboardAttributeRewrite[]) {
+  const nodes = new Map<string, ClipboardAttributeRewrite[]>();
+  const groups: ClipboardAttributeRewrite[][] = [];
+  for (const reference of references) {
+    if (!reference.target) {
+      groups.push([reference]);
+      continue;
+    }
+    let group = nodes.get(reference.target);
+    if (!group) {
+      group = [];
+      nodes.set(reference.target, group);
+      groups.push(group);
+    }
+    group.push(reference);
+  }
+  return groups;
+}
+
 function predicateChanges(parsed: Predicate, references: readonly ClipboardAttributeRewrite[]) {
   const include = new Set<string>();
   const exclude = new Set<string>();
-  for (const reference of references) {
-    const before =
-      attributeMatches(parsed, reference.name) && valueMatches(parsed, reference.before);
-    const after =
-      attributeMatches(parsed, reference.afterName ?? reference.name) &&
-      valueMatches(parsed, reference.after);
-    if (before !== after) (before ? include : exclude).add(outputPredicate(parsed, reference));
+  for (const group of attributeGroups(references)) {
+    const before = group.some(
+      (reference) =>
+        attributeMatches(parsed, reference.name) && valueMatches(parsed, reference.before),
+    );
+    const after = group.some(
+      (reference) =>
+        attributeMatches(parsed, reference.afterName ?? reference.name) &&
+        valueMatches(parsed, reference.after),
+    );
+    if (before !== after) (before ? include : exclude).add(outputPredicate(parsed, group[0]!));
   }
   return { include, exclude };
 }

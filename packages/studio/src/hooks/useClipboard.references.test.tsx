@@ -427,3 +427,31 @@ it("keeps normalized mixed fragment predicates selective through reload and dupl
   expect(css).toContain('[href="#shape"]');
   expect(css).toContain(":where(#");
 });
+
+it.each(["shape", "element-1-fixed-node-2"])(
+  "preserves aggregate dual-attribute predicates, including unchanged accepted href: %s",
+  async (shape) => {
+    vi.stubGlobal("crypto", { randomUUID: () => "fixed" });
+    const view = mount({
+      html: `<svg><defs><path id="${shape}" d="M0 0L1 1"/></defs><use role="img" href="#${shape}" xlink:href="#${shape}"/></svg>`,
+      css: `use[|href]{opacity:.25}use[|href="#${shape}"]{color:red}use[*|href="#${shape}"]{stroke:green}use[role="img"]{fill:blue}`,
+      width: 100,
+      height: 100,
+      warnings: [],
+    });
+    await view.api().handlePaste();
+    const originalId = view.doc().querySelector(".clip")!.id;
+    view.select(originalId);
+    await view.api().handleDuplicate();
+    for (const doc of [view.doc(), view.preview()]) {
+      for (const clip of doc.querySelectorAll(".clip")) {
+        const use = clip.querySelector("use")!;
+        expect(matchingDeclarations(doc, use, "opacity")).toContain(".25");
+        expect(matchingDeclarations(doc, use, "color")).toContain("red");
+        expect(matchingDeclarations(doc, use, "stroke")).toContain("green");
+        expect(matchingDeclarations(doc, use, "fill")).toContain("blue");
+      }
+    }
+    expect(view.records[1]!.files["index.html"]!.after).toBe(view.files["index.html"]);
+  },
+);

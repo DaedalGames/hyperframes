@@ -191,10 +191,22 @@ export function prepareElementClipboard(
       `${style};position:relative!important;left:0px!important;top:0px!important;right:auto!important;bottom:auto!important;width:${payload.width}px!important;height:${payload.height}px!important;margin:0!important;`,
     );
   }
-  const writes = attributes.flatMap(({ node, ...reference }) => {
-    const after = node.getAttribute(reference.afterName!)!;
-    if (reference.name === reference.afterName && reference.before === after) return [];
-    return [{ ...reference, after, target: nodeSelector(node, wrapper) }];
+  const finalAttributes = attributes.map((reference) => ({
+    ...reference,
+    after: reference.node.getAttribute(reference.afterName!)!,
+  }));
+  const changedNodes = new Set(
+    finalAttributes
+      .filter(
+        (reference) =>
+          reference.name !== reference.afterName || reference.before !== reference.after,
+      )
+      .map((reference) => reference.node),
+  );
+  const targets = new Map(Array.from(changedNodes, (node) => [node, nodeSelector(node, wrapper)]));
+  const writes = finalAttributes.flatMap(({ node, ...reference }) => {
+    const target = targets.get(node);
+    return target ? [{ ...reference, target }] : [];
   });
   const css = sanitizeElementCss(cssSource, scope, ids, warn, fonts, writes);
   if (css) {
