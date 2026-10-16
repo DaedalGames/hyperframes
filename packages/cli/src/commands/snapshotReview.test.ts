@@ -106,7 +106,16 @@ describe("planReview", () => {
   it("spreads beats evenly when there are fewer than two scenes", () => {
     const plan = planReview({ window: [0, 10], scenes: [], beats: [], notes: [] }, 10);
     expect(plan.beats.map((beat) => beat.time)).toEqual([1, 3, 5, 7, 9]);
-    expect(plan.notes[0]).toContain("Fewer than two timed scenes");
+    expect(plan.notes[0]).toContain("Fewer than two scene starts");
+  });
+
+  it("spreads beats evenly when every scene starts at the same time", () => {
+    const scenes = [
+      { id: "basemap", start: 0, end: 10 },
+      { id: "pin", start: 0, end: 10 },
+    ];
+    const plan = planReview({ window: [0, 10], scenes, beats: [], notes: [] }, 10);
+    expect(plan.beats.map((beat) => beat.time)).toEqual([1, 3, 5, 7, 9]);
   });
 });
 

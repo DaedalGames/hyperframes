@@ -15,7 +15,7 @@ export const REVIEW_SEAM_OFFSETS = [-0.2, -0.1, 0, 0.1, 0.2] as const;
 export const REVIEW_PHONE_WIDTH = 360;
 /** Starts and ends closer than this are one boundary. */
 const SAME_TIME_SEC = 0.05;
-/** Without two scenes there is nothing to cut between, so the beats are spread evenly. */
+/** Without two scene starts there is nothing to cut between, so the beats are spread evenly. */
 const EVEN_BEATS = 5;
 
 export interface ReviewScene {
@@ -131,8 +131,11 @@ export function planReview(
   const { window: bounds, scenes } = timeline;
   const notes = [...timeline.notes];
   const clamp = (time: number) => roundMs(Math.min(Math.max(time, bounds[0]), lastFrame));
+  const distinctStarts = mergeBeats(
+    scenes.map((scene) => ({ time: scene.start, label: scene.id })),
+  );
   const beats = mergeBeats([
-    ...(scenes.length >= 2
+    ...(distinctStarts.length >= 2
       ? scenes.map((scene) => ({ time: settledTime(scene.start, scene.end), label: scene.id }))
       : evenBeats(bounds, notes)),
     ...timeline.beats,
@@ -147,7 +150,7 @@ export function planReview(
 
 function evenBeats(bounds: SnapshotRange, notes: string[]): ReviewBeat[] {
   notes.push(
-    `Fewer than two timed scenes; ${EVEN_BEATS} beats are spread evenly instead. Time scenes as sub-composition hosts or clips to review each one.`,
+    `Fewer than two scene starts; ${EVEN_BEATS} beats are spread evenly instead. Time scenes as sub-composition hosts or clips to review each one.`,
   );
   const [start, end] = bounds;
   return Array.from({ length: EVEN_BEATS }, (_, index) => {
