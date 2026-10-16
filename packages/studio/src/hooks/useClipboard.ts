@@ -240,7 +240,7 @@ export function pasteTimelineClips(
       .replace(/data-start="[^"]*"/, `data-start="${formatTimelineAttributeNumber(newStart)}"`)
       .replace(/data-track-index="[^"]*"/, `data-track-index="${newTrack}"`);
     const withPatched = patchedRootTag + deduped.slice(rootTagEnd + 1);
-    result = insertTimelineAssetIntoSource(result, withPatched);
+    result = insertTimelineAssetIntoSource(result, withPatched, { preserveWhitespace: true });
     if (fromThisFile) {
       const authored = Number(rootTag.match(/data-start="([^"]*)"/)?.[1]);
       const authoredStart = Number.isFinite(authored) ? authored : clip.start;
@@ -398,6 +398,7 @@ export function useClipboard({
   // fallow-ignore-next-line complexity
   const handlePaste = useCallback(
     async (options?: InPlace) => {
+      const pendingPayload = clipboardRef.current;
       if (
         await pasteSystemElement(
           {
@@ -415,7 +416,7 @@ export function useClipboard({
         )
       )
         return;
-      const payload = await clipboardRef.current;
+      const payload = await pendingPayload;
       if (!payload) {
         showToast("Nothing to paste.", "info");
         return;

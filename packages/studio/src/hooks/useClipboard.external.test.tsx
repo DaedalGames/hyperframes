@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import React, { act } from "react";
+import postcss from "postcss";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { encodeElementClipboard } from "@hyperframes/core/element-clipboard";
@@ -159,9 +160,10 @@ it.each([
     );
     await view.api().handlePaste();
     const doc = new DOMParser().parseFromString(view.file(), "text/html");
-    expect(doc.querySelector(".clip")?.id).toBe("element-2");
-    expect(doc.querySelector(".clip div")?.id).toBe("element-2-node-0");
-    expect(doc.querySelector("style")?.textContent).toContain("#element-2-node-0");
+    const scope = doc.querySelector(".clip")?.id;
+    expect(scope).toMatch(/^element-2-[\da-f-]{36}$/);
+    expect(doc.querySelector(".clip div")?.id).toBe(`${scope}-node-0`);
+    expect(doc.querySelector("style")?.textContent).toContain(`#${scope}-node-0`);
     expect(doc.querySelectorAll(`#${existingId}`)).toHaveLength(1);
   },
 );
@@ -188,3 +190,108 @@ it("does not replace an existing composition font with the pasted font", async (
   expect(added).toContain("font-family:");
   expect(added).not.toContain('"element-2-font-0"');
 });
+
+it.each([
+  { css: "#source h1{color:red}", conditions: [] },
+  { css: "@media all{#source h1{color:red}}", conditions: ["media all"] },
+  {
+    css: "@supports (display:block){@media all{#source h1{color:red}}}",
+    conditions: ["media all", "supports (display:block)"],
+  },
+])(
+  "duplicates an imported clip with its supported embedded styles: $css",
+  async ({ css, conditions }) => {
+    const view = mount();
+    view.system(
+      encodeElementClipboard({
+        html: '<div id="source"><h1>Editable</h1></div>',
+        css,
+        width: 100,
+        height: 50,
+        warnings: [],
+      }),
+    );
+    await view.api().handlePaste();
+    const saved = new DOMParser().parseFromString(view.file(), "text/html");
+    const original = saved.querySelector(".clip")!;
+    view.iframe.contentDocument!.open();
+    view.iframe.contentDocument!.write(view.file());
+    view.iframe.contentDocument!.close();
+    const element = {
+      id: original.id,
+      domId: original.id,
+      hfId: original.getAttribute("data-hf-id")!,
+      tag: "div",
+      start: 7,
+      duration: 5,
+      track: 0,
+      sourceFile: "index.html",
+    };
+    usePlayerStore.setState({
+      elements: [element],
+      selectedElementId: original.id,
+      selectedElementIds: new Set([original.id]),
+    });
+    expect(await view.api().handleDuplicate()).toBe(true);
+    const duplicated = new DOMParser().parseFromString(view.file(), "text/html");
+    const title = duplicated.getElementById(`${original.id}-2`)!.querySelector("h1")!;
+    const matches: string[][] = [];
+    const cssText = Array.from(
+      duplicated.querySelectorAll("style"),
+      (style) => style.textContent,
+    ).join("\n");
+    postcss.parse(cssText).walkRules((rule) => {
+      if (!title.matches(rule.selector)) return;
+      const ancestors: string[] = [];
+      for (
+        let parent: postcss.Container | postcss.Document | undefined = rule.parent;
+        parent;
+        parent = parent.parent
+      ) {
+        if (parent instanceof postcss.AtRule) ancestors.push(`${parent.name} ${parent.params}`);
+      }
+      matches.push(ancestors);
+    });
+    expect(matches).toContainEqual(conditions);
+    expect(view.records).toHaveLength(2);
+    expect(view.records[1].files["index.html"].before).toBe(
+      view.records[0].files["index.html"].after,
+    );
+  },
+);
+
+it.each([
+  { indent: "", text: "a\nb" },
+  { indent: "    ", text: "a\nb" },
+  { indent: "", text: "ab" },
+  { indent: "    ", text: "ab" },
+])(
+  "preserves imported text through save, history and reload: $indent / $text",
+  async ({ indent, text }) => {
+    const source = `<html><body>\n${indent}<div data-composition-id="main" data-duration="10"></div>\n</body></html>`;
+    const view = mount(false, source);
+    view.system(
+      encodeElementClipboard({
+        html: `<pre>${text}</pre>`,
+        css: "",
+        width: 100,
+        height: 50,
+        warnings: [],
+      }),
+    );
+    await view.api().handlePaste();
+    const saved = new DOMParser().parseFromString(view.file(), "text/html");
+    expect(saved.querySelector("pre")?.textContent).toBe(text);
+    expect(
+      new DOMParser()
+        .parseFromString(view.records[0].files["index.html"].after, "text/html")
+        .querySelector("pre")?.textContent,
+    ).toBe(text);
+    view.iframe.contentDocument!.open();
+    view.iframe.contentDocument!.write(view.file());
+    view.iframe.contentDocument!.close();
+    expect(view.iframe.contentDocument!.querySelector("pre")?.textContent).toBe(text);
+    await view.write("index.html", view.records[0].files["index.html"].before);
+    expect(view.file()).toBe(source);
+  },
+);

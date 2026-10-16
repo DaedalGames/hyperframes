@@ -571,3 +571,27 @@ describe("internal and system clipboard arbitration", () => {
     expect(view.writes[1]).toContain("New external");
   });
 });
+
+it("keeps the internal payload from paste invocation while an OS read overlaps a later copy", async () => {
+  selectTitle();
+  const view = mountClipboard();
+  let finishRead: (text: string) => void = () => {};
+  const pendingRead = new Promise<string>((resolve) => {
+    finishRead = resolve;
+  });
+  const readText = vi
+    .fn()
+    .mockResolvedValue("ordinary text")
+    .mockResolvedValueOnce("ordinary text")
+    .mockImplementationOnce(() => pendingRead);
+  vi.stubGlobal("navigator", { clipboard: { readText } });
+  expect(view.clipboard().handleCopy()).toBe(true);
+  const earlierPaste = view.clipboard().handlePaste();
+  copySubNext(view);
+  finishRead("ordinary text");
+  await earlierPaste;
+  expect(view.writes[0]?.match(/>Title<\/h1>/g)).toHaveLength(2);
+  expect(view.writes[0]).not.toContain(">Sub</h2>");
+  await view.clipboard().handlePaste();
+  expect(view.writes[1]).toContain(">Sub</h2>");
+});

@@ -85,12 +85,9 @@ export async function pasteSystemElement(
             [...taken].some((id) => id === `element-${index}` || id.startsWith(`element-${index}-`))
           )
             index++;
-          const scope = `element-${index}`;
-          const prepared = prepareElementClipboard(
-            payload,
-            scope,
-            `${scope}-${crypto.randomUUID()}`,
-          );
+          // Composition files share one document after compilation.
+          const scope = `element-${index}-${crypto.randomUUID()}`;
+          const prepared = prepareElementClipboard(payload, scope);
           const template = document.createElement("template");
           template.innerHTML = prepared.html;
           const root = template.content.firstElementChild;

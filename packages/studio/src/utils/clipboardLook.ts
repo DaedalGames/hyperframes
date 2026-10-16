@@ -41,14 +41,30 @@ export function carryLook(
   return result;
 }
 
-// Top-level rules only: a rule inside @media or @supports is not copied.
 function withCopiedRules(css: string, from: string, to: string): string {
   const sheet = new CSSStyleSheet();
   sheet.replaceSync(css);
+  const indent = css.match(/\n([ \t]*)\S/)?.[1] ?? "";
+  const copies = copiedCssRules(sheet.cssRules, from, to, indent);
+  if (copies.length === 0) return css;
+  const body = css.trimEnd();
+  return body + copies.join("") + css.slice(body.length);
+}
+
+function supportedCssGroup(rule: CSSRule): rule is CSSMediaRule | CSSSupportsRule {
+  return rule.type === CSSRule.MEDIA_RULE || rule.type === CSSRule.SUPPORTS_RULE;
+}
+
+function copiedCssRules(rules: CSSRuleList, from: string, to: string, indent: string): string[] {
   const id = new RegExp(`#${escapeRegex(from)}(?![\\w-])`, "g");
   const excluded = new RegExp(`:not\\([^)]*#${escapeRegex(from)}(?![\\w-])`);
-  const indent = css.match(/\n([ \t]*)\S/)?.[1] ?? "";
-  const copies = Array.from(sheet.cssRules).flatMap((rule) => {
+  return Array.from(rules).flatMap((rule) => {
+    // Keep the same conditions when copying rules nested in a supported group.
+    if (supportedCssGroup(rule)) {
+      const copies = copiedCssRules(rule.cssRules, from, to, indent + "  ");
+      const header = rule.cssText.slice(0, rule.cssText.indexOf("{"));
+      return copies.length ? [`\n${indent}${header}{${copies.join("")}\n${indent}}`] : [];
+    }
     if (!(rule instanceof CSSStyleRule)) return [];
     // Only the selectors naming the original, so the copy restyles nothing else.
     const selectors = selectorList(rule.selectorText).filter(
@@ -58,9 +74,6 @@ function withCopiedRules(css: string, from: string, to: string): string {
     const copied = selectors.map((selector) => selector.replace(id, `#${to}`)).join(", ");
     return [`\n${indent}${copied}${rule.cssText.slice(rule.selectorText.length)}`];
   });
-  if (copies.length === 0) return css;
-  const body = css.trimEnd();
-  return body + copies.join("") + css.slice(body.length);
 }
 
 /** A selector list's own entries: its commas outside brackets and parentheses. */
