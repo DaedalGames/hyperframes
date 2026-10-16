@@ -1,5 +1,9 @@
 import postcss from "postcss";
-import { rebindClipboardSelector, type ClipboardAttributeRewrite } from "./clipboardSelectors";
+import {
+  clipboardNodeSelector,
+  rebindClipboardSelector,
+  type ClipboardAttributeRewrite,
+} from "./clipboardSelectors";
 import {
   decodeAuthoredAttribute,
   scanHtmlOpeningTags,
@@ -64,7 +68,7 @@ interface SourceEdit {
 function attributeEdit(
   attr: HtmlAttributeSpan,
   renames: ReadonlyMap<string, string>,
-): (SourceEdit & { reference: ClipboardAttributeRewrite }) | null {
+): SourceEdit | null {
   if (attr.kind !== "value") return null;
   const value = decodeAuthoredAttribute(attr.value);
   const rewritten = attributeValue(attr.name, value, renames);
@@ -77,7 +81,6 @@ function attributeEdit(
     start: attr.valueStart,
     end: attr.valueEnd,
     text: attr.quote ? encoded : `"${encoded}"`,
-    reference: { name: attr.name, before: value, after: rewritten },
   };
 }
 
@@ -85,12 +88,21 @@ export function clipboardAttributeRewrites(
   html: string,
   renames: ReadonlyMap<string, string>,
 ): ClipboardAttributeRewrite[] {
-  return scanHtmlOpeningTags(html).flatMap((tag) =>
-    tag.attributes.flatMap((attr) => {
-      const edit = attributeEdit(attr, renames);
-      return edit ? [edit.reference] : [];
-    }),
-  );
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  return Array.from(template.content.querySelectorAll("*")).flatMap((node) => {
+    const attributes = Array.from(node.attributes, (attr) => ({
+      name: attr.name,
+      before: attr.value,
+      after:
+        attr.name === "id"
+          ? (renames.get(attr.value) ?? attr.value)
+          : attributeValue(attr.name, attr.value, renames),
+    }));
+    if (!attributes.some((attr) => attr.before !== attr.after)) return [];
+    const target = clipboardNodeSelector(node, renames);
+    return attributes.map((attr) => ({ ...attr, target }));
+  });
 }
 
 /** Rebind a clone's own references before insertion; destination styles and scripts stay untouched. */
@@ -100,14 +112,13 @@ export function rebindClipboardReferences(
 ): string {
   if (!renames.size) return html;
   const edits: SourceEdit[] = [];
-  const attributes: ClipboardAttributeRewrite[] = [];
+  const attributes = clipboardAttributeRewrites(html, renames);
   const tags = scanHtmlOpeningTags(html);
   for (const tag of tags)
     for (const attr of tag.attributes) {
       const edit = attributeEdit(attr, renames);
       if (edit) {
         edits.push(edit);
-        attributes.push(edit.reference);
       }
     }
   for (const tag of tags) {

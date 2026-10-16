@@ -455,3 +455,33 @@ it.each(["shape", "element-1-fixed-node-2"])(
     expect(view.records[1]!.files["index.html"]!.after).toBe(view.files["index.html"]);
   },
 );
+
+it.each(["duplicate", "paste"] as const)(
+  "preserves authored dual-attribute aggregate truth through same-file %s",
+  async (action) => {
+    const view = mount({
+      html: "<div>unused</div>",
+      css: "",
+      width: 100,
+      height: 100,
+      warnings: [],
+    });
+    view.files["index.html"] = SOURCE.replace(
+      "</div></body>",
+      '<div id="authored" class="clip" data-start="0" data-duration="5" data-track-index="0"><style>#authored use[*|href$="-2"]{opacity:.25}</style><svg><defs><path id="other-2" d="M0 0L1 1"/><path id="shape" d="M0 0L1 1"/></defs><use role="img" href="#other-2" xlink:href="#shape"/></svg></div></div></body>',
+    );
+    view.navigate("index.html");
+    view.select("authored");
+    await cloneSelected(view, action);
+    for (const doc of [view.doc(), view.preview()]) {
+      const use = doc.getElementById("authored-2")!.querySelector("use")!;
+      expect(use.getAttribute("href")).toBe("#other-2-2");
+      expect(use.getAttribute("xlink:href")).toBe("#shape-2");
+      expect(matchingDeclarations(doc, use, "opacity")).toContain(".25");
+      expect(
+        matchingDeclarations(doc, doc.getElementById("authored")!.querySelector("use")!, "opacity"),
+      ).toContain(".25");
+    }
+    expect(view.records[0]!.files["index.html"]!.after).toBe(view.files["index.html"]);
+  },
+);

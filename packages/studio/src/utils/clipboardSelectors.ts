@@ -15,6 +15,16 @@ export interface ClipboardAttributeRewrite {
   after: string;
 }
 
+export function clipboardNodeSelector(node: Element, ids: ReadonlyMap<string, string>): string {
+  if (node.id) return `#${escapeCssIdentifier(ids.get(node.id) ?? node.id)}`;
+  const siblings = Array.from(node.parentNode?.childNodes ?? [node]).filter(
+    (sibling): sibling is Element =>
+      sibling instanceof Element && sibling.localName === node.localName,
+  );
+  const part = `${node.localName}:nth-of-type(${siblings.indexOf(node) + 1})`;
+  return node.parentElement ? `${clipboardNodeSelector(node.parentElement, ids)} > ${part}` : part;
+}
+
 type ValuePredicate = NonNullable<ReturnType<typeof parseAttributeSelector>>;
 type Predicate = ValuePredicate | NonNullable<ReturnType<typeof parseAttributeSelectorPresence>>;
 const MATCHES = {
@@ -85,7 +95,17 @@ function predicateChanges(parsed: Predicate, references: readonly ClipboardAttri
         attributeMatches(parsed, reference.afterName ?? reference.name) &&
         valueMatches(parsed, reference.after),
     );
-    if (before !== after) (before ? include : exclude).add(outputPredicate(parsed, group[0]!));
+    if (before !== after)
+      (before ? include : exclude).add(
+        outputPredicate(
+          parsed,
+          group.find(
+            (reference) =>
+              reference.before !== reference.after ||
+              reference.name !== (reference.afterName ?? reference.name),
+          ) ?? group[0]!,
+        ),
+      );
   }
   return { include, exclude };
 }

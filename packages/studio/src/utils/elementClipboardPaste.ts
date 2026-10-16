@@ -1,4 +1,4 @@
-import type { ClipboardAttributeRewrite } from "./clipboardSelectors";
+import { clipboardNodeSelector, type ClipboardAttributeRewrite } from "./clipboardSelectors";
 import {
   ELEMENT_CLIPBOARD_MAX_NODES,
   type ElementClipboard,
@@ -62,14 +62,6 @@ function writeAttribute(
     before: attr.value,
     after: accepted.value,
   });
-}
-
-function nodeSelector(node: Element, wrapper: Element): string {
-  if (node === wrapper) return `#${wrapper.id}`;
-  const siblings = Array.from(node.parentElement!.children).filter(
-    (sibling) => sibling.localName === node.localName,
-  );
-  return `${nodeSelector(node.parentElement!, wrapper)} > ${node.localName}:nth-of-type(${siblings.indexOf(node) + 1})`;
 }
 
 function copyResource(node: Element, clean: Element, attr: Attr, context: CopyContext): void {
@@ -203,7 +195,9 @@ export function prepareElementClipboard(
       )
       .map((reference) => reference.node),
   );
-  const targets = new Map(Array.from(changedNodes, (node) => [node, nodeSelector(node, wrapper)]));
+  const targets = new Map(
+    Array.from(changedNodes, (node) => [node, clipboardNodeSelector(node, new Map())]),
+  );
   const writes = finalAttributes.flatMap(({ node, ...reference }) => {
     const target = targets.get(node);
     return target ? [{ ...reference, target }] : [];
