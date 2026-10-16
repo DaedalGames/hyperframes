@@ -4,7 +4,7 @@
 // real-imagery basemap as an MP4 (camera zoom→hold), and projects each requested country's border
 // to SCREEN coordinates at the held view. The HF composition then plays the MP4 on track 0 and
 // animates a *live* SVG overlay (border draw-on, colour-block / flag fills, labels, pins) from the
-// exported `coords.json`. Borders/fills are NOT baked into the video — they stay editable in HF.
+// exported `<NAME>-coords.json`. Borders/fills are NOT baked into the video — they stay editable in HF.
 //
 // Why bake the imagery at all (this is the real reason, not "smoothness"): HF forbids render-time
 // network and requires deterministic output. Live raster tiles re-fetch every render and can change
@@ -15,8 +15,11 @@
 // PARAMETRIC — drive everything by env. Example (Brazil + Argentina on satellite):
 //   NAME=br-ar STYLE=satellite COUNTRIES="Brazil:#22d3ee,Argentina:#f59e0b" \
 //   CENTER="-60,-25" ZSTART=2.4 ZEND=3.4 FPS=30 DUR=5 node bake-basemap.mjs
-// Then encode frames-<NAME>/f%04d.png → <NAME>.mp4 (all-intra: -g 1) and feed <NAME>-coords.json
-// to the HF composition.
+// From space down to a street (globe, starfield, a turn from FROM to CENTER, then the dive):
+//   NAME=mbs PROJECTION=globe FROM="18,16" CENTER="103.8607,1.2834" ZSTART=1.85 ZEND=16.2 \
+//   PITCH=40 DUR=10 HOLD=0.8 node bake-basemap.mjs
+// It encodes frames-<NAME>/f%04d.png → <NAME>.mp4 (all-intra: -g 1) and writes <NAME>-coords.json
+// for the HF composition. One bake at a time: several headless Chromes on a small machine stall.
 import { join } from "node:path";
 import { mkdirSync, writeFileSync, readdirSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -24,10 +27,15 @@ import { spawnSync } from "node:child_process";
 
 if (process.argv.includes("--help") || process.argv.includes("-h")) {
   console.log(`usage: [NAME=..] [STYLE=satellite|dark|light|<{z}/{x}/{y} url>] [CENTER="lng,lat"]
-       [ZSTART=..] [ZEND=..] [PITCH=..] [BEARING=..] [FPS=30] [DUR=5] [HOLD=0.5]
-       [COUNTRIES="Name:#hex,Name:#hex"] [OUT=dir] [CHROME=path] node bake-basemap.mjs
+       [PROJECTION=mercator|globe] [FROM="lng,lat"] [PAN=0.35] [ZSTART=..] [ZEND=..] [PITCH=..]
+       [BEARING=..] [FPS=30] [DUR=5] [HOLD=0.5] [COUNTRIES="Name:#hex,Name:#hex"] [OUT=dir]
+       [CHROME=path] node bake-basemap.mjs
+PROJECTION=globe starts from Earth in space (starfield, atmosphere) and flattens as it zooms in.
+FROM pans the camera from that point to CENTER over the first PAN of the move, while the zoom
+runs from PAN/2 to HOLD; ZSTART about 1.8 frames the whole globe, ZEND 16 is a building.
 Writes <OUT>/<NAME>.mp4 (all-intra basemap) and <OUT>/<NAME>-coords.json (projected borders).
-Needs puppeteer-core, ffmpeg, a Chrome or chrome-headless-shell, and network for the tiles.`);
+Needs puppeteer-core, ffmpeg, a Chrome or chrome-headless-shell, and network for the tiles.
+Run one bake at a time; it prints its pace and an estimate as it goes.`);
   process.exit(0);
 }
 
@@ -77,6 +85,9 @@ const FPS = +(process.env.FPS || 30),
   DUR = +(process.env.DUR || 5),
   N = Math.max(1, Math.round(FPS * DUR));
 const HOLD = +(process.env.HOLD || 0.5); // p∈[0,1] at which the zoom finishes; camera holds after
+const PROJECTION = process.env.PROJECTION === "globe" ? "globe" : "mercator";
+const FROM = process.env.FROM ? process.env.FROM.split(",").map(Number) : null; // pan start; null = no pan
+const PAN = +(process.env.PAN || 0.35); // p at which the pan from FROM reaches CENTER
 const MARGIN = (process.env.KEEPMARGIN || "16,13").split(",").map(Number); // [lon°,lat°] keep-box around each country's mainland
 // COUNTRIES="Name:#hex,Name:#hex" — borders to project (optional; omit for a pure zoom-to / pin shot)
 const COUNTRIES = (process.env.COUNTRIES || "")
@@ -99,6 +110,8 @@ for (const [k, v] of Object.entries({
   FPS,
   DUR,
   HOLD,
+  PAN,
+  ...(FROM ? { "FROM.lng": FROM[0], "FROM.lat": FROM[1] } : {}),
 }))
   if (!Number.isFinite(v))
     throw new Error(
@@ -120,21 +133,43 @@ const OUT = process.env.OUT || process.cwd(); // artifacts → workspace (cwd), 
 const framesDir = join(OUT, "frames-" + NAME);
 mkdirSync(framesDir, { recursive: true });
 
+// A seeded star field behind the globe, so every bake of the same move is identical.
+let seed = 7;
+const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+const STARS = `<svg id="stars" width="1920" height="1080">${Array.from({ length: 260 }, () => {
+  const x = (rnd() * 1920).toFixed(0),
+    y = (rnd() * 1080).toFixed(0);
+  const r = (rnd() * 1.3 + 0.3).toFixed(2),
+    a = (rnd() * 0.6 + 0.2).toFixed(2);
+  return `<circle cx="${x}" cy="${y}" r="${r}" fill="#fff" opacity="${a}"/>`;
+}).join("")}</svg>`;
+
 // Deps PINNED exact (mutable @5/@2 majors would drift the bake over time).
 const PAGE = `<!doctype html><html><head>
 <link href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
-<style>*{margin:0}html,body{width:1920px;height:1080px;overflow:hidden;background:#05070d}#map{width:1920px;height:1080px}.maplibregl-control-container{display:none!important}</style>
-</head><body><div id="map"></div><script>
+<style>*{margin:0}html,body{width:1920px;height:1080px;overflow:hidden;background:radial-gradient(ellipse at 50% 55%,#0b1630 0%,#050812 55%,#020308 100%)}#stars{position:absolute;inset:0}#map{position:absolute;inset:0;width:1920px;height:1080px}.maplibregl-control-container{display:none!important}</style>
+</head><body>${PROJECTION === "globe" ? STARS : ""}<div id="map"></div><script>
 var CENTER=${JSON.stringify(CENTER)}, ZSTART=${ZSTART}, ZEND=${ZEND}, PITCH=${PITCH}, BEARING=${BEARING}, HOLD=${HOLD};
+var FROM=${JSON.stringify(FROM)}, PAN=${PAN};
 var MARGIN=${JSON.stringify(MARGIN)}, WANT=${JSON.stringify(COUNTRIES)};
-var map=new maplibregl.Map({container:"map",style:{version:8,projection:{type:"mercator"},
+var GLOBE=${PROJECTION === "globe"};
+// On the globe the page behind the map shows through (stars), and the atmosphere fades out as the camera nears the ground.
+var map=new maplibregl.Map({container:"map",style:{version:8,projection:{type:GLOBE?"globe":"mercator"},
+  sky:GLOBE?{"atmosphere-blend":["interpolate",["linear"],["zoom"],0,1,5,1,7,0]}:undefined,
   sources:{s:{type:"raster",tiles:[${JSON.stringify(TILES)}],tileSize:256,maxzoom:19}},
-  layers:[{id:"bg",type:"background",paint:{"background-color":"#05070d"}},{id:"s",type:"raster",source:"s"}]},
-  center:CENTER,zoom:ZSTART,pitch:0,bearing:0,interactive:false,attributionControl:false,fadeDuration:0,preserveDrawingBuffer:true,maxTileCacheSize:6000});
+  layers:(GLOBE?[]:[{id:"bg",type:"background",paint:{"background-color":"#05070d"}}]).concat([{id:"s",type:"raster",source:"s"}])},
+  center:FROM||CENTER,zoom:ZSTART,pitch:0,bearing:0,interactive:false,attributionControl:false,fadeDuration:0,preserveDrawingBuffer:true,maxTileCacheSize:6000,
+  canvasContextAttributes:{alpha:GLOBE,preserveDrawingBuffer:true}});
 function ease(x){return x<0.5?4*x*x*x:1-Math.pow(-2*x+2,3)/2;} // easeInOutCubic (= Remotion interpolate+Easing)
-function camAt(p){ var t=ease(Math.min(1,p/HOLD)); return {center:CENTER, zoom:ZSTART+(ZEND-ZSTART)*t, pitch:PITCH*t, bearing:BEARING*t}; }
+function sine(x){return -(Math.cos(Math.PI*x)-1)/2;}
+function seg(p,a,b){return b<=a?1:Math.min(1,Math.max(0,(p-a)/(b-a)));}
+// With FROM, the camera turns to CENTER over [0,PAN] while the zoom runs over [PAN/2,HOLD]; without it, the zoom runs over [0,HOLD].
+function camAt(p){
+  var s=FROM?sine(seg(p,0,PAN)):1, t=ease(seg(p,FROM?PAN/2:0,HOLD));
+  var c=FROM?[FROM[0]+(CENTER[0]-FROM[0])*s, FROM[1]+(CENTER[1]-FROM[1])*s]:CENTER;
+  return {center:c, zoom:ZSTART+(ZEND-ZSTART)*t, pitch:PITCH*t, bearing:BEARING*t}; }
 function ringCentroid(r){ var sx=0,sy=0; for(var k=0;k<r.length;k++){sx+=r[k][0];sy+=r[k][1];} return [sx/r.length, sy/r.length]; }
 // Keep the polygons in a lon/lat box around the country's MAINLAND (the vertex-richest polygon),
 // dropping far-flung overseas territories that would blow up the bbox. Generalizes per subject —
@@ -172,10 +207,12 @@ window.__ready=new Promise(function(res){ map.on("load", function(){
   });
 });});
 window.__setCam=function(p){ map.jumpTo(camAt(p)); };
-// returns true if the idle event did NOT fire within ms (i.e. tiles may be incomplete)
-// returns true only if tiles are GENUINELY not loaded at timeout — CARTO/Esri idle is flaky and
-// often never fires even when every tile is painted, so check areTilesLoaded() before crying timeout.
-window.__waitIdle=function(ms){ return new Promise(function(res){ var done=false; function fin(t){if(done)return;done=true;res(t);} map.once("idle",function(){fin(false);}); setTimeout(function(){ fin(!map.areTilesLoaded()); }, ms||9000); }); };
+// Resolves false once every tile for this camera is loaded and painted, true if ms passed first.
+// Polls rather than waiting for "idle": that event can fire before a listener is attached, which
+// left every cached frame sitting out the whole timeout.
+window.__waitIdle=function(ms){ return new Promise(function(res){ var t0=performance.now();
+  (function poll(){ if(map.loaded()&&map.areTilesLoaded()){ map.triggerRepaint(); requestAnimationFrame(function(){requestAnimationFrame(function(){res(false);});}); return; }
+    if(performance.now()-t0>(ms||9000)){ res(!map.areTilesLoaded()); return; } setTimeout(poll,40); })(); }); };
 function featurePath(f){ function ring(r){ return r.map(function(c,i){ var p=map.project(c); return (i?"L":"M")+p.x.toFixed(1)+" "+p.y.toFixed(1); }).join(" ")+"Z"; }
   var g=f.geometry,d=""; if(g.type==="Polygon") g.coordinates.forEach(function(r){d+=ring(r);}); else g.coordinates.forEach(function(poly){poly.forEach(function(r){d+=ring(r);});}); return d; }
 function bboxOf(f){ var mnx=1e9,mny=1e9,mxx=-1e9,mxy=-1e9;
@@ -210,8 +247,9 @@ try {
   await page.evaluate(() => window.__ready);
   for (const w of await page.evaluate(() => window.__warn)) console.warn(`[${NAME}] WARN: ${w}`);
   console.log(
-    `[${NAME}] ready (${STYLE}); baking ${N} frames, zoom ${ZSTART}→${ZEND} hold@p=${HOLD}, ${COUNTRIES.length} border(s)`,
+    `[${NAME}] ready (${STYLE}, ${PROJECTION}); baking ${N} frames, zoom ${ZSTART}→${ZEND} hold@p=${HOLD}, ${COUNTRIES.length} border(s)`,
   );
+  const t0 = Date.now();
   let coords = null;
   const timeouts = [];
   for (let i = 0; i < N; i++) {
@@ -229,7 +267,12 @@ try {
     });
     if (p >= HOLD && !coords && COUNTRIES.length)
       coords = await page.evaluate(() => window.__project()); // capture at first hold frame
-    if (i % 20 === 0 || i === N - 1) console.log(`  [${NAME}] ${i + 1}/${N}`);
+    if (i % 20 === 0 || i === N - 1) {
+      const per = (Date.now() - t0) / 1000 / (i + 1);
+      console.log(
+        `  [${NAME}] ${i + 1}/${N} · ${per.toFixed(2)} s/frame · about ${Math.ceil((per * (N - i - 1)) / 60)} min left`,
+      );
+    }
   }
   // encode frames → all-intra MP4 (every frame seekable for HF); fall back to printing the command if ffmpeg is absent
   const mp4 = join(OUT, NAME + ".mp4"),
