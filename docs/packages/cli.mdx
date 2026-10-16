@@ -892,8 +892,8 @@ meant to be still can declare `data-no-timeline` to skip the guard.
 #### Craft warnings
 
 The `craft` section reports what a viewer would notice over time and a single
-frame cannot show. Every craft finding is a warning, so it fails the run only
-under `--strict`, and its message names the fix and the skill reference to read.
+frame cannot show. Every craft finding is a warning, even under `--strict`: a
+film may break one on purpose. Its message names the fix and the skill reference to read.
 They are measured on an 8 fps sweep of the whole film, with each short line's
 edges re-measured to about 0.01 s, and skipped for a `--range` check.
 

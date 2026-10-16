@@ -1622,8 +1622,10 @@ function buildReport(
     motionSection.errorCount +
     contrastSection.errorCount +
     craftSection.errorCount;
+  // Craft findings are judgment calls a film may break on purpose, so --strict gates defects only.
+  const strictWarningCount = warningCount - craftSection.warningCount;
   const report: CheckReport = {
-    ok: errorCount === 0 && (!options.strict || warningCount === 0),
+    ok: errorCount === 0 && (!options.strict || strictWarningCount === 0),
     strict: options.strict,
     browserSkipped: browser.skipped,
     lint,

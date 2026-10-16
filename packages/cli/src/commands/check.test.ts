@@ -1830,7 +1830,7 @@ describe("check pipeline", () => {
       });
     }
 
-    it("reports them as warnings that keep exit 0, and --strict fails them", async () => {
+    it("reports them as warnings that keep exit 0, even under --strict", async () => {
       const { report } = await runScenario(craftDriver());
 
       expect(report.craft.enabled).toBe(true);
@@ -1846,7 +1846,7 @@ describe("check pipeline", () => {
       expect(checkExitCode(report)).toBe(0);
 
       const strict = await runScenario(craftDriver(), { strict: true });
-      expect(checkExitCode(strict.report)).toBe(1);
+      expect(checkExitCode(strict.report)).toBe(0);
     });
 
     it("re-measures a short line between dense samples before judging it", async () => {
