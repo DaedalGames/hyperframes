@@ -56,13 +56,16 @@ describe("resolveReviewTimeline", () => {
 });
 
 describe("planReview", () => {
-  it("settles each scene's beat 0.3 s in and strips every cut at ±0.1 and ±0.2 s", () => {
+  it("frames each scene 0.3 s in and at its middle, and strips every cut at ±0.1 and ±0.2 s", () => {
     const plan = planReview(resolveReviewTimeline(FILM, {}, 20), 20 - 1 / 30);
     expect(plan.beats).toEqual([
       { time: 0.3, label: "intro" },
+      { time: 3, label: "intro mid" },
       { time: 6.3, label: "stat" },
       { time: 7.5, label: "beat:number" },
+      { time: 9.5, label: "stat mid" },
       { time: 13.3, label: "outro" },
+      { time: 16.5, label: "outro mid" },
     ]);
     expect(plan.seams).toEqual([
       { time: 6, from: "intro", to: "stat", times: [5.8, 5.9, 6, 6.1, 6.2] },
@@ -83,7 +86,7 @@ describe("planReview", () => {
       },
       10,
     );
-    expect(plan.beats.map((beat) => beat.label)).toEqual(["a", "b + beat:logo"]);
+    expect(plan.beats.map((beat) => beat.label)).toEqual(["a", "a mid", "b + beat:logo", "b mid"]);
   });
 
   it("uses a short scene's middle and keeps every frame inside the film", () => {

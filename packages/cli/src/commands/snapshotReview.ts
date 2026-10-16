@@ -9,6 +9,7 @@ import {
 
 /** A beat's frame lands this long after its start, once the entrance has settled. */
 const REVIEW_SETTLE_SEC = 0.3;
+const REVIEW_MID_GAP_SEC = 0.5;
 /** Seam strip offsets around each cut. */
 export const REVIEW_SEAM_OFFSETS = [-0.2, -0.1, 0, 0.1, 0.2] as const;
 /** Phone sheet tile width: the frame as wide as a phone held upright. */
@@ -118,6 +119,16 @@ export function resolveReviewTimeline(
   return { window: bounds, scenes, beats, notes };
 }
 
+/** Just after a scene starts, and its middle once that is far enough on to show what the scene builds. */
+function sceneBeats(scene: ReviewScene): ReviewBeat[] {
+  const settled = settledTime(scene.start, scene.end);
+  const middle = roundMs((scene.start + scene.end) / 2);
+  const beats = [{ time: settled, label: scene.id }];
+  return middle - settled >= REVIEW_MID_GAP_SEC
+    ? [...beats, { time: middle, label: `${scene.id} mid` }]
+    : beats;
+}
+
 /** start + 0.3 s, or the middle of a span too short for that. */
 function settledTime(start: number, end: number): number {
   return roundMs(Math.min(start + REVIEW_SETTLE_SEC, (start + end) / 2));
@@ -135,9 +146,7 @@ export function planReview(
     scenes.map((scene) => ({ time: scene.start, label: scene.id })),
   );
   const beats = mergeBeats([
-    ...(distinctStarts.length >= 2
-      ? scenes.map((scene) => ({ time: settledTime(scene.start, scene.end), label: scene.id }))
-      : evenBeats(bounds, notes)),
+    ...(distinctStarts.length >= 2 ? scenes.flatMap(sceneBeats) : evenBeats(bounds, notes)),
     ...timeline.beats,
   ]).map((beat) => ({ ...beat, time: clamp(beat.time) }));
   const seams = seamTimes(scenes, bounds).map((time) => ({

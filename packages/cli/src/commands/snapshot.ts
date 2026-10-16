@@ -1190,7 +1190,7 @@ export default defineCommand({
     review: {
       type: "boolean",
       description:
-        "Capture the review set instead of evenly spaced frames: a settled frame per scene and data-beat (start + 0.3 s) on review-beats.jpg, a 5-frame strip around every cut (review-seam-NN.jpg), and the beat frames at phone width (review-phone.jpg). Scopes to --composition; ignores --frames.",
+        "Capture the review set instead of evenly spaced frames: each scene at its start + 0.3 s and its middle, and each data-beat at its start + 0.3 s, on review-beats.jpg, a 5-frame strip around every cut (review-seam-NN.jpg), and the beat frames at phone width (review-phone.jpg). Scopes to --composition; ignores --frames.",
       default: false,
     },
     json: {
