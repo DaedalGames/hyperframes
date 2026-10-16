@@ -3718,7 +3718,7 @@ export function initSandboxRuntimeModular(): void {
   // Swap edited scenes in place from a rebuilt preview document. Refuses before changing anything unless
   // the documents differ only inside existing scenes; a later failure is left to the caller's reload.
   // Nests the timelines a scene's scripts just made and redraws the current frame with them.
-  const nestRanScenes = (hosts: Element[]) => {
+  const nestRanScenes = (hosts: Element[], { drawnByTick = false } = {}) => {
     childrenBound = false;
     bindRootTimelineIfAvailable();
     // Probed before the scene was nested, so the new media found no volume envelope.
@@ -3737,7 +3737,9 @@ export function initSandboxRuntimeModular(): void {
     applyPositionEdits(document);
     // Redraw the current frame as a seek does; a playing film cut to end at or before it stops there, as at its end.
     const cutShort = clock.isPlaying() && duration > 0 && state.currentTime >= duration;
-    transport.seek(cutShort ? duration : state.currentTime, { keepPlaying: !cutShort });
+    // Playing, the next tick draws the frame; a seek would pause and restart the clock and media.
+    if (!(drawnByTick && clock.isPlaying() && !cutShort))
+      transport.seek(cutShort ? duration : state.currentTime, { keepPlaying: !cutShort });
     syncTimedElementVisibility(state.currentTime);
     postTimeline();
   };
@@ -3947,7 +3949,7 @@ export function initSandboxRuntimeModular(): void {
       for (const host of hosts) applyVariableBindings(document, host);
       bindMediaMetadataListeners();
       initVfx(document.body, state.canonicalFps);
-      nestRanScenes(hosts);
+      nestRanScenes(hosts, { drawnByTick: true });
     });
     sceneMounts = mounted.catch(() => undefined);
     registerSeekCompletion(mounted);

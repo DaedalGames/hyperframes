@@ -88,6 +88,21 @@ describe("scene scripts held until the playhead nears", () => {
     expect(ran()).toBe("near tied far ");
   });
 
+  it("runs a far scene the playback reaches without pausing the clock", async () => {
+    await boot(true);
+    window.__player!.seek(19.5);
+    await window.__hfWaitForSeekCompletion?.();
+    // The runtime's own copy: boot reset the module registry.
+    const { TransportClock } = await import("./clock");
+    const pause = vi.spyOn(TransportClock.prototype, "pause");
+    window.__player!.play();
+    await vi.waitFor(() => expect(ran()).toContain("far"), { timeout: 3000 });
+    await window.__hfWaitForSeekCompletion?.();
+    expect(pause).not.toHaveBeenCalled();
+    expect(window.__player!.isPlaying()).toBe(true);
+    window.__player!.pause();
+  });
+
   it("runs every scene's scripts at boot outside a preview, as a capture does", async () => {
     await boot(false);
     expect(ran()).toBe("near far tied ");
