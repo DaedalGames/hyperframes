@@ -1107,6 +1107,7 @@ export function trackCheckReport(props: {
   motionWarnings: number;
   contrastErrors: number;
   contrastWarnings: number;
+  craftWarnings: number;
   launchSettleMs: number;
   seekLoopMs: number;
   contrastMs: number;
@@ -1132,6 +1133,7 @@ export function trackCheckReport(props: {
     motion_warnings: props.motionWarnings,
     contrast_errors: props.contrastErrors,
     contrast_warnings: props.contrastWarnings,
+    craft_warnings: props.craftWarnings,
     launch_settle_ms: props.launchSettleMs,
     seek_loop_ms: props.seekLoopMs,
     contrast_ms: props.contrastMs,

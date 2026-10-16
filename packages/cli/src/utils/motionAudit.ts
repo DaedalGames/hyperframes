@@ -7,6 +7,8 @@ const APPEAR_OPACITY = 0.5;
 const FRAME_TOLERANCE = 1;
 /** Default longest allowed fully-static window for keepsMoving, in seconds. */
 const DEFAULT_MAX_STATIC_SEC = 2;
+/** A film may end on a still card this long; stillness inside it never counts as frozen. */
+export const END_CARD_HOLD_SEC = 3;
 
 export interface FrameSample {
   rect: LayoutRect;
@@ -165,6 +167,7 @@ function keepsMoving(
   frames: MotionFrame[],
   within: string | undefined,
   maxStaticSec: number,
+  endCardStart: number,
 ): LayoutIssue[] {
   // "*" is reserved for whole-canvas scope; motionSpec.ts rejects it as a user-supplied withinSelector.
   const scope = within ?? "*";
@@ -177,7 +180,8 @@ function keepsMoving(
   if (!first) return issues;
   let runStart = first.time;
   let runSig = first.liveness[scope] ?? "";
-  const flush = (endTime: number) => {
+  const flush = (runEnd: number) => {
+    const endTime = Math.min(runEnd, endCardStart);
     const span = endTime - runStart;
     if (span > maxStaticSec) {
       issues.push({
@@ -210,14 +214,20 @@ function keepsMoving(
 /**
  * Evaluate motion assertions against the dense `element × time` matrix.
  * Pure — no browser. Findings reuse the LayoutIssue shape and flow through
- * inspect's existing dedupe/collapse/limit/format pipeline.
+ * inspect's existing dedupe/collapse/limit/format pipeline. With the film's
+ * duration, keepsMoving leaves its last END_CARD_HOLD_SEC out of every static run.
  */
 export function evaluateMotion(
   frames: MotionFrame[],
   assertions: MotionAssertion[],
   canvas: Canvas,
+  filmDuration?: number,
 ): LayoutIssue[] {
   if (frames.length === 0) return [];
+  const endCardStart =
+    filmDuration !== undefined && filmDuration > 0
+      ? filmDuration - END_CARD_HOLD_SEC
+      : Number.POSITIVE_INFINITY;
   return assertions.flatMap((assertion) => {
     switch (assertion.kind) {
       case "appearsBy":
@@ -231,6 +241,7 @@ export function evaluateMotion(
           frames,
           assertion.withinSelector,
           assertion.maxStaticSec ?? DEFAULT_MAX_STATIC_SEC,
+          endCardStart,
         );
     }
   });

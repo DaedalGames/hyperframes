@@ -30,7 +30,7 @@ Lints `index.html` and all files in `compositions/`. Reports errors (must fix), 
 ```bash
 npx hyperframes check                    # current directory: the full browser gate
 npx hyperframes check ./my-project       # specific project
-npx hyperframes check --json             # agent-readable envelope {ok, browserSkipped, lint, runtime, layout, motion, contrast, hdr, snapshots}
+npx hyperframes check --json             # agent-readable envelope {ok, browserSkipped, lint, runtime, layout, motion, contrast, craft, hdr, snapshots}
 npx hyperframes check --snapshots        # also write overview frames (annotated) + per-finding crops
 npx hyperframes check --samples 15       # denser timeline sweep (default 9)
 npx hyperframes check --at 1.5,4,7.25    # explicit hero-frame timestamps
@@ -47,6 +47,12 @@ One command, one Chrome boot. `check` runs the linter first and skips the browse
 - **Layout**: text extending outside its container or the canvas, text clipped by its own box, held text overlaps and occlusion (with an approximate covered fraction), children escaping clipping containers. Text under a transparent `<video>` (a `remove-background` cutout) is measured per word against the frame's alpha: partial cover is info with the share hidden, a word 80% hidden or two neighbouring words each half hidden is an error, and a frame that cannot be read falls back to opaque with a `video_alpha_unread` note.
 - **Motion**: `*.motion.json` sidecar assertions against the same seeked timeline (see below).
 - **Contrast**: WCAG AA on visible text, sampled at 5 grid points. Failures are **errors** and each finding carries the sampled fg/bg colors, measured vs required ratio, and a suggested compliant color in the same palette direction, so most contrast fixes need no screenshot at all.
+- **Craft**: warnings only (exit 0 unless `--strict`), measured on an 8 fps sweep of the whole film and skipped under `--range`. Each message names the fix and the reference to read.
+  - `line_unread`: a reading-size line (≥ 30 px tall at 1080) on screen under its floor: 0.4 s for 1–2 words, otherwise ¾ of 0.5 s + 0.3 s a word (3 words 1.05 s, 6 words 1.73 s); the film's last line needs 2 s. Edges are re-measured to ~0.01 s. Captions-track text and `data-layout-ignore` are exempt.
+  - `dead_stretch`: more than 3 s where the `keepsMoving` classifier sees nothing change. The final 3 s and any time a `data-hold` element is on screen are exempt; it stays quiet when `sweep_static` fires or a whole-composition `keepsMoving` assertion sets the limit.
+  - `text_below_floor`: text under 2.6% of the frame's short side (28 px on 1080) held 0.5 s or more, one finding per file listing every element.
+  - `first_frame_empty`: frame 0 paints nothing but the background (no text, image, video, canvas or svg); it is the thumbnail on social players.
+  - `film_silent`: a film over 15 s with no unmuted `<audio>` or audible `<video>`.
 
 Every finding carries a selector, the element's `data-*` identity, the composition source file, a bbox, and the sample time: jump straight from the JSON to the HTML you must edit and re-run.
 
@@ -59,6 +65,7 @@ Every finding carries a selector, the element's `data-*` identity, the compositi
 - `data-layout-allow-occlusion` — an element is meant to cover text.
 - `data-layout-allow-caption-zone` — intentional lower-third / caption-band copy under `--caption-zone`. Applies to the marked element and every descendant (`closest`); silences only `caption_zone_collision` (not overflow/overlap/occlusion). Prefer the narrowest wrapper that owns the intentional band copy.
 - `data-layout-ignore` — decorative element that should never be audited.
+- `data-hold` — deliberate stillness: while this element is on screen, `dead_stretch` does not count the time.
 
 **Opt-in pipeline gates** (used by orchestrators; off by default):
 
@@ -89,12 +96,12 @@ Drop a `*.motion.json` sidecar next to the composition (matching the html basena
 }
 ```
 
-| Assertion                      | Fails (code) when                                                           |
-| ------------------------------ | --------------------------------------------------------------------------- |
-| `appearsBy(selector, bySec)`   | not visible (opacity ≥ 0.5) by `bySec` — `motion_appears_late`              |
-| `before(a, b)`                 | `a` does not first appear strictly before `b` — `motion_out_of_order`       |
-| `staysInFrame(selector)`       | once visible, its box leaves the canvas — `motion_off_frame`                |
-| `keepsMoving(withinSelector?)` | a fully-static window exceeds `maxStaticSec` (default 2s) — `motion_frozen` |
+| Assertion                      | Fails (code) when                                                                                                           |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| `appearsBy(selector, bySec)`   | not visible (opacity ≥ 0.5) by `bySec` — `motion_appears_late`                                                              |
+| `before(a, b)`                 | `a` does not first appear strictly before `b` — `motion_out_of_order`                                                       |
+| `staysInFrame(selector)`       | once visible, its box leaves the canvas — `motion_off_frame`                                                                |
+| `keepsMoving(withinSelector?)` | a fully-static window exceeds `maxStaticSec` (default 2s); the film's final 3 s (an end card) never count — `motion_frozen` |
 
 `duration`, `withinSelector`, and `maxStaticSec` are optional. Findings are **errors by default** and appear in the same human and `--json` output as layout findings. A selector that matches nothing is reported as `motion_selector_missing` rather than silently passing — a typo'd selector fails loudly. Use this in the feedback loop instead of eyeballing the render: assert what the motion is supposed to do, and let `check` tell you when the seek diverges from intent.
 

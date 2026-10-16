@@ -183,6 +183,40 @@ export interface OffPivotFrame {
   samples: OffPivotRotationSample[];
 }
 
+/** One painted text element at one seek, from `__hyperframesCraftSample` (layout-audit.browser.js). */
+export interface CraftTextPart {
+  /** Stable for the element across seeks of one page. */
+  key: number;
+  /** Key of its reading block: the nearest block-level ancestor-or-self, so a split headline is one line. */
+  block: number;
+  selector: string;
+  blockSelector: string;
+  sourceFile: string;
+  text: string;
+  /** Opacity multiplied down the ancestor chain. */
+  opacity: number;
+  /** Computed font size times every ancestor transform's scale. */
+  fontPx: number;
+  rect: { left: number; top: number; width: number; height: number };
+  captions: boolean;
+}
+
+export interface CraftFrame {
+  time: number;
+  parts: CraftTextPart[];
+  /** A data-hold element is on screen: stillness here is deliberate. */
+  held: boolean;
+  /** Something besides the background paints: text, an image, video, canvas or svg. */
+  painted: boolean;
+  /** The keepsMoving liveness signature of the whole composition. */
+  signature: string;
+}
+
+export interface CraftFilm {
+  /** Unmuted <audio> plus videos the timing compiler marks audible. */
+  soundSources: number;
+}
+
 export type MotionSpecResolution =
   | { kind: "none" }
   | { kind: "valid"; path: string; spec: MotionSpec }
@@ -229,6 +263,9 @@ export interface CheckAuditDriver {
   ): Promise<MotionFrame>;
   anchorMotionIssues(issues: LayoutIssue[]): Promise<AnchoredLayoutIssue[]>;
   collectContrast(time: number, annotations?: CheckAnnotationBox[]): Promise<ContrastCapture>;
+  /** Craft section: text, stillness and paint at the current seek. A driver without it skips the section. */
+  collectCraftFrame?(time: number): Promise<CraftFrame>;
+  collectCraftFilm?(): Promise<CraftFilm>;
 }
 
 export interface CheckScreenshot {
@@ -255,9 +292,31 @@ export interface CheckBrowserResult {
   contrastFindings: CheckContrastFinding[];
   contrastChecked: number;
   contrastPassed: number;
+  craft: CraftResult;
   screenshots: CheckScreenshot[];
   timings: CheckTimings;
   skipped: boolean;
+}
+
+/** Taste warnings measured on the dense grid: never errors, so they gate only under --strict. */
+export interface CraftFinding extends CheckFinding {
+  words?: number;
+  /** Seconds the line stayed readable, the text stayed small, or the frame stayed still. */
+  seconds?: number;
+  floorSeconds?: number;
+  fontPx?: number;
+  floorPx?: number;
+  until?: number;
+  /** text_below_floor: every small text element in the finding's file. */
+  elements?: { selector: string; text: string; fontPx: number; time: number; seconds: number }[];
+}
+
+export interface CraftResult {
+  enabled: boolean;
+  /** Seconds between craft samples; line_unread re-measures its candidates finer than this. */
+  step: number;
+  samples: number;
+  findings: CraftFinding[];
 }
 
 /** The seek-grid audit loop, injected into checkBrowser so it never imports checkPipeline back. */
@@ -303,6 +362,7 @@ export interface CheckReport {
     checked: number;
     passed: number;
   };
+  craft: CheckSection<CraftFinding> & { enabled: boolean; step: number; samples: number };
   hdr: { autoPromotion: HdrAutoPromotion | null; inspection: "available" | "unavailable" };
   snapshots: { enabled: boolean; files: string[]; times: number[]; findingFiles: string[] };
 }

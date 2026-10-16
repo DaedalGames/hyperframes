@@ -810,7 +810,7 @@ did, in one command and one browser session.
 
 ```bash
 npx hyperframes check [dir]
-npx hyperframes check [dir] --json         # {ok, browserSkipped, scope, lint, runtime, layout, motion, contrast, hdr, snapshots}
+npx hyperframes check [dir] --json         # {ok, browserSkipped, scope, lint, runtime, layout, motion, contrast, craft, hdr, snapshots}
 npx hyperframes check [dir] --snapshots
 npx hyperframes check [dir] --at 1.5,4,7.25
 npx hyperframes check [dir] --strict       # warnings fail too
@@ -820,7 +820,8 @@ npx hyperframes check [dir] --strict       # warnings fail too
 Then it loads the bundled composition once and sweeps a single seek grid,
 running every audit at every sample: runtime console errors and failed requests,
 layout defects (overflow, clipping, held overlaps, occlusion, coordinate-frame
-drift), `*.motion.json` assertions, and WCAG AA contrast.
+drift), `*.motion.json` assertions, WCAG AA contrast, and craft warnings
+(see [Craft warnings](#craft-warnings)).
 
 When the browser never ran (lint errors, a linter crash, or a browser launch
 failure), `browserSkipped` is `true` and the `layout`, `motion` and `contrast`
@@ -839,7 +840,7 @@ cover every finding from the full check.
 | `--at`                                       | Explicit timestamps in seconds, comma-separated                                                                             |
 | `--at-transitions`                           | Also sample every tween start and end, to catch transient overlaps at transition seams                                       |
 | `--max-transition-samples`                   | Cap the transition-derived samples. When it truncates, the omitted count is reported. Default: unlimited.                    |
-| `--range <start,end>`                        | Sample only this interval, in global seconds. Lint stays project-wide; whole-timeline motion and `sweep_static` are skipped. |
+| `--range <start,end>`                        | Sample only this interval, in global seconds. Lint stays project-wide; whole-timeline motion, `sweep_static` and craft warnings are skipped. |
 | `--components <selectors>`                   | Report only findings that involve these elements or their descendants. Counts, `ok` and the exit code still cover all.      |
 | `--max-issues`                               | Findings to print or return after static collapse (default 80)                                                              |
 | `--collapse-static` / `--no-collapse-static` | Fold a repeated static finding into one row (default: on)                                                                    |
@@ -888,6 +889,28 @@ meant to be still can declare `data-no-timeline` to skip the guard.
 
 {/* VISUAL: a `check --snapshots` overview frame beside one finding crop, with the labelled finding box visible on both */}
 
+#### Craft warnings
+
+The `craft` section reports what a viewer would notice over time and a single
+frame cannot show. Every craft finding is a warning, so it fails the run only
+under `--strict`, and its message names the fix and the skill reference to read.
+They are measured on an 8 fps sweep of the whole film, with each short line's
+edges re-measured to about 0.01 s, and skipped for a `--range` check.
+
+| Code                | Warns when                                                                                                                                                                                                 |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `line_unread`       | A reading-size line (30 px or taller at 1080) is on screen for less than its floor: 0.4 s for one or two words, otherwise three quarters of 0.5 s + 0.3 s a word. The film's last line needs 2 s.          |
+| `dead_stretch`      | Nothing on screen changes for more than 3 s, by the same classifier `keepsMoving` uses.                                                                                                                    |
+| `text_below_floor`  | Text under 2.6% of the frame's short side (28 px on 1080) stays on screen 0.5 s or more. One finding per file lists every such element.                                                                    |
+| `first_frame_empty` | Frame 0 paints nothing but the background: no text, image, video, canvas or SVG. The first frame is the thumbnail on social players.                                                                      |
+| `film_silent`       | A film longer than 15 s has no unmuted `<audio>` and no `<video>` with sound.                                                                                                                             |
+
+Captions-track text (`data-track-kind="captions"`) and `data-layout-ignore`
+text are exempt from the text rules. `dead_stretch` never counts the film's
+last 3 s (a held end card) or time when an element marked `data-hold` is on
+screen, and it stays quiet when `sweep_static` already reports the sweep or a
+whole-composition `keepsMoving` assertion sets its own limit.
+
 #### Mark intentional layout choices
 
 When the audit is wrong because the layout is deliberate, say so in the HTML and
@@ -929,7 +952,7 @@ HTML. Without a sidecar, nothing changes.
 | `appearsBy(selector, bySec)`   | A reveal the seek lands past — the element must reach opacity ≥ 0.5 by `bySec` (`motion_appears_late`)          |
 | `before(a, b)`                 | Broken stagger order — `a` must first appear strictly before `b` (`motion_out_of_order`)                        |
 | `staysInFrame(selector)`       | Off-frame drift — once visible, the box never leaves the canvas (`motion_off_frame`)                            |
-| `keepsMoving(withinSelector?)` | A frozen shot — no fully static window longer than `maxStaticSec`, default 2s (`motion_frozen`)                 |
+| `keepsMoving(withinSelector?)` | A frozen shot — no fully static window longer than `maxStaticSec`, default 2s (`motion_frozen`); the film's last 3 s never count |
 
 `keepsMoving` uses the same motion classifier as the frozen-sweep guard: box
 geometry, opacity, text and generated content, form-control state, painted CSS
