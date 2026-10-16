@@ -1,6 +1,6 @@
 import type { Browser, Page } from "puppeteer-core";
 import { normalizeErrorMessage } from "./errorMessage.js";
-import { withRemainingBudget } from "../capture/captureTimeout.js";
+import { isNavigationTimeoutError, withRemainingBudget } from "../capture/captureTimeout.js";
 import { BrowserCleanupError, closeManagedBrowser } from "../browser/launch.js";
 
 const CHECK_DEADLINE_MS = 120_000;
@@ -74,9 +74,20 @@ export class CheckDeadline {
 
   run<T>(operation: () => Promise<T>): Promise<T> {
     if (this.expired) return Promise.reject(this.expired);
-    const pending = operation();
+    const pending = operation().catch((error: unknown) => {
+      throw this.blame(error);
+    });
     this.operations.add(pending);
     return Promise.race([pending, this.expiry]);
+  }
+
+  /** A page load that timed out while a composition's script ran was waiting on that script, whichever clock ran out
+   * first: the 10 s load or this deadline. */
+  private blame(error: unknown): unknown {
+    const running = this.scripts.at(-1);
+    return running !== undefined && isNavigationTimeoutError(error)
+      ? new CheckDeadlineError(running)
+      : error;
   }
 
   async close(): Promise<void> {
