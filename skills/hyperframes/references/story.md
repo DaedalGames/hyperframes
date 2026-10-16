@@ -22,7 +22,7 @@ Write three. They are three different films, not three titles on one film: each 
 - its look in one line: ground, type, the one material or treatment, taken from the subject or the brand (`look.md`);
 - its sound in one line (`sound.md` §1).
 
-Picking a storyline picks its look and its sound. Before anyone picks, build each storyline's hero shot, about 3 s, in its own look with its LOOK numbers (`spec.md` "The look test"): the pick is made from pictures, not descriptions. Then write the picked one as `SPEC.md`.
+Pick a storyline for its story: the one a stranger would follow and remember, with people or a situation they know, ahead of the most striking picture. Picking a storyline picks its look and its sound. Before anyone picks, build each storyline's hero shot, about 3 s, in its own look with its LOOK numbers (`spec.md` "The look test"): the pick is made from pictures, not descriptions. Then write the picked one as `SPEC.md`.
 
 Put your recommendation first, with the reason in one clause, and save all three in the project as `STORYLINES.md` so a later turn can switch.
 

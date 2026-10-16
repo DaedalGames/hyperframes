@@ -2,9 +2,13 @@
 
 One idea the viewer understands by the end (`../story.md` §1). The spine is one concrete example worked through, start to finish, not a tour of facts. Usually 30–90 s.
 
+## Ground it first
+
+Start where the viewer already is: a person, a place or a situation they know, and a question they would ask about it ("why does the astronaut come home younger than her twin?"). The abstract device (a light clock, a graph, a field) enters inside that situation, as the thing that answers the question, and the film returns to the person at the end with the answer. A film that opens on the device alone is a diagram, not an explainer.
+
 ## Devices that explain
 
-- **The object is the explanation.** Build a thing whose working is the idea: a machine, a model, a map, a light clock. Every number on screen comes from it, and the camera tours through it: cutaways, an exploded view, a dive into the part that matters.
+- **The object is the explanation.** Build a thing whose working is the idea: a machine, a model, a map, a light clock, drawn so it reads as what it is (its material, its mount, where it sits in the scene). Every number on screen comes from it, and the camera tours through it: cutaways, an exploded view, a dive into the part that matters.
 - **One diagram that grows.** Start from the simplest true picture and add one part per beat, each appearing when it is named; never a finished diagram dropped on screen at once.
 - **Continuous transformation.** Each step morphs out of the last (a bar becomes an axis, a dot becomes a population), so the viewer never loses the thread to a cut.
 - **The worked example.** One real input (a sentence, a number, a photo) travels through every step to the answer.

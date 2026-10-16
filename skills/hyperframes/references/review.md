@@ -13,7 +13,7 @@ Trust the numbers over your eye where they disagree: a clipped label or a 0.6 s 
 
 ## 2. What to look for
 
-First, describe each beat frame in one sentence as a viewer would, and compare it with its shot in `SPEC.md`; what does not match is a note. Then name every default the frames show (`spec.md` "BANNED by default", or one not on the list yet), add each to the BANNED line, and fix them before anything else.
+First, describe each beat frame in one sentence as a stranger would, naming every object; an object you would have to explain ("those bars are mirrors") is a P0. Then read the beat frames in order: do they tell a story a stranger follows, each one causing the next? Compare each with its shot in `SPEC.md`; what does not match is a note. Then name every default the frames show (`spec.md` "BANNED by default", or one not on the list yet), add each to the BANNED line, and fix them before anything else.
 
 Then go through the sheets once per question:
 

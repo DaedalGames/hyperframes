@@ -4,6 +4,8 @@ Adjectives are where the default look lives. Given "premium, modern, clean", the
 
 So before any scene, write `SPEC.md` at the project root: the film as a director's brief to yourself, with a number wherever you would have written an adjective. Build from it, check against it, and change it when a review changes the film.
 
+The spec serves the story, never the other way round (`story.md`). A look that turns the story's things into abstract shapes has failed, however striking the frame.
+
 ## The template
 
 ```text
@@ -14,6 +16,9 @@ LOOK:    ground (hex, texture and its amount), ink, one accent and where it may 
          display face + weight + size in px + tracking, body face the same;
          the medium (paper and ink, photographs, product UI, glass, clay, 3D studio) with its numbers;
          light and depth: shadow offset, blur and opacity, grain %, vignette %
+OBJECTS: every thing the story needs the viewer to recognise (a mirror, a clock, a phone, a person),
+         drawn with the material and details that make it read without a label: a mirror is
+         silvered glass with a bright edge and a mount, not a bar
 MOTION:  eases by role as named curves (enter, move, exit, camera); springs as damping ratio;
          durations and staggers in frames
 SHOTS:   one line per shot: frame range, the one hero move, what the viewer reads (with its window),
@@ -37,7 +42,8 @@ QA:      the frames to check, and what each must show
 
 - The hero of a shot fills at least 40% of the frame's height or width. A small object in the middle of an empty frame is never a shot; push in, crop, or give it a world.
 - One hero move per shot. Secondary moves travel 50-70% as far, start 100-200 ms after it, and everything else holds still.
-- The shot's main information is on screen within about 2.5 s; after that it holds, so any frame the viewer pauses on reads as a finished poster.
+- In a story film every shot moves the story: something happens that causes the next shot. Lines read as cause and effect ("so…", "which means…"), not slogans.
+- An information card (B-roll over a talking head, a data beat, a vertical explainer card) is different: its information is on screen within about 2.5 s, then it holds, so any paused frame reads as a finished poster.
 - Something new every 2-4 s across the film; a new layout every bar when there is music.
 - Text meant to be read: at least 28 px at 1080 (2.6% of the short side), held 0.5 s + 0.3 s a word. Too many words: cut words, never shrink type.
 
@@ -59,7 +65,7 @@ After the first render, name every default it used anyway, from this list or not
 
 ## The look test
 
-A full film in the wrong look is the most expensive mistake. Before building the rest, build only the hero shot, about 3 s, once in the look of each storyline (`story.md` §2), each from its own LOOK and MOTION lines, and render a still and a strip of each (`snapshot --at`, `--range`). The person picks from those; with no one to ask, check each against BANNED and the question "would this frame stop a thumb on a phone?", pick one, and say why in the reply. Then write the full `SPEC.md` for the pick and build the rest to match its shot.
+A full film in the wrong look is the most expensive mistake. Before building the rest, build only the hero shot, about 3 s, once in the look of each storyline (`story.md` §2), each from its own LOOK and MOTION lines, and render a still and a strip of each (`snapshot --at`, `--range`). The person picks from those; with no one to ask, judge them in this order: does a stranger understand what they are looking at and want to see what happens next; is every object recognisable without a label; does it avoid BANNED; would it stop a thumb on a phone. Pick one and say why in the reply. A storyline is never picked for its look over its story. Then write the full `SPEC.md` for the pick and build the rest to match its shot.
 
 ## A look built from a medium
 
