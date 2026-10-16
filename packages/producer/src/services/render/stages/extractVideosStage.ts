@@ -93,6 +93,8 @@ export interface ExtractVideosStageResult {
   extractionResult: Awaited<ReturnType<typeof extractAllVideoFrames>> | null;
   /** Frame-lookup table for the runtime video-frame injector, or `null` if no frames were extracted. */
   frameLookup: FrameLookupTable | null;
+  /** Re-extracts these videos tone-mapped to SDR and swaps them into `frameLookup`. */
+  toneMapVideosToSdr: (videoIds: ReadonlySet<string>) => Promise<void>;
   videoReadinessSkipIds: string[];
   videoMetadataHints: CaptureVideoMetadataHint[];
   /** Set of video IDs whose ORIGINAL color space was HDR (pre-extraction). */
@@ -485,6 +487,21 @@ export async function runExtractVideosStage(
     imageColorSpaces.push(...probed);
   }
 
+  // Preserve the configured rational through FFmpeg extraction. NTSC
+  // rates must remain `30000/1001`, not a rounded JavaScript decimal,
+  // because short boundary counts can differ by one frame.
+  const extractionOptions = {
+    fps: job.config.fps,
+    outputDir: join(compiledDir, "__hyperframes_video_frames"),
+    format: job.config.videoFrameFormat ?? "auto",
+    toneMapHdrToSdr: job.config.hdrMode === "force-sdr",
+    timelineEnd: composition.duration,
+    maxTransientRetries: extractionPolicy.maxTransientRetries,
+    collectProbeFailures: extractionPolicy.failureMode === "enforce",
+    deferRangeExtraction,
+    contentKeyedDirs: [join(compiledDir, REMOTE_MEDIA_SUBDIR)],
+  };
+
   if (composition.videos.length > 0) {
     const totalVideos = composition.videos.length;
     for (let i = 0; i < totalVideos; i++) {
@@ -497,20 +514,7 @@ export async function runExtractVideosStage(
     extractionResult = await extractAllVideoFrames(
       composition.videos,
       projectDir,
-      // Preserve the configured rational through FFmpeg extraction. NTSC
-      // rates must remain `30000/1001`, not a rounded JavaScript decimal,
-      // because short boundary counts can differ by one frame.
-      {
-        fps: job.config.fps,
-        outputDir: join(compiledDir, "__hyperframes_video_frames"),
-        format: job.config.videoFrameFormat ?? "auto",
-        toneMapHdrToSdr: job.config.hdrMode === "force-sdr",
-        timelineEnd: composition.duration,
-        maxTransientRetries: extractionPolicy.maxTransientRetries,
-        collectProbeFailures: extractionPolicy.failureMode === "enforce",
-        deferRangeExtraction,
-        contentKeyedDirs: [join(compiledDir, REMOTE_MEDIA_SUBDIR)],
-      },
+      extractionOptions,
       abortSignal,
       cfg,
       compiledDir,
@@ -542,7 +546,44 @@ export async function runExtractVideosStage(
   }
   const videoExtractMs = Date.now() - stage2Start;
 
+  const toneMapVideosToSdr = async (videoIds: ReadonlySet<string>): Promise<void> => {
+    const videos = composition.videos.filter((video) => videoIds.has(video.id));
+    if (videos.length === 0 || !frameLookup) return;
+    const result = await extractAllVideoFrames(
+      videos,
+      projectDir,
+      {
+        ...extractionOptions,
+        toneMapHdrToSdr: true,
+        outputDir: join(compiledDir, "__hyperframes_video_frames_sdr"),
+      },
+      abortSignal,
+      cfg,
+      compiledDir,
+    );
+    throwIfEncoderInterrupted(result);
+    const failure = applyVideoExtractionFailurePolicy(result, extractionPolicy, log);
+    if (failure) throw failure;
+    materializeExtractedFramesForCompiledDir(result.extracted, compiledDir, {
+      materializeSymlinks,
+    });
+    const byId = new Map(result.extracted.map((frames) => [frames.videoId, frames]));
+    for (const video of videos) {
+      const frames = byId.get(video.id);
+      if (!frames) continue;
+      frameLookup.addVideo(
+        frames,
+        video.start,
+        video.end,
+        video.mediaStart,
+        video.loop,
+        video.playbackRate,
+      );
+    }
+  };
+
   return {
+    toneMapVideosToSdr,
     extractionResult,
     frameLookup,
     videoReadinessSkipIds,
