@@ -36,11 +36,8 @@ function byStableId(a: TimelineElement, b: TimelineElement): number {
   return ka < kb ? -1 : ka > kb ? 1 : 0;
 }
 
-/**
- * Whether first-fit would put every clip on the first lane: no two clips overlap except a transition
- * pair. A sweep in start order visits only the pairs that overlap, so a long sequential track costs
- * one sort, where first-fit compares each clip with every clip already placed.
- */
+/** True when no two clips overlap except a transition pair.
+ * A start-order sweep costs one sort, not first-fit's all-pairs compare. */
 function sharesOneLane(clips: TimelineElement[]): boolean {
   const byStart = [...clips].sort((a, b) => a.start - b.start);
   for (let i = 0; i < byStart.length; i++) {
