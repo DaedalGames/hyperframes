@@ -127,6 +127,30 @@ function mountSvg(html: string, css: string) {
   return mount({ html, css, width: 100, height: 100, warnings: [] });
 }
 
+it("retains incoming owned CSS after equal-specificity destination head rules", async () => {
+  const view = mountSvg('<div class="card">Text</div>', ".card{color:red}");
+  await view.api().handlePaste();
+  const id = view.doc().querySelector(".clip")!.id;
+  view.select(id);
+  await view.api().handleCopy();
+  view.files["compositions/b.html"] = SOURCE.replace(
+    "<body>",
+    `<head title="</head>"><!-- </head> --><script>const close="</head>"</script><style>#${id} :is(.card){color:blue}</style></head><body>`,
+  );
+  view.navigate("compositions/b.html");
+  usePlayerStore.setState({ selectedElementId: null, selectedElementIds: new Set(), elements: [] });
+  await view.api().handlePaste();
+  for (const doc of [view.doc(), view.preview()]) {
+    const card = doc.querySelector(".card")!;
+    expect(matchingDeclarations(doc, card, "color").at(-1)).toBe("red");
+    expect(doc.head.querySelector("script")?.textContent).toBe('const close="</head>"');
+    expect(doc.head.getAttribute("title")).toBe("</head>");
+  }
+  expect(view.files["compositions/b.html"]).toContain(
+    '<!-- </head> --><script>const close="</head>"</script>',
+  );
+});
+
 it("does not add matching ancestor context while preserving sibling styles", async () => {
   const view = mountSvg(
     '<div class="card"><span>Text</span></div>',

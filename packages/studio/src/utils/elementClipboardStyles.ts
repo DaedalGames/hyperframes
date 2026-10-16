@@ -20,9 +20,18 @@ export function includeElementClipboardStyles(saved: Document, html: string): st
 }
 
 function insertStyles(source: string, styles: string): string {
-  const tags = scanHtmlOpeningTags(source);
+  const closes: number[] = [];
+  const tags = scanHtmlOpeningTags(source, (name, start) => {
+    if (name === "head") closes.push(start);
+  });
   const head = tags.find((tag) => tag.name === "head");
-  if (head) return source.slice(0, head.end) + styles + source.slice(head.end);
+  if (head) {
+    const end =
+      closes.find((start) => start >= head.end) ??
+      tags.find((tag) => tag.name === "body")?.start ??
+      source.length;
+    return source.slice(0, end) + styles + source.slice(end);
+  }
   const html = tags.find((tag) => tag.name === "html");
   const index = html?.end ?? tags[0]?.start ?? source.length;
   return source.slice(0, index) + `<head>${styles}</head>` + source.slice(index);
