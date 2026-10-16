@@ -5,6 +5,8 @@ import { rebindClipboardSelector, type ClipboardAttributeRewrite } from "./clipb
 import { ID_ATTR_RE } from "./clipboardPayload";
 import { escapeRegex } from "./sourcePatcher";
 
+import { unownedElementCss } from "./elementClipboardStyleBlocks";
+
 const ID_ATTRS = new RegExp(ID_ATTR_RE.source, "g");
 // One pass over both, so a `<style>` written inside a script's text is left as script.
 const BLOCKS =
@@ -60,7 +62,7 @@ function withCopiedRules(
   attributes: readonly ClipboardAttributeRewrite[],
 ): string {
   const sheet = new CSSStyleSheet();
-  sheet.replaceSync(css);
+  sheet.replaceSync(unownedElementCss(css));
   const indent = css.match(/\n([ \t]*)\S/)?.[1] ?? "";
   const copies = copiedCssRules(sheet.cssRules, from, indent, renames, attributes);
   if (copies.length === 0) return css;

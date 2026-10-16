@@ -8,6 +8,8 @@ import { useClipboard } from "./useClipboard";
 import { usePlayerStore } from "../player";
 import { resolveDomEditSelection, type DomEditSelection } from "../components/editor/domEditing";
 
+import { ownedElementCss, unownedElementCss } from "../utils/elementClipboardStyleBlocks";
+
 const parse = (html: string) => new DOMParser().parseFromString(html, "text/html");
 const SOURCE =
   '<html><body><div data-composition-id="main" data-duration="10"></div></body></html>';
@@ -21,6 +23,7 @@ afterEach(() => {
 
 function mount(payload: ElementClipboard) {
   const files: Record<string, string> = { "index.html": SOURCE, "compositions/b.html": SOURCE };
+  const toasts: string[] = [];
   const records: Array<{ files: Record<string, { before: string; after: string }> }> = [];
   let path = "index.html";
   const systemText = encodeElementClipboard(payload);
@@ -44,7 +47,9 @@ function mount(payload: ElementClipboard) {
       projectId: "p",
       activeCompPath: path,
       domEditSelectionRef,
-      showToast: () => {},
+      showToast: (message) => {
+        toasts.push(message);
+      },
       writeProjectFile: async (file, content) => {
         files[file] = content;
       },
@@ -99,6 +104,7 @@ function mount(payload: ElementClipboard) {
     api: () => clipboard!,
     files,
     records,
+    toasts,
     select,
     selectDom: async (id: string) => {
       usePlayerStore.setState({ selectedElementId: null, selectedElementIds: new Set() });
@@ -151,6 +157,134 @@ it("retains incoming owned CSS after equal-specificity destination head rules", 
   );
 });
 
+it.each(["before", "after"])(
+  "preserves authored body stylesheet order %s the composition",
+  async (position) => {
+    const view = mountSvg('<div class="card">Text</div>', ".card{color:red}");
+    const authored = "<style>:is(#unused,.clip) .card{color:blue}</style>";
+    view.files["index.html"] = SOURCE.replace(
+      position === "before" ? "<body>" : "</body>",
+      position === "before" ? `<body>${authored}` : `${authored}</body>`,
+    );
+    view.navigate("index.html");
+    await view.api().handlePaste();
+    const original = view.doc().querySelector(".clip")!.id;
+    view.select(original);
+    await view.api().handleDuplicate();
+    for (const doc of [view.doc(), view.preview()]) {
+      for (const card of doc.querySelectorAll(".card")) {
+        expect(matchingDeclarations(doc, card, "color").at(-1)).toBe(
+          position === "before" ? "red" : "blue",
+        );
+      }
+    }
+    expect(view.records.at(-1)!.files["index.html"]!.after).toBe(view.files["index.html"]);
+  },
+);
+
+it("preserves host clip sibling selectors while placing owned CSS", async () => {
+  const view = mountSvg('<div class="card">Text</div>', ".card{color:red}");
+  const host =
+    "<style>.clip:only-child{opacity:.25}.clip + .clip{visibility:hidden}.clip:nth-child(even){background:blue}</style>";
+  view.files["index.html"] = SOURCE.replace("<body>", `<body>${host}`);
+  view.navigate("index.html");
+  await view.api().handlePaste();
+  const id = view.doc().querySelector(".clip")!.id;
+  expect(view.doc().getElementById(id)!.matches(".clip:only-child")).toBe(true);
+  view.select(id);
+  await view.api().handleDuplicate();
+  for (const doc of [view.doc(), view.preview()]) {
+    const clips = Array.from(doc.querySelectorAll(".clip"));
+    expect(clips.map((clip) => clip.matches(".clip:only-child"))).toEqual([false, false]);
+    expect(clips.map((clip) => clip.matches(".clip + .clip"))).toEqual([false, true]);
+    expect(clips.map((clip) => clip.matches(".clip:nth-child(even)"))).toEqual([false, true]);
+    expect(clips[0]!.parentElement!.children).toHaveLength(2);
+  }
+});
+
+it.each([
+  { name: "template", suffix: "<template><style>.card{color:green}</style></template>" },
+  { name: "inert type", suffix: '<style type="text/plain">.card{color:green}</style>' },
+])("keeps owned CSS outside an earlier $name sheet", async ({ suffix }) => {
+  const view = mountSvg('<div class="card">Text</div>', ".card{color:red}");
+  view.files["index.html"] = SOURCE.replace(
+    "<body>",
+    `<body><style data-hf-style-probe="legacy" data-hf-style-probe-x="legacy">.unrelated{color:blue}</style>${suffix}`,
+  );
+  view.navigate("index.html");
+  await view.api().handlePaste();
+  const doc = view.doc();
+  const blocks = Array.from(doc.querySelectorAll('style:not([type="text/plain"])')).flatMap(
+    (style) => ownedElementCss(style.textContent ?? ""),
+  );
+  expect(blocks).toHaveLength(1);
+  expect(blocks[0]!.css).toContain("color:red");
+  expect(view.files["index.html"]).toContain(suffix);
+});
+
+it("keeps media-gated authored CSS conditional and owned CSS unconditional", async () => {
+  const view = mountSvg('<div class="card">Text</div>', ".card{color:red}");
+  const authored = ":is(#unused,.clip) .card{color:blue}";
+  view.files["index.html"] = SOURCE.replace(
+    "<body>",
+    `<body><style media="not all">${authored}</style>`,
+  );
+  view.navigate("index.html");
+  await view.api().handlePaste();
+  const style = view.doc().body.querySelector("style")!;
+  expect(style.hasAttribute("media")).toBe(false);
+  const nodes = postcss.parse(style.textContent!).nodes;
+  expect(nodes[0]).toMatchObject({ type: "atrule", name: "media", params: "not all" });
+  expect(nodes[0]!.toString()).toContain(authored);
+  expect(nodes[1]).toMatchObject({ type: "atrule", name: "media", params: "all" });
+  expect(ownedElementCss(style.textContent!)).toHaveLength(1);
+});
+
+it.each([
+  { rule: '@import "theme.css";', media: "screen" },
+  { rule: '@namespace svg url("http://www.w3.org/2000/svg");', media: "screen" },
+  { rule: '@namespace url("http://www.w3.org/2000/svg");', media: "" },
+])(
+  "rejects unsupported stylesheet contexts before saving: $rule $media",
+  async ({ rule, media }) => {
+    const view = mountSvg('<div class="card">Text</div>', ".card{color:red}");
+    const before = SOURCE.replace(
+      "<body>",
+      `<body><style media="${media}">${rule}.existing{color:blue}</style>`,
+    );
+    view.files["index.html"] = before;
+    view.navigate("index.html");
+    await view.api().handlePaste();
+    expect(view.files["index.html"]).toBe(before);
+    expect(view.records).toHaveLength(0);
+    expect(view.toasts.some((message) => message.includes("stylesheet"))).toBe(true);
+  },
+);
+
+it.each(["head", "body"])(
+  "handles a last preceding %s stylesheet link explicitly",
+  async (location) => {
+    const view = mountSvg('<div class="card">Text</div>', ".card{color:red}");
+    const link = '<link rel="stylesheet" href="theme.css">';
+    const before = SOURCE.replace(
+      "<body>",
+      location === "head" ? `<head>${link}</head><body>` : `<body>${link}`,
+    );
+    view.files["index.html"] = before;
+    view.navigate("index.html");
+    await view.api().handlePaste();
+    if (location === "body") {
+      expect(view.files["index.html"]).toBe(before);
+      expect(view.records).toHaveLength(0);
+      expect(view.toasts.some((message) => message.includes("body stylesheet link"))).toBe(true);
+    } else {
+      expect(view.doc().querySelector(".clip")).not.toBeNull();
+      expect(view.doc().head.querySelector("link + style")?.textContent).toContain("color:red");
+      expect(view.files["index.html"]).toContain(link);
+    }
+  },
+);
+
 it("does not add matching ancestor context while preserving sibling styles", async () => {
   const view = mountSvg(
     '<div class="card"><span>Text</span></div>',
@@ -197,7 +331,11 @@ it.each(["timeline", "dom"])(
     for (const doc of [view.doc(), view.preview()]) {
       const clips = Array.from(doc.querySelectorAll(".clip"));
       expect(clips).toHaveLength(2);
-      expect(doc.head.querySelectorAll("style")).toHaveLength(2);
+      expect(
+        Array.from(doc.querySelectorAll("style")).flatMap((style) =>
+          ownedElementCss(style.textContent!),
+        ),
+      ).toHaveLength(2);
       expect(doc.querySelector(".clip style")).toBeNull();
       expect(doc.head.textContent).not.toContain(".unrelated");
       for (const clip of clips) {
@@ -218,10 +356,13 @@ it.each(["timeline", "dom"])(
 
 function clipCss(clip: Element): string {
   return Array.from(clip.ownerDocument.querySelectorAll("style"))
-    .filter(
-      (style) => clip.contains(style) || style.getAttribute("data-hf-element-style") === clip.id,
+    .flatMap((style) =>
+      clip.contains(style)
+        ? [style.textContent ?? ""]
+        : ownedElementCss(style.textContent ?? "")
+            .filter((block) => block.owner === clip.id)
+            .map((block) => block.css),
     )
-    .map((style) => style.textContent)
     .join("\n");
 }
 
@@ -278,9 +419,8 @@ it.each([".title{color:red}", "@media all{@supports (display:block){.title{color
       ).toBe(false);
     }
     expect(
-      Array.from(
-        doc.head.querySelectorAll("style:not([data-hf-element-style])"),
-        (style) => style.textContent,
+      Array.from(doc.head.querySelectorAll("style"), (style) =>
+        unownedElementCss(style.textContent ?? ""),
       ),
     ).toEqual([`#${original.id}{background:blue}`]);
     expect(view.records).toHaveLength(3);

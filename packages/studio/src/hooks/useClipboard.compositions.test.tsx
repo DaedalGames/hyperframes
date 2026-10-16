@@ -1,3 +1,4 @@
+import { ownedElementCss } from "../utils/elementClipboardStyleBlocks";
 // @vitest-environment jsdom
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -65,7 +66,10 @@ it("isolates parent and child pasted styles after the compiler inlines both comp
     });
     await clipboard!.handlePaste();
     const parent = parse(files[path]!);
-    const parentStyle = parent.querySelector("style[data-hf-element-style]")!.textContent!;
+    const parentStyle = Array.from(parent.querySelectorAll("style"))
+      .flatMap((style) => ownedElementCss(style.textContent ?? ""))
+      .map((block) => block.css)
+      .join("\n");
     path = "compositions/sub.html";
     act(() => root.render(<Harness />));
     systemText = encodeElementClipboard({

@@ -1,3 +1,4 @@
+import { ownedElementCss } from "../utils/elementClipboardStyleBlocks";
 // @vitest-environment jsdom
 import React, { act } from "react";
 import postcss from "postcss";
@@ -186,7 +187,10 @@ it("does not replace an existing composition font with the pasted font", async (
   await view.api().handlePaste();
   const doc = new DOMParser().parseFromString(view.file(), "text/html");
   expect(doc.head.textContent).toContain("font-family:element-2-font-0");
-  const added = doc.querySelector("style[data-hf-element-style]")?.textContent ?? "";
+  const added = Array.from(doc.querySelectorAll("style"))
+    .flatMap((style) => ownedElementCss(style.textContent ?? ""))
+    .map((block) => block.css)
+    .join("\n");
   expect(added).toContain("font-family:");
   expect(added).not.toContain('"element-2-font-0"');
 });
@@ -236,9 +240,10 @@ it.each([
     const duplicated = new DOMParser().parseFromString(view.file(), "text/html");
     const title = duplicated.getElementById(`${original.id}-2`)!.querySelector("h1")!;
     const matches: string[][] = [];
-    const cssText = Array.from(
-      duplicated.querySelectorAll("style"),
-      (style) => style.textContent,
+    const cssText = Array.from(duplicated.querySelectorAll("style"), (style) =>
+      ownedElementCss(style.textContent ?? "")
+        .map((block) => block.css)
+        .join("\n"),
     ).join("\n");
     postcss.parse(cssText).walkRules((rule) => {
       if (!title.matches(rule.selector)) return;

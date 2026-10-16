@@ -193,12 +193,9 @@ export function pasteElementHtml(
   const reminted = remintHfIds(payload.html, new DOMParser(), hfIdsInFile(content));
   const deduped = deduplicateIds(reminted, collectHtmlIds(content));
   const renames = renamedIds(reminted, deduped);
-  const prepared = hoistElementClipboardStyles(content, deduped, renames);
-  const result = insertAsSibling(
-    prepared.content,
-    prepared.html,
-    payload.originSelector,
-    payload.originSelectorIndex,
+  const result = hoistElementClipboardStyles(
+    insertAsSibling(content, deduped, payload.originSelector, payload.originSelectorIndex),
+    renames,
   );
   return fromThisFile ? carryLook(result, renames, 0) : result;
 }
@@ -247,14 +244,10 @@ export function pasteTimelineClips(
       .replace(/data-start="[^"]*"/, `data-start="${formatTimelineAttributeNumber(newStart)}"`)
       .replace(/data-track-index="[^"]*"/, `data-track-index="${newTrack}"`);
     const withPatched = patchedRootTag + deduped.slice(rootTagEnd + 1);
-    const prepared = hoistElementClipboardStyles(
-      result,
-      withPatched,
+    result = hoistElementClipboardStyles(
+      insertTimelineAssetIntoSource(result, withPatched, { preserveWhitespace: true }),
       renamedIds(reminted, deduped),
     );
-    result = insertTimelineAssetIntoSource(prepared.content, prepared.html, {
-      preserveWhitespace: true,
-    });
     if (fromThisFile) {
       const authored = Number(rootTag.match(/data-start="([^"]*)"/)?.[1]);
       const authoredStart = Number.isFinite(authored) ? authored : clip.start;
