@@ -2,7 +2,7 @@
 
 Use it whenever a run makes or changes a storyboard: when the person asks for one, or when you want their go on the shots before animating. This file owns **how to make the board**; `storyboard-format.md` owns the `STORYBOARD.md` file the tools parse.
 
-A film over about 15 s gets a `STORYBOARD.md` even without stills: one frame per beat of the picked storyline, each with its `reads` and `sound` (`storyboard-format.md`), written before the first scene. It is the plan the build and the review (`review.md`) check against.
+A film's shots are planned in the SHOTS line of `SPEC.md` (`spec.md`); a storyboard turns those shots into stills when the person wants to approve them first, one frame per shot, carrying its `reads` and `sound` (`storyboard-format.md`).
 
 The person sees the plan as stills on the board, comments or draws on a frame, and says go. The board is `boards/storyboard.html`, and tools that show it find its frames by the classes in § 2; boxes marked any other way (`cell` boxes, `id="frame-NN"` markers) are not found.
 

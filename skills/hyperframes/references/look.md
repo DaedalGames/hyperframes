@@ -1,6 +1,6 @@
 # The look
 
-Left alone, the same brief comes out with the same look run after run, and banning that look only moves it to the next default. Outside input breaks it, in this order: the project's design spec, a real brand, a reference image or film the person gave you, the subject's own world. Settle it before the first scene, in a written design plan (below).
+Left alone, the same brief comes out with the same look run after run, and banning that look only moves it to the next default. Outside input breaks it, in this order: the project's design spec, a real brand, a reference image or film the person gave you, the subject's own world. Settle it before the first scene, as numbers in the LOOK line (below).
 
 ## The project's design spec
 
@@ -42,16 +42,9 @@ The presets are slide-deck looks: use one when the person names it, or for a dec
 | `daisy-days`        | Picture book: charcoal outlines, sunny pastels, Fredoka One, hand-drawn ornaments              |
 | `editorial-forest`  | Literary: green, pink and cream, Source Serif display, mono chrome, flat paper                 |
 
-## The design plan
+## The LOOK line
 
-Before the first scene, write the look down (into `frame.md` when there is none), taken from the brand, the reference or the subject itself: its era, its materials, where it would be shown.
-
-- **Colours**: 4–6, each named for its role (ground, ink, accent, one or two supports). Each world may have its own ground; the palette and type stay.
-- **Type**: a display face and a body face, chosen for this subject. Inter, Space Grotesk, Instrument Serif, Geist and JetBrains Mono are where generated design lands; use them when the brand does, not by default. Titles 4–9% of the frame height; nothing meant to be read under 2.6% of the short side.
-- **A material or treatment**: what the frames are made of (photographs, paper, ink, glass, the product's own UI, footage, a 3D set), so the look comes from a medium, not from effects.
-- **One rule for the frame**, and the one bold thing the film will be remembered by.
-
-Then read the plan against the tells (`story.md` §8) and change anything it hits.
+With no design spec, the look is the LOOK line of `SPEC.md` (`spec.md`), taken from the brand, the reference or the subject itself: its era, its materials, where it would be shown. Every part is a number (hex, px, %, a named face and weight), the ground and the hero come from a medium rather than from effects, and the BANNED line keeps it off the defaults. Inter, Space Grotesk, Instrument Serif, Geist and JetBrains Mono are where generated design lands; use them when the brand does, not by default. Copy the palette and the faces into the root variables below.
 
 ## Video facts
 

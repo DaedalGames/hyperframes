@@ -33,7 +33,8 @@ Few and exact: every effect has a cause on screen, and too many read as a templa
 | pop               | a badge, chip or number landing                |
 | riser into impact | the payoff or the mark, once in the film       |
 
-- Place a clip so its peak lands on the frame: `npx hyperframes audio <file> --json` reports where it hits; most files peak after their start.
+- Place a clip so its peak lands one frame after its picture (light arrives before sound; a sound early feels wrong sooner than one late): `npx hyperframes audio <file> --json` reports where it hits, and most files peak after their start.
+- Each hit sits 3-6 dB over the bed; a bed with most of its energy under 150 Hz plays as nothing on a phone speaker.
 - Rotate two or three takes of a repeated sound; the same whoosh on every cut is the most common tell.
 - Over strong music, a typing-heavy film can drop the clicks and keys. No synthesised tones, chimes or dings.
 

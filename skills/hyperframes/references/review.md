@@ -1,6 +1,6 @@
 # Review
 
-You wrote the timeline, so you know what happens; the viewer sees it once, at full speed, often on a phone. Review is how you see the film as they will. `check` catches what is broken; this pass catches what is weak. Run it after `check` passes, on every new film and on any edit that changes timing or layout, before you reply or render.
+You wrote the timeline, so you know what happens; the viewer sees it once, at full speed, often on a phone. Review is how you see the film as they will: as a harsh motion director, not a proud author. `check` catches what is broken; this pass catches what is weak. Run it after `check` passes, on every new film and on any edit that changes timing or layout, before you reply or render.
 
 ## 1. Measure, then look
 
@@ -13,7 +13,9 @@ Trust the numbers over your eye where they disagree: a clipped label or a 0.6 s 
 
 ## 2. What to look for
 
-Go through the sheets once per question:
+First, describe each beat frame in one sentence as a viewer would, and compare it with its shot in `SPEC.md`; what does not match is a note. Then name every default the frames show (`spec.md` "BANNED by default", or one not on the list yet), add each to the BANNED line, and fix them before anything else.
+
+Then go through the sheets once per question:
 
 | Question                      | What it catches                                                                                                                                    |
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -33,7 +35,7 @@ Write each problem as one line: `t=4.2s · where · problem → exact change · 
 - **P1** weakens the film: a dead stretch, a soft payoff, a seam that jumps.
 - **P2** polish.
 
-Fix every P0 and the P1s worth their time: text first, then timing, then detail. Then snapshot only what you changed, once. A second pass only when a P0 is still open. Never score the film out of 10: a score finds nothing to fix.
+Fix every P0 and the P1s worth their time: text first, then timing, then detail. Then snapshot only what you changed, once. A second pass only when a P0 is still open. Never score the film out of 10: a score finds nothing to fix. When a fix does not hold, snapshot the frames on either side of the problem, list every difference, and change only the line that causes it. A film that feels busy: remove a third of the motion and keep the moves that lead the eye.
 
 A fresh pair of eyes, when your host can start a sub-agent: give it only `STORYBOARD.md` and the three sheets, ask for P0 and P1 lines in the format above, and keep editing to yourself. Commit or copy the project before you fix, so a fix that makes things worse can be rolled back.
 

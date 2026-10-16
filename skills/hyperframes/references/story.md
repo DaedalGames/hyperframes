@@ -22,7 +22,7 @@ Write three. They are three different films, not three titles on one film: each 
 - its look in one line: ground, type, the one material or treatment, taken from the subject or the brand (`look.md`);
 - its sound in one line (`sound.md` §1).
 
-Picking a storyline picks its look and its sound.
+Picking a storyline picks its look and its sound. Before anyone picks, build each storyline's hero shot, about 3 s, in its own look with its LOOK numbers (`spec.md` "The look test"): the pick is made from pictures, not descriptions. Then write the picked one as `SPEC.md`.
 
 Put your recommendation first, with the reason in one clause, and save all three in the project as `STORYLINES.md` so a later turn can switch.
 
@@ -83,15 +83,10 @@ The mark lands once, with weight, usually on the end card; before it the brand s
 
 ## 8. Tells of a generated film
 
-Defaults, not bans; a reference that does one on purpose wins:
+The defaults a film falls into when nothing is decided are banned by name in `spec.md` ("BANNED by default"): a dark void with small things floating in it, glow and particles, the cream-paper-serif-mono-label look, everything fading and sliding up, three cards in a row, the docked logo. Beyond those, for a story:
 
-- one dark canvas for the whole film, small UI floating in its middle;
 - every scene entering the same way, or the same move beat after beat;
-- side-by-side panels, floating cards, three cards in a row, four corner brackets, click rings;
-- a title over a dimmed screenshot of the product;
-- titles that keep sliding or shrinking after they land; breathing or floating loops standing in for motion on titles and UI (a character's idle breath is acting, `types/character.md`);
-- every title fading and sliding up into place;
-- the logo docked small in a corner for the whole film;
-- the second default, reached once the first is banned: a cream or paper ground with a serif display, one italic accent word, a terracotta or cobalt accent, small caps-mono labels ("001 —", "FIG. 01"), hairline rules and a coloured full stop on the end title. Any one of these can be right for a brand or a subject; all of them together, chosen for no reason, is the house style of generated design.
+- side-by-side panels and floating cards standing in for a scene;
+- titles that keep sliding or shrinking after they land; breathing or floating loops standing in for motion on titles and UI (a character's idle breath is acting, `types/character.md`).
 
-When a first snapshot shows any of these, name which, take the replacement from the subject, the brand or the medium, and add what you replaced to the project's `frame.md` Don'ts so later scenes keep away from it.
+When a first render shows any of them, name which, take the replacement from the subject, the brand or the medium, and add it to the BANNED line of `SPEC.md`.

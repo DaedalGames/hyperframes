@@ -9,6 +9,10 @@ One idea the viewer understands by the end (`../story.md` §1). The spine is one
 - **Continuous transformation.** Each step morphs out of the last (a bar becomes an axis, a dot becomes a population), so the viewer never loses the thread to a cut.
 - **The worked example.** One real input (a sentence, a number, a photo) travels through every step to the answer.
 
+## Shapes of information
+
+Most explainable lines are one of a few shapes, and each has its own picture: a number that lands (`data.md`); a myth turned over (the wrong idea struck through, the right one printed over it); before and after; many things converging into a few groups; a network that densifies; one chosen out of many; steps in order; a real screenshot with the detail circled; a quote set as a poster; a chapter card. Pick the shape first, then the picture, so similar lines get different pictures and every line gets the one that shows it.
+
 ## Words
 
 - Narrated: the voice is the clock (`../sound.md` §2). Reveal each part when the voice names it, across the back half of the scene; keep a scene to about 19 spoken words (`../film.md` "Script and pacing").
