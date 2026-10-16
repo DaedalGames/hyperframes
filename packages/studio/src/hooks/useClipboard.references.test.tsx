@@ -295,3 +295,135 @@ it("preserves fragment-attribute predicates on the initial accepted SVG import",
   const selectors = embeddedSelectors(clip);
   expect(selectors.some((selector) => clip.querySelector("use")!.matches(selector))).toBe(true);
 });
+
+it.each([
+  {
+    name: "ordinary href control",
+    html: '<svg><defs><path id="shape" d="M0 0h100v100H0z"/></defs><use href="#shape"/></svg>',
+    css: 'use[*|href="#shape"]{opacity:.25}',
+    target: "use",
+  },
+  {
+    name: "normalized xlink href",
+    html: '<svg><defs><path id="shape" d="M0 0h100v100H0z"/></defs><use xlink:href="#shape"/></svg>',
+    css: 'use[*|href="#shape"]{opacity:.25}',
+    target: "use",
+  },
+  {
+    name: "literal fill URL control",
+    html: '<svg><defs><linearGradient id="paint"/></defs><rect fill="url(#paint)"/></svg>',
+    css: 'rect[fill$="paint)"]{opacity:.25}',
+    target: "rect",
+  },
+  {
+    name: "escaped fill URL",
+    html: String.raw`<svg><defs><linearGradient id="paint"/></defs><rect fill="url(\23 paint)"/></svg>`,
+    css: 'rect[fill$="paint)"]{opacity:.25}',
+    target: "rect",
+  },
+])("preserves actual accepted resource transformation: $name", async ({ html, css, target }) => {
+  const view = mount({ html, css, width: 100, height: 100, warnings: [] });
+  await view.api().handlePaste();
+  const clip = view.doc().querySelector(".clip")!;
+  expect(
+    embeddedSelectors(clip).some((selector) => clip.querySelector(target)!.matches(selector)),
+  ).toBe(true);
+  expect(view.records[0]!.files["index.html"]!.after).toBe(view.files["index.html"]);
+});
+
+function matchingDeclarations(doc: Document, target: Element, property: string): string[] {
+  const values: string[] = [];
+  for (const style of doc.querySelectorAll("style"))
+    postcss.parse(style.textContent!).walkRules((rule) => {
+      if (target.matches(rule.selector))
+        rule.walkDecls(property, (decl) => {
+          values.push(decl.value);
+        });
+    });
+  return values;
+}
+
+async function cloneSelected(view: ReturnType<typeof mount>, action: "duplicate" | "paste") {
+  if (action === "duplicate") expect(await view.api().handleDuplicate()).toBe(true);
+  else {
+    await view.api().handleCopy();
+    await view.api().handlePaste();
+  }
+}
+
+it.each(["duplicate", "paste"] as const)(
+  "keeps false imported ID predicates false through same-file %s",
+  async (action) => {
+    const view = mount({
+      html: '<div id="source">Text</div>',
+      css: '[id$="-2"]{background-color:red}',
+      width: 100,
+      height: 50,
+      warnings: [],
+    });
+    await view.api().handlePaste();
+    const originalId = view.doc().querySelector(".clip")!.id;
+    view.select(originalId);
+    await cloneSelected(view, action);
+    const doc = view.doc();
+    const original = doc.getElementById(originalId)!.querySelector("div")!;
+    const clone = doc.getElementById(`${originalId}-2`)!.querySelector("div")!;
+    expect(matchingDeclarations(doc, original, "background-color")).toEqual([]);
+    expect(matchingDeclarations(doc, clone, "background-color")).toEqual([]);
+    expect(view.preview().getElementById(clone.id)).not.toBeNull();
+    expect(view.records[1]!.files["index.html"]!.after).toBe(view.files["index.html"]);
+  },
+);
+
+it.each(["duplicate", "paste"] as const)(
+  "keeps false authored fragment predicates false through same-file %s",
+  async (action) => {
+    const view = mount({
+      html: "<div>unused</div>",
+      css: "",
+      width: 100,
+      height: 50,
+      warnings: [],
+    });
+    view.files["index.html"] = SOURCE.replace(
+      "</div></body>",
+      '<div id="authored" class="clip" data-start="0" data-duration="5" data-track-index="0"><style>#authored use[href$="-2"]{opacity:0}</style><svg><symbol id="shape"><rect width="100" height="100"/></symbol><use href="#shape"/></svg></div></div></body>',
+    );
+    view.navigate("index.html");
+    view.select("authored");
+    await cloneSelected(view, action);
+    const doc = view.doc();
+    const use = doc.getElementById("authored-2")!.querySelector("use")!;
+    expect(use.getAttribute("href")).toBe("#shape-2");
+    expect(matchingDeclarations(doc, use, "opacity")).toEqual([]);
+    expect(view.records[0]!.files["index.html"]!.after).toBe(view.files["index.html"]);
+  },
+);
+
+it("keeps normalized mixed fragment predicates selective through reload and duplicate", async () => {
+  const view = mount({
+    html: '<svg><defs><path id="shape" d="M0 0L1 1"/></defs><use xlink:href="#shape"/><use href="#shape"/></svg>',
+    css: 'use[*|href="#shape"]{opacity:.25}use[|href]{visibility:hidden}use[href="#shape"]{fill:red}',
+    width: 100,
+    height: 100,
+    warnings: [],
+  });
+  await view.api().handlePaste();
+  const id = view.doc().querySelector(".clip")!.id;
+  view.select(id);
+  await view.api().handleDuplicate();
+  for (const doc of [view.doc(), view.preview()]) {
+    for (const clip of doc.querySelectorAll(".clip")) {
+      const [xlink, ordinary] = Array.from(clip.querySelectorAll("use"));
+      expect(matchingDeclarations(doc, xlink!, "opacity")).toContain(".25");
+      expect(matchingDeclarations(doc, ordinary!, "opacity")).toContain(".25");
+      expect(matchingDeclarations(doc, xlink!, "visibility")).not.toContain("hidden");
+      expect(matchingDeclarations(doc, ordinary!, "visibility")).toContain("hidden");
+      expect(matchingDeclarations(doc, xlink!, "fill")).not.toContain("red");
+      expect(matchingDeclarations(doc, ordinary!, "fill")).toContain("red");
+    }
+  }
+  const css = view.doc().querySelector("style")!.textContent!;
+  expect(css).toContain('[href="#shape"]');
+  expect(css).toContain(":where(#");
+});

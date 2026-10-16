@@ -1,4 +1,3 @@
-import { rebindClipboardUrls } from "./clipboardReferences";
 import type { ClipboardAttributeRewrite } from "./clipboardSelectors";
 import {
   ELEMENT_CLIPBOARD_MAX_NODES,
@@ -36,7 +35,7 @@ interface CopyContext {
   nodeIds: ReadonlyMap<Element, string>;
   fonts: ReadonlyMap<string, string>;
   warn: () => void;
-  attributes: ClipboardAttributeRewrite[];
+  attributes: Array<ClipboardAttributeRewrite & { node: Element }>;
 }
 
 function resourceAttribute(node: Element, attr: Attr): boolean {
@@ -47,11 +46,38 @@ function resourceAttribute(node: Element, attr: Attr): boolean {
   );
 }
 
+function writeAttribute(
+  clean: Element,
+  attr: Attr,
+  value: string,
+  context: CopyContext,
+  name = attr.name,
+): void {
+  clean.setAttribute(name, value);
+  const accepted = clean.getAttributeNode(name)!;
+  context.attributes.push({
+    node: clean,
+    name: attr.name,
+    afterName: accepted.name,
+    before: attr.value,
+    after: accepted.value,
+  });
+}
+
+function nodeSelector(node: Element, wrapper: Element): string {
+  if (node === wrapper) return `#${wrapper.id}`;
+  const siblings = Array.from(node.parentElement!.children).filter(
+    (sibling) => sibling.localName === node.localName,
+  );
+  return `${nodeSelector(node.parentElement!, wrapper)} > ${node.localName}:nth-of-type(${siblings.indexOf(node) + 1})`;
+}
+
 function copyResource(node: Element, clean: Element, attr: Attr, context: CopyContext): void {
   const fragment = context.ids.get(attr.value.slice(1));
-  if (attr.value.startsWith("#") && fragment) clean.setAttribute("href", `#${fragment}`);
+  if (attr.value.startsWith("#") && fragment)
+    writeAttribute(clean, attr, `#${fragment}`, context, "href");
   else if (embeddedResource(attr.value) && node.localName !== "use")
-    clean.setAttribute(attr.name, attr.value);
+    writeAttribute(clean, attr, attr.value, context);
   else context.warn();
 }
 
@@ -65,33 +91,27 @@ function copyKnownAttribute(clean: Element, attr: Attr, context: CopyContext): v
     context.warn();
     return;
   }
-  clean.setAttribute(
-    attr.name,
+  writeAttribute(
+    clean,
+    attr,
     attr.name === "font-family" ? renameElementFonts(value, context.fonts) : value,
+    context,
   );
-}
-
-function recordFragmentAttribute(clean: Element, attr: Attr, context: CopyContext): void {
-  const fragment = attr.value.startsWith("#") && context.ids.has(attr.value.slice(1));
-  const urls = rebindClipboardUrls(attr.value, context.ids) !== attr.value;
-  if (!fragment && !urls) return;
-  const after = clean.getAttribute(attr.name);
-  if (after !== null && after !== attr.value)
-    context.attributes.push({ name: attr.name, before: attr.value, after });
 }
 
 function copyAttribute(node: Element, clean: Element, attr: Attr, context: CopyContext): void {
   if (attr.name === "id") return;
   if (attr.name === "data-hf-n" && /^\d{1,6}$/.test(attr.value))
-    clean.setAttribute(attr.name, attr.value);
+    writeAttribute(clean, attr, attr.value, context);
   else if (attr.name === "style")
-    clean.setAttribute(
-      "style",
+    writeAttribute(
+      clean,
+      attr,
       sanitizeElementStyle(attr.value, context.ids, context.warn, context.fonts),
+      context,
     );
   else if (resourceAttribute(node, attr)) copyResource(node, clean, attr, context);
   else copyKnownAttribute(clean, attr, context);
-  recordFragmentAttribute(clean, attr, context);
 }
 
 function cleanElement(node: Element, context: CopyContext): Element | null {
@@ -159,7 +179,7 @@ export function prepareElementClipboard(
     ...elements.filter((el) => el.localName === "style").map((el) => el.textContent ?? ""),
   ].join("\n");
   const fonts = elementFontNames(cssSource, fontScope);
-  const attributes: ClipboardAttributeRewrite[] = [];
+  const attributes: CopyContext["attributes"] = [];
   const context = { output, ids, nodeIds, fonts, warn, attributes };
   for (const child of Array.from(template.content.childNodes)) copyNode(child, wrapper, context);
   if (!wrapper.firstChild) throw new Error("Element has no supported content");
@@ -171,7 +191,12 @@ export function prepareElementClipboard(
       `${style};position:relative!important;left:0px!important;top:0px!important;right:auto!important;bottom:auto!important;width:${payload.width}px!important;height:${payload.height}px!important;margin:0!important;`,
     );
   }
-  const css = sanitizeElementCss(cssSource, scope, ids, warn, fonts, attributes);
+  const writes = attributes.flatMap(({ node, ...reference }) => {
+    const after = node.getAttribute(reference.afterName!)!;
+    if (reference.name === reference.afterName && reference.before === after) return [];
+    return [{ ...reference, after, target: nodeSelector(node, wrapper) }];
+  });
+  const css = sanitizeElementCss(cssSource, scope, ids, warn, fonts, writes);
   if (css) {
     const style = output.createElement("style");
     style.textContent = css;

@@ -81,6 +81,18 @@ function attributeEdit(
   };
 }
 
+export function clipboardAttributeRewrites(
+  html: string,
+  renames: ReadonlyMap<string, string>,
+): ClipboardAttributeRewrite[] {
+  return scanHtmlOpeningTags(html).flatMap((tag) =>
+    tag.attributes.flatMap((attr) => {
+      const edit = attributeEdit(attr, renames);
+      return edit ? [edit.reference] : [];
+    }),
+  );
+}
+
 /** Rebind a clone's own references before insertion; destination styles and scripts stay untouched. */
 export function rebindClipboardReferences(
   html: string,

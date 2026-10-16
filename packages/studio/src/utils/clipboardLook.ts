@@ -1,5 +1,6 @@
 import { copyAnimationsInScript } from "@hyperframes/parsers/gsap-writer-acorn";
-import { rebindClipboardUrls } from "./clipboardReferences";
+import { clipboardAttributeRewrites, rebindClipboardUrls } from "./clipboardReferences";
+import { rebindClipboardSelector, type ClipboardAttributeRewrite } from "./clipboardSelectors";
 import { ID_ATTR_RE } from "./clipboardPayload";
 import { escapeRegex } from "./sourcePatcher";
 
@@ -28,6 +29,7 @@ export function carryLook(
   delta: number,
 ): string {
   let result = html;
+  const attributes = clipboardAttributeRewrites(html, renames);
   for (const [from, to] of renames) {
     result = result.replace(
       BLOCKS,
@@ -35,7 +37,7 @@ export function carryLook(
         scriptOpen !== undefined
           ? scriptOpen + copyAnimationsInScript(script, `#${from}`, `#${to}`, delta) + scriptClose
           : styleOpen !== undefined
-            ? styleOpen + withCopiedRules(css, from, to, renames) + styleClose
+            ? styleOpen + withCopiedRules(css, from, renames, attributes) + styleClose
             : block,
     );
   }
@@ -45,13 +47,13 @@ export function carryLook(
 function withCopiedRules(
   css: string,
   from: string,
-  to: string,
   renames: ReadonlyMap<string, string>,
+  attributes: readonly ClipboardAttributeRewrite[],
 ): string {
   const sheet = new CSSStyleSheet();
   sheet.replaceSync(css);
   const indent = css.match(/\n([ \t]*)\S/)?.[1] ?? "";
-  const copies = copiedCssRules(sheet.cssRules, from, to, indent, renames);
+  const copies = copiedCssRules(sheet.cssRules, from, indent, renames, attributes);
   if (copies.length === 0) return css;
   const body = css.trimEnd();
   return body + copies.join("") + css.slice(body.length);
@@ -64,16 +66,16 @@ function supportedCssGroup(rule: CSSRule): rule is CSSMediaRule | CSSSupportsRul
 function copiedCssRules(
   rules: CSSRuleList,
   from: string,
-  to: string,
   indent: string,
   renames: ReadonlyMap<string, string>,
+  attributes: readonly ClipboardAttributeRewrite[],
 ): string[] {
   const id = new RegExp(`#${escapeRegex(from)}(?![\\w-])`, "g");
   const excluded = new RegExp(`:not\\([^)]*#${escapeRegex(from)}(?![\\w-])`);
   return Array.from(rules).flatMap((rule) => {
     // Keep the same conditions when copying rules nested in a supported group.
     if (supportedCssGroup(rule)) {
-      const copies = copiedCssRules(rule.cssRules, from, to, indent + "  ", renames);
+      const copies = copiedCssRules(rule.cssRules, from, indent + "  ", renames, attributes);
       const header = rule.cssText.slice(0, rule.cssText.indexOf("{"));
       return copies.length ? [`\n${indent}${header}{${copies.join("")}\n${indent}}`] : [];
     }
@@ -83,7 +85,9 @@ function copiedCssRules(
       (selector) => selector.match(id) && !excluded.test(selector),
     );
     if (selectors.length === 0) return [];
-    const copied = selectors.map((selector) => selector.replace(id, `#${to}`)).join(", ");
+    const copied = selectors
+      .map((selector) => rebindClipboardSelector(selector, renames, attributes))
+      .join(", ");
     return [
       `\n${indent}${copied}${rebindClipboardUrls(rule.cssText.slice(rule.selectorText.length), renames)}`,
     ];

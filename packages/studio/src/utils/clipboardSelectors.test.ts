@@ -41,3 +41,26 @@ it("uses only recorded attribute writes and preserves unrelated predicates and s
   expect(rect.matches(rewritten)).toBe(true);
   expect(rewritten).toContain('[title="#paint"]');
 });
+
+it.each(['[*|href="#paint"]', "[*|href]", "[|href]", "[href]"])(
+  "preserves namespace normalization truth for %s",
+  (selector) => {
+    const before = document.createElementNS("http://www.w3.org/2000/svg", "use");
+    before.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", "#paint");
+    const after = document.createElementNS("http://www.w3.org/2000/svg", "use");
+    after.setAttribute("href", "#copy-paint");
+    const rewritten = rebindClipboardSelector(selector, new Map(), [
+      { name: "xlink:href", afterName: "href", before: "#paint", after: "#copy-paint" },
+    ]);
+    expect(after.matches(rewritten)).toBe(selector === "[href]" ? false : before.matches(selector));
+  },
+);
+
+it("moves an explicit named-namespace predicate to the accepted output attribute name", () => {
+  const rewritten = rebindClipboardSelector('[xlink|href="#paint"]', new Map(), [
+    { name: "xlink:href", afterName: "href", before: "#paint", after: "#copy-paint" },
+  ]);
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", "#copy-paint");
+  expect(rewritten).toContain('[href="#copy-paint"]');
+});
