@@ -168,7 +168,6 @@ export function insertTimelineAssetIntoSource(
   const lineStart = source.lastIndexOf("\n", match.index);
   const leadingWhitespace = source.slice(lineStart + 1, match.index).match(/^(\s*)/)?.[1] ?? "";
   const childIndent = leadingWhitespace + "  ";
-  // Clipboard markup can contain significant newlines inside text nodes.
   const indented = options.preserveWhitespace
     ? assetHtml
     : assetHtml
