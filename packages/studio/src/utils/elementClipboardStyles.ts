@@ -93,14 +93,21 @@ function appendToSheet(
   return appendToExistingSheet(source, previous, previous.rawTextEnd, css);
 }
 
+function attributeValue(tag: HtmlOpeningTagSpan, name: string): string {
+  const attr = tag.attributes.find((candidate) => candidate.name === name);
+  return attr?.kind === "value" ? decodeAuthoredAttribute(attr.value) : "";
+}
+
 function appendToExistingSheet(
   source: string,
   previous: HtmlOpeningTagSpan,
   end: number,
   css: string,
 ): string {
+  if (attributeValue(previous, "title"))
+    throw new Error("Cannot paste styled content into a titled stylesheet.");
   const media = previous.attributes.find((attr) => attr.name === "media");
-  const condition = media?.kind === "value" ? decodeAuthoredAttribute(media.value).trim() : "";
+  const condition = attributeValue(previous, "media").trim();
   const normalized = appendElementCss(source.slice(previous.end, end), condition, css);
   let opening = source.slice(previous.start, previous.end);
   if (media && condition && condition.toLowerCase() !== "all")

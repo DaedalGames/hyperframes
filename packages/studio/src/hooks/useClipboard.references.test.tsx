@@ -285,6 +285,28 @@ it.each(["head", "body"])(
   },
 );
 
+it.each(['title="night"', 'TITLE="n&#105;ght"', 'title=""'])(
+  "handles a selected titled stylesheet explicitly: %s",
+  async (attribute) => {
+    const view = mountSvg('<div class="card">Text</div>', ".card{color:red}");
+    const before = SOURCE.replace(
+      "<body>",
+      `<head><style title="day">.unrelated{color:blue}</style><style ${attribute}>.unrelated{color:green}</style></head><body>`,
+    );
+    view.files["index.html"] = before;
+    view.navigate("index.html");
+    await view.api().handlePaste();
+    if (attribute === 'title=""') {
+      expect(view.doc().querySelector(".clip")).not.toBeNull();
+      expect(view.records).toHaveLength(1);
+    } else {
+      expect(view.files["index.html"]).toBe(before);
+      expect(view.records).toHaveLength(0);
+      expect(view.toasts.some((message) => message.includes("titled stylesheet"))).toBe(true);
+    }
+  },
+);
+
 it("does not add matching ancestor context while preserving sibling styles", async () => {
   const view = mountSvg(
     '<div class="card"><span>Text</span></div>',
