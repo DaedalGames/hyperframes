@@ -69,7 +69,7 @@ A film visits several worlds, each with its own background, light and scale (a d
 - Show, don't list: no bullet slides or three-card rows. When similar things repeat, each gets its own idea and layout.
 - Real numbers only, from the source. The first line is never "Introducing", "Meet" or the logo; after the pain, "Introducing X" is fine. Never "unlock", "seamless", "supercharge", "game-changer", "revolutionize", "effortless", or "in seconds" unless measured.
 - Read the lines alone: a stranger gets the pitch. Watch the pictures alone: they tell the same story.
-- A launch film is music only by default; narrate an explainer or when asked, and never put the spoken sentence on screen word for word.
+- No voiceover unless the request or the source calls for one; then the screen never repeats the spoken sentence word for word. Without a voice, large titles and the product's own text carry the words.
 
 ## 7. The brand
 
