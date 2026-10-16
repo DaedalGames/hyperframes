@@ -11,6 +11,7 @@ export interface ClipboardAttributeRewrite {
   name: string;
   afterName?: string;
   target?: string;
+  element?: Element;
   before: string | null;
   after: string;
 }
@@ -44,12 +45,37 @@ function attributeMatches(parsed: Predicate, attributeName: string): boolean {
   return attributeName === name;
 }
 
-function valueMatches(parsed: Predicate, value: string): boolean {
+const DEFAULT_CASE_MATCHING = new WeakMap<Element, Map<string, boolean>>();
+
+function defaultInsensitive(element: Element | undefined, name: string): boolean {
+  if (!element) return false;
+  let attributes = DEFAULT_CASE_MATCHING.get(element);
+  if (!attributes) {
+    attributes = new Map();
+    DEFAULT_CASE_MATCHING.set(element, attributes);
+  }
+  const cached = attributes.get(name);
+  if (cached !== undefined) return cached;
+  const probe = element.ownerDocument.createElementNS(element.namespaceURI, element.localName);
+  probe.setAttribute(name, "aA");
+  const insensitive = probe.matches(`[${escapeCssIdentifier(name)}="aa"]`);
+  attributes.set(name, insensitive);
+  return insensitive;
+}
+
+function valueMatches(
+  parsed: Predicate,
+  value: string,
+  reference: ClipboardAttributeRewrite,
+  name: string,
+): boolean {
   if (!("operator" in parsed)) return true;
-  const fold =
-    parsed.flag?.toLowerCase() === "i"
-      ? (text: string) => text.replace(/[A-Z]/g, (char) => char.toLowerCase())
-      : (text: string) => text;
+  const insensitive = parsed.flag
+    ? parsed.flag.toLowerCase() === "i"
+    : defaultInsensitive(reference.element, name);
+  const fold = insensitive
+    ? (text: string) => text.replace(/[A-Z]/g, (char) => char.toLowerCase())
+    : (text: string) => text;
   return MATCHES[parsed.operator](fold(value), fold(parsed.value));
 }
 
@@ -90,12 +116,12 @@ function predicateChanges(parsed: Predicate, references: readonly ClipboardAttri
       (reference) =>
         reference.before !== null &&
         attributeMatches(parsed, reference.name) &&
-        valueMatches(parsed, reference.before),
+        valueMatches(parsed, reference.before, reference, reference.name),
     );
     const after = group.some(
       (reference) =>
         attributeMatches(parsed, reference.afterName ?? reference.name) &&
-        valueMatches(parsed, reference.after),
+        valueMatches(parsed, reference.after, reference, reference.afterName ?? reference.name),
     );
     if (before !== after)
       (before ? include : exclude).add(

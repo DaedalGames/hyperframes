@@ -537,3 +537,39 @@ it.each(["", ' type="button"'])(
     expect(view.records[0]!.files["index.html"]!.after).toBe(view.files["index.html"]);
   },
 );
+
+it.each([
+  ...Object.entries({
+    "=": "button",
+    "^=": "but",
+    "$=": "ton",
+    "*=": "utt",
+    "~=": "button",
+    "|=": "button",
+  }).map(([operator, value]) => ({ operator, value, type: "BUTTON", flag: "" })),
+  { operator: "^=", value: "but", type: "button", flag: "" },
+  { operator: "^=", value: "but", type: "BUTTON", flag: " i" },
+])(
+  "preserves HTML type default matching: $type $operator $value$flag",
+  async ({ operator, value, type, flag }) => {
+    const view = mount({
+      html: `<div><button type="${type}">Text</button></div>`,
+      css: `button[type${operator}"${value}"${flag}]{color:red}`,
+      width: 100,
+      height: 50,
+      warnings: [],
+    });
+    await view.api().handlePaste();
+    const id = view.doc().querySelector(".clip")!.id;
+    view.select(id);
+    await view.api().handleDuplicate();
+    for (const doc of [view.doc(), view.preview()]) {
+      for (const clip of doc.querySelectorAll(".clip")) {
+        const button = clip.querySelector("button")!;
+        expect(button.getAttribute("type")).toBe("button");
+        expect(matchingDeclarations(doc, button, "color")).toContain("red");
+      }
+    }
+    expect(view.records[1]!.files["index.html"]!.after).toBe(view.files["index.html"]);
+  },
+);

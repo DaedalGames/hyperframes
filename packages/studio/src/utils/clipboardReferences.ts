@@ -101,7 +101,7 @@ export function clipboardAttributeRewrites(
     }));
     if (!attributes.some((attr) => attr.before !== attr.after)) return [];
     const target = clipboardNodeSelector(node, renames);
-    return attributes.map((attr) => ({ ...attr, target }));
+    return attributes.map((attr) => ({ ...attr, target, element: node }));
   });
 }
 

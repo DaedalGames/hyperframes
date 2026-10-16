@@ -87,3 +87,53 @@ it.each(["[style]", '[style=""]', ":not([style])", ':not([style=""])'])(
     }
   },
 );
+
+it.each([
+  {
+    namespace: "http://www.w3.org/1999/xhtml",
+    tag: "button",
+    name: "type",
+    before: "BUTTON",
+    after: "button",
+    value: "but",
+  },
+  {
+    namespace: "http://www.w3.org/1999/xhtml",
+    tag: "div",
+    name: "class",
+    before: "UPPER",
+    after: "upper",
+    value: "upp",
+  },
+  {
+    namespace: "http://www.w3.org/2000/svg",
+    tag: "feFuncA",
+    name: "type",
+    before: "IDENTITY",
+    after: "identity",
+    value: "iden",
+  },
+])(
+  "preserves default value matching in $namespace $tag $name",
+  ({ namespace, tag, name, before, after, value }) => {
+    const original = document.createElementNS(namespace, tag);
+    original.setAttribute(name, before);
+    const output = document.createElementNS(namespace, tag);
+    output.setAttribute(name, after);
+    output.id = "context-node";
+    const selector = `[${name}^="${value}"]`;
+    const rewritten = rebindClipboardSelector(selector, new Map(), [
+      { name, before, after, element: output, target: "#context-node" },
+    ]);
+    expect(output.matches(rewritten)).toBe(original.matches(selector));
+  },
+);
+
+it("retains an explicit sensitive override when native s syntax is unavailable", () => {
+  const element = document.createElement("button");
+  const rewritten = rebindClipboardSelector('[type^="but" s]', new Map(), [
+    { name: "type", before: "BUTTON", after: "button", element, target: "#context-node" },
+  ]);
+  expect(rewritten).toContain(":where(:not(");
+  expect(rewritten).toContain('[type="button" s]');
+});

@@ -214,7 +214,7 @@ export function prepareElementClipboard(
   );
   const writes = finalAttributes.flatMap(({ node, ...reference }) => {
     const target = targets.get(node);
-    return target ? [{ ...reference, target }] : [];
+    return target ? [{ ...reference, target, element: node }] : [];
   });
   const css = sanitizeElementCss(cssSource, scope, ids, warn, fonts, writes);
   if (css) {
