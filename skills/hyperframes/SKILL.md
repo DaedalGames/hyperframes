@@ -43,6 +43,7 @@ Studio edits the tags you write.
 ## Work loop
 
 - An existing project: `npx hyperframes timeline --json` shows what plays when. Before changing anything, `npx hyperframes history --since mine --who <you>` shows what the person changed since your last turn; build on it (`/hyperframes-cli`, Project history).
+- A new film over ~15 s that tells a story: three storylines first (`references/story.md`); the person picks unless they asked for the file or no stops.
 - After your last edit, run `npx hyperframes check --json` and fix every error, then `npx hyperframes snapshot` the moments you changed (`--at`, `--range START,END` or `--composition <id>`) and look at the frames before you reply.
 - Render when the person approves the Studio preview, asks for the file, or asks you to work through without stopping; then render after your own check and snapshots pass. Otherwise stop at the preview and wait.
 
@@ -58,13 +59,14 @@ Call it "the HyperFrames desktop app", never "Studio"; offer it as the better wa
 
 | Read | When |
 | --- | --- |
-| `references/format.md` | Scenes, nesting, `data-*` attributes, variables, adding media, linked clips, layout opt-outs, lint errors |
+| `references/format.md` | Scenes, nesting, `data-*` attributes, variables, media, linked clips, layout opt-outs, lint errors |
 | `references/runtimes.md` | GSAP facts that bite, or CSS, WAAPI, Lottie, anime.js, Three.js, canvas |
-| `references/motion.md` | Writing any motion: timings, eases, blur, cuts, title entrances; punch-ins, speed changes, holds; motion that stutters; seeing motion |
+| `references/motion.md` | Any motion: timings, eases, blur, cuts, titles; punch-ins, speed changes, holds; stutter; seeing motion |
 | `references/look.md` | Colours, type and style: a brand, a project `frame.md`, or one of 13 presets in `assets/frame-presets/` |
 | `references/captions.md` | Captions: transcripts, word groups, fitting, placement |
-| `references/film.md` | A whole film from a website, a topic, a pull request, a music track, or a short motion piece |
+| `references/story.md` | A film over ~15 s that tells a story (launch, explainer, PR): three storylines, hook, beats |
+| `references/film.md` | Measured facts: films from a website, PR or music; maps and real places; kinetic type |
 | `references/overlays.md` | Designed cards and lower thirds over talking-head footage |
-| `references/storyboard.md` | A storyboard: stills on a board the person approves before you animate |
+| `references/storyboard.md` | A storyboard: stills the person approves before you animate |
 
 Decks: `/slideshow`. Remotion source: `/remotion-to-hyperframes`. Figma designs, tokens, or storyboard frames as reconstructed motion: `/figma`. Installing or refreshing skills, and upgrading a project's pinned CLI: `references/skill-lifecycle.md`.

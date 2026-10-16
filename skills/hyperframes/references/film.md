@@ -1,6 +1,6 @@
 # Whole films
 
-What is specific to HyperFrames, or was measured on shipped films, when one video is made from a website, a topic, a pull request, a music track or a short motion brief. Story, structure and taste are yours. Motion craft is in `motion.md`, look in `look.md`, captions in `captions.md`.
+What is specific to HyperFrames, or was measured on shipped films, when one video is made from a website, a topic, a pull request, a music track or a short motion brief. The story comes first, from `story.md`: the one thing, three storylines, the hook. Motion craft is in `motion.md`, look in `look.md`, captions in `captions.md`.
 
 ## Script and pacing
 
@@ -34,9 +34,14 @@ What is specific to HyperFrames, or was measured on shipped films, when one vide
 - A move that must land on a hit starts 40–190 ms early; a reaction starts 0–45 ms after. The hit itself is a 0 ms `tl.set`: easing a hit kills it. Scenes tile the track with no gaps.
 - A word meant to be read holds at least one beat. Any single treatment goes stale after about 6 s: lengthen a section with a hold or a new treatment, never by slowing tweens. On rhythmic sections give footage one clip per strong beat; on calm ones one slow push from 1.0 to 1.08.
 
+## Maps and real places
+
+- A real place (a city, a building, a route, a zoom from the globe to a street) is shown on real imagery. Vector outlines from Natural Earth or GeoJSON read as a diagram and lose the place; keep them for borders and labels drawn on top.
+- Live tiles change between renders, so bake the camera move to video with `scripts/bake-basemap.mjs` (MapLibre over Esri satellite or Carto tiles; writes an all-intra MP4 and `<NAME>-coords.json`). `--help` lists its settings (`STYLE=satellite`, `CENTER`, `ZSTART`/`ZEND`, `PITCH`, `DUR`); it needs network for the tiles, so bake once and keep the MP4. Draw borders, pins and labels as a live SVG from those coordinates, animating them only while the camera holds.
+- Credit the imagery on screen ("Esri, Maxar, Earthstar Geographics" or "© CARTO, © OpenStreetMap").
+
 ## Short motion pieces
 
 - Kinetic type takes 3–7 English words or 4–12 Chinese characters per scene. A count-up runs 1.2–1.6 s, then holds, landing on a downbeat or a hard stop.
 - A highlighter that wraps across lines: tween a custom property on a `background-size` band with `box-decoration-break: clone`. `getTotalLength()` can return 0 before layout; give line draw-ons a fallback.
 - A point in an image guessed directly misses by 16–24% of the frame. `scripts/locate.mjs` narrows it with a numbered 9×9 grid, then 6×6 on the crop, then a check render (about 2% error).
-- Maps on real imagery: live tiles change between renders, so bake them to video with `scripts/bake-basemap.mjs` (MapLibre over Esri or Carto tiles; writes an all-intra MP4 and `<NAME>-coords.json`) and draw borders as a live SVG from those coordinates, animating it only while the camera holds. Credit the imagery on screen ("Esri, Maxar, Earthstar Geographics" or "© CARTO, © OpenStreetMap").
