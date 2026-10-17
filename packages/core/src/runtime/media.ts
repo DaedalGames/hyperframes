@@ -331,7 +331,7 @@ function steeredVideoRate(el: HTMLMediaElement, offset: number, baseRate: number
   return baseRate * (1 + direction * VIDEO_STEER);
 }
 
-export type MediaResyncReason = "hard" | "strict" | "force";
+export type MediaResyncReason = "hard" | "strict";
 
 // fallow-ignore-next-line complexity
 export function syncRuntimeMedia(params: {
@@ -637,9 +637,10 @@ export function syncRuntimeMedia(params: {
         // only exists during render).
         const skipForInjectedVideo = el.tagName === "VIDEO" && !!findInjectedRenderFrame(el);
         if (!skipForInjectedVideo) {
-          // A clip's first tick is its initial placement, not a resync.
-          if (el.tagName === "VIDEO" && playing && !firstTickOfClip) {
-            params.onResync?.(el, drift, hardSync ? "hard" : strictSync ? "strict" : "force");
+          // A clip's first tick is its initial placement and a forced tick is the transport's own
+          // move (seek, play, loop); only drift the video made by itself is a resync.
+          if (el.tagName === "VIDEO" && playing && !firstTickOfClip && !params.forceSync) {
+            params.onResync?.(el, drift, hardSync ? "hard" : "strict");
           }
           try {
             el.currentTime = relTime;
