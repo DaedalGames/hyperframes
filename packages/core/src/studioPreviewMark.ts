@@ -1,6 +1,6 @@
 export const STUDIO_PREVIEW_MARK_META = "hyperframes-studio-preview";
-/** Media deferral without the preview's image skipping: a capture's still loads only the media near its moment. */
-export const DEFER_MEDIA_META = "hyperframes-defer-media";
+/** The mark's content: Studio's own preview, or a capture build (a still shot right after a seek). */
+export const STUDIO_PREVIEW_MARK = { preview: "preview", capture: "capture" } as const;
 export const STUDIO_PREVIEW_UPCOMING_ATTR = "data-hf-upcoming";
 export const STUDIO_PREVIEW_LAZY_ATTR = "data-hf-preview-lazy";
 export const STUDIO_PREVIEW_ERRORS = "__hfPreviewErrors";
@@ -21,8 +21,14 @@ export function applyAuthoredTiming(
   el.removeAttribute(RUNTIME_STAMPED_ATTR);
 }
 
-/** Whether `doc` loads media only near the playhead: Studio's preview, or a capture build that asks for that alone. */
+const markOf = (doc: Document) =>
+  doc.querySelector(`meta[name="${STUDIO_PREVIEW_MARK_META}"]`)?.getAttribute("content") ?? null;
+
+/** Whether `doc` loads media only near the playhead: any marked page, the preview or a capture build. */
 export const defersMedia = (doc: Document): boolean =>
-  doc.querySelector(
-    `meta[name="${STUDIO_PREVIEW_MARK_META}"], meta[name="${DEFER_MEDIA_META}"]`,
-  ) !== null;
+  doc.querySelector(`meta[name="${STUDIO_PREVIEW_MARK_META}"]`) !== null;
+
+/** Whether `doc` skips hidden clips' images: the preview only (a mark without content is one); a capture keeps
+ * every image eager, so a still right after a seek never shows a scene before its images. */
+export const skipsImagesOfHiddenClips = (doc: Document): boolean =>
+  defersMedia(doc) && markOf(doc) !== STUDIO_PREVIEW_MARK.capture;

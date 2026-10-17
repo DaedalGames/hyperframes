@@ -14,7 +14,7 @@ import {
   type BundleOptions,
 } from "@hyperframes/core/compiler";
 import {
-  DEFER_MEDIA_META,
+  STUDIO_PREVIEW_MARK,
   STUDIO_PREVIEW_MARK_META,
   STUDIO_PREVIEW_ERRORS,
 } from "@hyperframes/core/studio-preview-mark";
@@ -321,13 +321,16 @@ function previewVariablesFromRequest(rawVariables: string | undefined):
   return { raw: rawVariables, values: parse.values };
 }
 
-/** Captures screenshot right after a seek, so they get every image eager and no preview mark; their media still
+/** Captures screenshot right after a seek, so they get every image eager and the capture mark: their media still
  * loads only near the moment shot, or a long film's still would load every clip it has. */
 export const PREVIEW_CAPTURE_PARAM = "hf-capture";
 
 // Studio's console capture attaches at the iframe's load; this keeps what was raised before it.
 const EARLY_ERRORS_SCRIPT = `<script>(function(){var seen=window.${STUDIO_PREVIEW_ERRORS}=[];
 addEventListener("error",function(e){seen.push(e.message||String(e))});})();</script>`;
+
+const previewMark = (content: string) =>
+  `<meta name="${STUDIO_PREVIEW_MARK_META}" content="${content}">`;
 
 function injectStudioPreviewAugmentations(
   html: string,
@@ -337,10 +340,10 @@ function injectStudioPreviewAugmentations(
   capture: boolean,
 ): string {
   const marked = capture
-    ? injectTagsAtHeadStart(html, `<meta name="${DEFER_MEDIA_META}">`)
+    ? injectTagsAtHeadStart(html, previewMark(STUDIO_PREVIEW_MARK.capture))
     : injectTagsAtHeadStart(
         lazyPreviewImages(html),
-        `<meta name="${STUDIO_PREVIEW_MARK_META}">${EARLY_ERRORS_SCRIPT}`,
+        `${previewMark(STUDIO_PREVIEW_MARK.preview)}${EARLY_ERRORS_SCRIPT}`,
       );
   return injectStudioMotionScript(
     injectMotionPathPluginIfNeeded(
