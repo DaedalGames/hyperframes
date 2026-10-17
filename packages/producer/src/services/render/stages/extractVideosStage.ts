@@ -72,6 +72,8 @@ import {
   type ExtractionFailureMetadataV1,
 } from "../extractionFailureMetadata.js";
 
+const SDR_FRAME_ROOT = "__hyperframes_video_frames_sdr";
+
 export interface ExtractVideosStageInput {
   projectDir: string;
   /** `join(workDir, "compiled")`; the directory the file server roots at. */
@@ -566,7 +568,7 @@ export async function runExtractVideosStage(
       {
         ...extractionOptions,
         toneMapHdrToSdr: true,
-        outputDir: join(compiledDir, "__hyperframes_video_frames_sdr"),
+        outputDir: join(compiledDir, SDR_FRAME_ROOT),
       },
       abortSignal,
       cfg,
@@ -577,6 +579,7 @@ export async function runExtractVideosStage(
     if (failure) throw failure;
     materializeExtractedFramesForCompiledDir(result.extracted, compiledDir, {
       materializeSymlinks,
+      frameRootName: SDR_FRAME_ROOT,
     });
     const byId = new Map(result.extracted.map((frames) => [frames.videoId, frames]));
     for (const video of videos) {
