@@ -40,6 +40,7 @@ export const DENSE_GEOMETRY_SEEK_OPTIONS = {
   animationFrameSettle: "none",
   waitForFontsMs: 0,
   settleMs: 0,
+  waitForVideoFrames: false,
 } as const;
 
 export interface SeekCompositionTimelineOptions {
@@ -49,18 +50,22 @@ export interface SeekCompositionTimelineOptions {
   animationFrameSettle?: "race" | "double" | "none";
   waitForFontsMs?: number;
   settleMs?: number;
+  waitForVideoFrames?: boolean;
 }
+
+type SeekBarrierOptions = { videoFrames: boolean };
 
 type CompositionPageFunction =
   | string
   | (() => unknown)
   | ((value: number) => unknown)
+  | ((barrier: SeekBarrierOptions) => unknown)
   | ((value: number, fallbackToBridgeAndTimelines: boolean, exactTime: boolean) => unknown);
 
 export interface CompositionEvaluationPage {
   evaluate(
     pageFunction: CompositionPageFunction,
-    value?: number,
+    value?: number | SeekBarrierOptions,
     fallbackToBridgeAndTimelines?: boolean,
     exactTime?: boolean,
   ): Promise<unknown>;
@@ -341,12 +346,15 @@ export async function seekCompositionTimeline(
     options.exactTime === true,
   );
 
-  await page.evaluate(async () => {
-    const waitForCompletion = Reflect.get(window, "__hfWaitForSeekCompletion");
-    if (typeof waitForCompletion === "function") {
-      await Reflect.apply(waitForCompletion, window, []);
-    }
-  });
+  await page.evaluate(
+    async (barrier: SeekBarrierOptions) => {
+      const waitForCompletion = Reflect.get(window, "__hfWaitForSeekCompletion");
+      if (typeof waitForCompletion === "function") {
+        await Reflect.apply(waitForCompletion, window, [barrier]);
+      }
+    },
+    { videoFrames: options.waitForVideoFrames !== false },
+  );
 
   const animationFrameSettle = options.animationFrameSettle ?? "race";
   if (animationFrameSettle === "race") {
