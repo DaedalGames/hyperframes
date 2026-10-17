@@ -1,7 +1,11 @@
 // fallow-ignore-file code-duplication
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HF_COLOR_GRADING_ATTR, serializeHfColorGrading } from "../colorGrading";
-import { DEFER_MEDIA_META, STUDIO_PREVIEW_LAZY_ATTR, STUDIO_PREVIEW_MARK_META } from "../studioPreviewMark";
+import {
+  DEFER_MEDIA_META,
+  STUDIO_PREVIEW_LAZY_ATTR,
+  STUDIO_PREVIEW_MARK_META,
+} from "../studioPreviewMark";
 import type { RuntimeTimelineLike } from "./types";
 
 function pausedTimeline(duration: number): RuntimeTimelineLike {
@@ -390,7 +394,9 @@ describe("runtime entry", () => {
     it("loads a capture build's media only near its moment, while every image of a hidden clip stays shown", async () => {
       spyLoad();
       // What a capture build carries instead of the preview mark.
-      document.head.appendChild(Object.assign(document.createElement("meta"), { name: DEFER_MEDIA_META }));
+      document.head.appendChild(
+        Object.assign(document.createElement("meta"), { name: DEFER_MEDIA_META }),
+      );
       const root = mountRoot();
       const [now, later] = videos(root, "0", "9");
       const hidden = withImage(timed(root, "div", "9"));
