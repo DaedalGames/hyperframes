@@ -26,9 +26,6 @@ export function audibleVideoNeedsWebAudio(fields: {
   );
 }
 
-/** The audio track a file plays (N in ffmpeg's `0:a:N`): the first audio stream whose codec ffprobe
- * can name. ffmpeg's own pick takes the most channels, which on an iPhone clip is the spatial track
- * ("unknown") that no ffmpeg decodes, and any command mapping it fails. */
 export function playableAudioTrack(
   streams: ReadonlyArray<{ codec_type?: string; codec_name?: string }>,
 ): number | undefined {

@@ -77,7 +77,6 @@ export interface MediaMetadata {
   hasAudio?: boolean;
   /** Video stream carries alpha (pix_fmt or the VP8/VP9 alpha_mode tag). */
   hasAlpha?: boolean;
-  /** `playableAudioTrack` of a probed video; absent when no audio stream plays. */
   audioTrack?: number;
   probeError?: string;
 }

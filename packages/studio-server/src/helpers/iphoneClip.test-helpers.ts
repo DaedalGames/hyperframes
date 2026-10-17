@@ -2,7 +2,6 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-/** An iPhone-shaped clip: a spatial-audio track ffmpeg cannot decode first, a 1 kHz AAC voice second. */
 export function writeIphoneClip(ffmpeg: string, dir: string, seconds = 1): string {
   const base = join(dir, "base.mov");
   execFileSync(ffmpeg, [

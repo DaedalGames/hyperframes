@@ -7,7 +7,6 @@ import type { AudioSignal } from "@hyperframes/core/audio-analysis";
 const run = promisify(execFile);
 
 export interface AudioStreamInfo {
-  /** N in ffmpeg's `0:a:N` (`playableAudioTrack`). */
   track: number;
   sampleRate: number;
   channels: number;

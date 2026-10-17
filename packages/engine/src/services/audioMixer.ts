@@ -168,7 +168,6 @@ function preparedAudioOutputArgs(
   headFilter: string | null,
 ): string[] {
   const channelFilter = metadata?.channels === 1 ? STEREO_CHANNEL_FILTER : null;
-  // The probed track, so an iPhone clip's undecodable spatial track is never read; ffmpeg's own pick without a probe.
   const input = metadata ? `0:a:${metadata.audioTrack}` : "0:a";
   const outputArgs = channelFilter ? [] : ["-ac", "2"];
   if (typeof playbackRate === "object") {

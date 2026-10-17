@@ -416,7 +416,6 @@ function stderrReason(stderrTail: string): string {
   return line ? `: ${line.replace(/[.!]+$/, "")}` : "";
 }
 
-/** The probed video plus its playable audio track; ffmpeg's own pick only when the probe failed. */
 function streamMaps(metadata: MediaMetadata): string[] {
   if (metadata.probeError) return [];
   const audio = metadata.audioTrack === undefined ? [] : ["-map", `0:a:${metadata.audioTrack}`];
