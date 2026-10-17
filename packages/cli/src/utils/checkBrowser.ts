@@ -25,13 +25,16 @@ import { loadBrowserScript } from "../commands/layout.js";
 import { normalizeErrorMessage } from "./errorMessage.js";
 import { ambiguousIssue, type MotionFrame } from "./motionAudit.js";
 import type { LayoutIssue, LayoutIssueCode, LayoutRect } from "./layoutAudit.js";
-import { serveStaticProjectHtml } from "./staticProjectServer.js";
 import { collectTweenRecords, findTweenTails, tweenTailMessage } from "./gsapTweenTails.js";
 import {
   decideMediaProxyEligibility,
   scanProjectMediaCodecMap,
 } from "@hyperframes/studio-server/media-codec-map";
-import { createVideoStillInjector, type VideoStillInjector } from "../commands/snapshot.js";
+import {
+  createVideoStillInjector,
+  serveCapturePage,
+  type VideoStillInjector,
+} from "../commands/snapshot.js";
 import { rectToBbox } from "./checkTypes.js";
 import type {
   AnchoredLayoutIssue,
@@ -166,14 +169,7 @@ export async function runBrowserCheck(
   const { bundleWithLocalizedFonts } = await import("./bundleWithLocalizedFonts.js");
   const html = await bundleWithLocalizedFonts(project.dir);
   const { files: hostile, findings: drafts } = await scanHostileVideoFiles(project.dir, html);
-  // No preview copies: with them on, the page would ask this server to transcode while check waits.
-  const server = await serveStaticProjectHtml(
-    project.dir,
-    html,
-    "Failed to bind check server",
-    [],
-    false,
-  );
+  const server = await serveCapturePage(project.dir, html, false, "Failed to bind check server");
   let currentTime = 0;
   let failure: { kind: "none" } | { kind: "failed"; error: unknown } = { kind: "none" };
   let chromeBrowser: import("puppeteer-core").Browser | undefined;
@@ -256,13 +252,7 @@ export async function captureFindingCrops(
   const { bundleWithLocalizedFonts } = await import("./bundleWithLocalizedFonts.js");
   const html = await bundleWithLocalizedFonts(project.dir);
   const { files: hostile } = await scanHostileVideoFiles(project.dir, html);
-  const server = await serveStaticProjectHtml(
-    project.dir,
-    html,
-    "Failed to bind check server",
-    [],
-    false,
-  );
+  const server = await serveCapturePage(project.dir, html, false, "Failed to bind check server");
   let chromeBrowser: import("puppeteer-core").Browser | undefined;
   const written: string[] = [];
   let failure: { kind: "none" } | { kind: "failed"; error: unknown } = { kind: "none" };

@@ -44,7 +44,8 @@ const mocks = vi.hoisted(() => ({
   >(async () => ({})),
 }));
 
-vi.mock("../commands/snapshot.js", () => ({
+vi.mock("../commands/snapshot.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../commands/snapshot.js")>()),
   createVideoStillInjector: vi.fn(async () => ({ injectAt: mocks.injectAt })),
 }));
 
