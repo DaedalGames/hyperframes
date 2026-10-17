@@ -66,7 +66,14 @@ async function runFfprobe(
   }
 
   const command = getFfprobeBinary();
-  const args = ["-v", "error", ...urlInputArgs(filePath), ...argsWithoutInput, "--", filePath];
+  const args = [
+    "-v",
+    "error",
+    ...urlInputArgs(filePath, { tool: "ffprobe" }),
+    ...argsWithoutInput,
+    "--",
+    filePath,
+  ];
   const proc = spawn(command, args, {
     // Nothing is ever written to the child's stdin; leaving it as a pipe is
     // what lets a stdin-reading invocation block indefinitely.
