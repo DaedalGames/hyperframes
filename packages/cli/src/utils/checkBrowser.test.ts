@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // fallow-ignore-file code-duplication
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   openSettledCompositionPage,
   type OpenSettledCompositionPageOptions,
@@ -698,8 +698,8 @@ describe("videos the browser cannot decode", () => {
     await check();
     expect(mocks.injectAt).toHaveBeenCalledWith(5, expect.any(Function));
     const only = mocks.injectAt.mock.calls[0]![1]!;
-    expect(only(join(PROJECT.dir, "clip.mp4"))).toBe(true);
-    expect(only(join(PROJECT.dir, "plain.mp4"))).toBe(false);
+    expect(only(resolve(PROJECT.dir, "clip.mp4"))).toBe(true);
+    expect(only(resolve(PROJECT.dir, "plain.mp4"))).toBe(false);
   });
 
   it("names a frame it could not paint instead of passing it", async () => {
