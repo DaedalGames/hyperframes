@@ -94,6 +94,8 @@ export interface LockedRenderConfig {
    * before this field existed.
    */
   variables?: Record<string, unknown>;
+
+  stitchMp4?: true;
 }
 
 export interface CompositionMetadataJson {

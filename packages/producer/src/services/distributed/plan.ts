@@ -54,6 +54,8 @@ import {
   type RenderStrictness,
 } from "../renderOrchestrator.js";
 import { closeFileServerSafely } from "../fileServer.js";
+import { padOrTrimAudioToVideoFrameCount } from "../render/audioPadTrim.js";
+import { encoderFailureError } from "../render/encoderInterruption.js";
 import { runAudioStage } from "../render/stages/audioStage.js";
 import { runCompileStage } from "../render/stages/compileStage.js";
 import {
@@ -305,6 +307,11 @@ export interface BuildLocalExecutionPlanOptions {
   readonly digests?: PlanFileDigests;
   /** Runs while the audio mixes, once `compiled/` and the video trees are final. */
   readonly whileAudioMixes?: () => Promise<void>;
+  /**
+   * mp4 chunks carry their own slice of the plan audio, and assemble indexes their samples under
+   * one faststart header. Ignored for other formats and with `cfr`, which re-encodes.
+   */
+  readonly stitchMp4?: boolean;
 }
 
 export function logPlanStage(log: ProducerLogger, stage: string, startedAt: number): void {
@@ -826,6 +833,7 @@ function buildLockedRenderConfig(input: {
   effectiveChunkSize: number;
   chunkCount: number;
   runtimeEnv: Record<string, string>;
+  stitchMp4: boolean;
 }): LockedRenderConfig {
   const { config, forceScreenshot, deviceScaleFactor, ffmpegVersion } = input;
   const { encoder, pixelFormat, preset } = resolveEncoderTriple(config);
@@ -860,7 +868,42 @@ function buildLockedRenderConfig(input: {
     chunkCount: input.chunkCount,
     runtimeEnv: input.runtimeEnv,
     variables: config.variables,
+    ...(input.stitchMp4 ? { stitchMp4: true } : {}),
   };
+}
+
+/** Only mp4 without `cfr` can skip the assemble-time join; `cfr` re-encodes the joined video. */
+function stitchesMp4(
+  config: Pick<DistributedRenderConfig, "format" | "cfr">,
+  options: Pick<BuildLocalExecutionPlanOptions, "stitchMp4">,
+): boolean {
+  return options.stitchMp4 === true && config.format === "mp4" && config.cfr !== true;
+}
+
+/**
+ * Stitched mp4 chunks carry their own audio, so the length and true-peak fix the
+ * assembler applies to a joined file happens here, once, before any chunk reads the audio.
+ */
+async function fitPlanAudioToFrames(
+  audioPath: string,
+  workDir: string,
+  totalFrames: number,
+  fps: number,
+  run: { signal?: AbortSignal; timeoutMs: number },
+): Promise<void> {
+  const fittedPath = join(workDir, "audio-fitted.m4a");
+  const result = await padOrTrimAudioToVideoFrameCount({
+    videoPath: audioPath,
+    probeVideoFrameInfo: async () => ({ frameCount: totalFrames, fpsNum: fps, fpsDen: 1 }),
+    audioPath,
+    outputPath: fittedPath,
+    signal: run.signal,
+    timeoutMs: run.timeoutMs,
+  });
+  if (!result.success) {
+    throw encoderFailureError("[plan] audio pad/trim failed", result);
+  }
+  renameSync(fittedPath, audioPath);
 }
 
 /**
@@ -1349,6 +1392,13 @@ export async function buildLocalExecutionPlan(
   if (audioResult.hasAudio && existsSync(audioResult.audioOutputPath)) {
     renameSync(audioResult.audioOutputPath, planAudioPath);
   }
+  const stitchMp4 = stitchesMp4(config, options);
+  if (stitchMp4 && existsSync(planAudioPath)) {
+    await fitPlanAudioToFrames(planAudioPath, workDir, totalFrames, config.fps, {
+      signal: abortSignal,
+      timeoutMs: cfg.ffmpegProcessTimeout,
+    });
+  }
 
   // ── Locked config ──
   const ffmpegVersion = await readFfmpegVersion();
@@ -1364,6 +1414,7 @@ export async function buildLocalExecutionPlan(
     effectiveChunkSize,
     chunkCount,
     runtimeEnv,
+    stitchMp4,
   });
 
   // ── Freeze the plan ──
