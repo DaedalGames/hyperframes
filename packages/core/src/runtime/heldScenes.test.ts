@@ -64,10 +64,32 @@ describe("scene scripts held until the playhead nears", () => {
     document.head.innerHTML = "";
     document.body.innerHTML = "";
     delete document.body.dataset.ran;
+    delete document.body.dataset.saw;
     window.__timelines = {};
     delete window.__player;
     delete (window as { __hyperframeRuntimeBootstrapped?: boolean })
       .__hyperframeRuntimeBootstrapped;
+  });
+
+  it("runs a far scene at boot when the compiler kept it eager for a near scene that reads it", async () => {
+    (globalThis as { CSS?: { escape?: (v: string) => string } }).CSS ??= {};
+    globalThis.CSS.escape ??= (v: string) => v;
+    document.head.appendChild(
+      Object.assign(document.createElement("meta"), { name: STUDIO_PREVIEW_MARK_META }),
+    );
+    document.body.innerHTML =
+      `<div data-composition-id="main" data-root="true" data-start="0" data-duration="60" data-width="1920" data-height="1080">` +
+      host("b", 30, ' data-hf-scene-eager="a reads it"') +
+      host("a", 0, ' data-hf-scene-eager="its script names b"') +
+      `</div>` +
+      sceneScript("b") +
+      `<script type="${AFTER_FONTS_SCRIPT_TYPE}" data-hf-scene="a">` +
+      `document.body.dataset.saw = String((document.body.dataset.ran || "").includes("b "));</script>`;
+    window.__timelines = { main: timeline(60) };
+    vi.resetModules();
+    await import("./entry");
+    await vi.waitFor(() => expect(window.__player).toBeDefined());
+    expect(document.body.dataset.saw).toBe("true");
   });
 
   it("runs a far scene's scripts once a seek comes within the lead, and nests it at its start", async () => {

@@ -3303,7 +3303,7 @@ ${["a", "b", "c", "d", "e", "f"].map((id, i) => `    <div data-composition-id="$
     const eager = (id: string) =>
       doc.querySelector(`div[data-hf-scene="${id}"]`)?.getAttribute("data-hf-scene-eager");
     expect(["a", "b", "c", "d", "e", "f"].map(eager)).toEqual([
-      null,
+      "d reads it",
       "its script uses window.__bSeq =",
       "its script uses documentElement",
       "its script names a",
@@ -3314,6 +3314,37 @@ ${["a", "b", "c", "d", "e", "f"].map((id, i) => `    <div data-composition-id="$
     expect(doc.querySelector('div[data-hf-scene="a"]')?.getAttribute("data-hf-scene-no-swap")).toBe(
       "its script uses getContext",
     );
+  });
+
+  it("keeps every scene an eager scene reads eager too, however far out it starts", async () => {
+    const scene = (id: string, script: string) =>
+      `<template id="${id}-template"><div data-composition-id="${id}"><p>${id}</p>
+  <script>${script}</script></div></template>`;
+    const dir = makeTempProject({
+      "index.html": `<!doctype html><html><head></head><body>
+  <div data-composition-id="main" data-width="1920" data-height="1080" data-duration="60">
+    <div data-composition-id="b" data-composition-src="compositions/b.html" data-start="30" data-duration="5"></div>
+    <div data-composition-id="a" data-composition-src="compositions/a.html" data-start="0" data-duration="5"></div>
+    <div data-composition-id="c" data-composition-src="compositions/c.html" data-start="40" data-duration="5"></div>
+    <div data-composition-id="d" data-composition-src="compositions/d.html" data-start="50" data-duration="5"></div>
+  </div></body></html>`,
+      "compositions/b.html": scene("b", 'window.__timelines["b"] = window.__timelines["c"];'),
+      "compositions/a.html": scene(
+        "a",
+        'document.title = String(Boolean(window.__timelines["b"]));',
+      ),
+      "compositions/c.html": scene("c", 'window.__timelines["c"] = gsap.timeline();'),
+      "compositions/d.html": scene("d", 'window.__timelines["d"] = gsap.timeline();'),
+    });
+    const doc = parseHTML(await bundleToSingleHtml(dir, { sceneParts: true })).document;
+    const eager = (id: string) =>
+      doc.querySelector(`div[data-hf-scene="${id}"]`)?.getAttribute("data-hf-scene-eager");
+    expect(["a", "b", "c", "d"].map(eager)).toEqual([
+      "its script names b",
+      "its script names c",
+      "b reads it",
+      null,
+    ]);
   });
 
   it("marks a scene whose own script leaves work running as not swappable, and only that scene", async () => {

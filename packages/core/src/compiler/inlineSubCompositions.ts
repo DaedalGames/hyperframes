@@ -754,7 +754,7 @@ export function inlineSubCompositions(
   };
 }
 
-/** A scene script that names another scene's composition id reads what that scene's script left. */
+/** A scene script that names another scene's composition id reads what that scene's script left: both run at boot. */
 function keepScenesNamingOthersEager(
   sceneHosts: Map<string, Element>,
   sceneLiterals: Map<string, Set<string>>,
@@ -766,14 +766,23 @@ function keepScenesNamingOthersEager(
       ),
     );
   const ids = new Map([...sceneHosts].map(([scene, host]) => [scene, idsOf(host)]));
-  for (const [scene, literals] of sceneLiterals) {
-    const host = sceneHosts.get(scene);
-    const own = ids.get(scene);
-    if (!host || !own || host.hasAttribute(SCENE_EAGER_ATTR)) continue;
-    const named = [...literals].find(
-      (literal) =>
-        literal && !own.has(literal) && [...ids.values()].some((other) => other.has(literal)),
-    );
-    if (named) host.setAttribute(SCENE_EAGER_ATTR, `its script names ${named}`);
+  const providersOf = (scene: string) => {
+    const own = ids.get(scene) ?? new Set<string>();
+    const literals = [...(sceneLiterals.get(scene) ?? [])].filter((l) => l && !own.has(l));
+    return [...ids].filter(([, other]) => literals.some((l) => other.has(l))).map(([id]) => id);
+  };
+  for (const [scene, host] of sceneHosts) {
+    const named = providersOf(scene)[0];
+    if (named && !host.hasAttribute(SCENE_EAGER_ATTR))
+      host.setAttribute(SCENE_EAGER_ATTR, `its script names ${named}`);
+  }
+  const eager = [...sceneHosts].filter(([, host]) => host.hasAttribute(SCENE_EAGER_ATTR));
+  for (const [reader] of eager) {
+    for (const provider of providersOf(reader)) {
+      const host = sceneHosts.get(provider);
+      if (!host || host.hasAttribute(SCENE_EAGER_ATTR)) continue;
+      host.setAttribute(SCENE_EAGER_ATTR, `${reader} reads it`);
+      eager.push([provider, host]);
+    }
   }
 }
