@@ -436,6 +436,7 @@ async function handlePlanV2(
     });
     const manifest: PlanV2Manifest = await primitive(projectDir, config, publisher, {
       stagingParentDir: work,
+      fragmentedMp4: true,
     });
 
     return {

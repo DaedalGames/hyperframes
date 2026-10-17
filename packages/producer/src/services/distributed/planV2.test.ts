@@ -55,6 +55,7 @@ function createV1Plan(
   root: string,
   options?: {
     audio?: boolean;
+    fragmentedMp4?: boolean;
     video?: boolean;
     omitVideoMetadata?: boolean;
     fpsNum?: number;
@@ -72,6 +73,7 @@ function createV1Plan(
 ): string {
   const {
     audio = false,
+    fragmentedMp4 = false,
     video = false,
     omitVideoMetadata = false,
     fpsNum = 30,
@@ -97,7 +99,10 @@ function createV1Plan(
       { index: 1, startFrame: 1, endFrame: 2 },
     ]),
   );
-  writeFileSync(join(planDir, "meta", "encoder.json"), "{}");
+  writeFileSync(
+    join(planDir, "meta", "encoder.json"),
+    fragmentedMp4 ? JSON.stringify({ fragmentedMp4: true }) : "{}",
+  );
   writeFileSync(join(planDir, "meta", "composition.json"), "{}");
   if (video) {
     const framesDir = join(planDir, "video-frames", "hero");
@@ -411,6 +416,18 @@ describe("Plan v2 manifest", () => {
     expect(chunk.some((artifact) => artifact.path === "compiled/index.html")).toBe(true);
     expect(assembler.some((artifact) => artifact.path === "audio.m4a")).toBe(true);
     expect(assembler.some((artifact) => artifact.path === "compiled/index.html")).toBe(false);
+  });
+
+  it("sends audio to every chunk and not the assembler when chunks are fragmented pieces", () => {
+    const root = tempPath("hf-plan-v2-fmp4-targets-");
+    const v1 = createV1Plan(root, { audio: true, fragmentedMp4: true });
+    const manifest = readPlanV2Manifest(createPlanV2FromV1(v1, join(root, "v2")).planDir);
+    for (const chunkIndex of [0, 1]) {
+      const chunk = listPlanV2ArtifactsForTarget(manifest, { role: "chunk", chunkIndex });
+      expect(chunk.some((artifact) => artifact.path === "audio.m4a")).toBe(true);
+    }
+    const assembler = listPlanV2ArtifactsForTarget(manifest, { role: "assembler" });
+    expect(assembler.some((artifact) => artifact.path === "audio.m4a")).toBe(false);
   });
 
   it("uses the runtime frame lookup to select exact video frames per chunk", () => {

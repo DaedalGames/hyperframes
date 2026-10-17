@@ -52,6 +52,7 @@ import {
 import { encoderFailureError } from "../render/encoderInterruption.js";
 import type { ChunkSliceJson, LockedRenderConfig } from "../render/stages/freezePlan.js";
 import { DISTRIBUTED_RENDER_CAPABILITIES, readPlanProtocolV1 } from "./planProtocol.js";
+import { concatenatePieces } from "./fmp4Piece.js";
 import { validatePlanV2MaterializedTarget } from "./planV2.js";
 import type { DistributedFormat } from "./shared.js";
 
@@ -101,9 +102,8 @@ export function cfrRateControlArgs(locked: CfrRateControlSource): string[] {
  *   png-sequence each entry is a path to a directory of frames.
  * @param audioPath — `<planDir>/<MIXED_AUDIO_FILENAME>` for mux'd formats. Pass `null`
  *   when the composition has no audio (or `assemble` is being called for a
- *   format whose audio is muxed elsewhere). `assemble` always normalizes
- *   audio length against the assembled video's frame count when
- *   `audioPath` is non-null.
+ *   format whose audio is muxed elsewhere). Fragmented-mp4 pieces carry their
+ *   own audio; otherwise a non-null `audioPath` is normalized to the frame count.
  * @param outputPath — final on-disk output (file for mp4/mov; directory
  *   for png-sequence — created if missing).
  */
@@ -139,6 +139,16 @@ export async function assemble(
   if (plan.dimensions.format === "png-sequence") {
     // ── 2a. png-sequence: merge frame directories with global re-numbering
     return mergePngFrameDirs(chunkPaths, outputPath, plan.totalFrames, audioPath, start);
+  }
+
+  if (readsFragmentedPieces(planDir, cfr)) {
+    await concatenatePieces(chunkPaths, outputPath);
+    return {
+      outputPath,
+      durationMs: Date.now() - start,
+      framesEncoded: plan.totalFrames,
+      fileSize: statSync(outputPath).size,
+    };
   }
 
   // ── 2b. mp4 / mov / webm: join + audio mux + faststart in one pass ─────
@@ -379,6 +389,23 @@ async function runAssembleFfmpeg(
   }
 }
 
+function readEncoderJson(planDir: string): Partial<LockedRenderConfig> | null {
+  const encoderJsonPath = join(planDir, "meta", "encoder.json");
+  if (!existsSync(encoderJsonPath)) return null;
+  return JSON.parse(readFileSync(encoderJsonPath, "utf-8")) as Partial<LockedRenderConfig>;
+}
+
+/** Fragmented-mp4 chunks already carry their audio and join by byte concatenation. */
+function readsFragmentedPieces(planDir: string, cfr: boolean): boolean {
+  if (readEncoderJson(planDir)?.fragmentedMp4 !== true) return false;
+  if (cfr) {
+    throw new Error(
+      "[assemble] cfr=true cannot re-encode a plan whose mp4 chunks are fragmented pieces",
+    );
+  }
+  return true;
+}
+
 /**
  * The cfr re-encode hardcodes `-c:v libx264`: reject non-mp4 formats and h265
  * chunks (which it would silently transcode) before any ffmpeg runs.
@@ -391,13 +418,12 @@ function readCfrEncoder(planDir: string, format: DistributedFormat): CfrRateCont
         `already produce exact avg_frame_rate; cfr re-encode is not needed.`,
     );
   }
-  const encoderJsonPath = join(planDir, "meta", "encoder.json");
-  if (!existsSync(encoderJsonPath)) {
-    throw new Error(`[assemble] planDir missing meta/encoder.json: ${encoderJsonPath}`);
+  const encoderJson = readEncoderJson(planDir);
+  if (!encoderJson) {
+    throw new Error(
+      `[assemble] planDir missing meta/encoder.json: ${join(planDir, "meta", "encoder.json")}`,
+    );
   }
-  const encoderJson = JSON.parse(readFileSync(encoderJsonPath, "utf-8")) as CfrRateControlSource & {
-    encoder?: string;
-  };
   if (encoderJson.encoder === "libx265-software") {
     throw new Error(
       `[assemble] cfr=true is not yet supported with codec: "h265". The ` +

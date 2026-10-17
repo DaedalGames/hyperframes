@@ -93,6 +93,8 @@ export interface LockedRenderConfig {
    * before this field existed.
    */
   variables?: Record<string, unknown>;
+
+  fragmentedMp4?: true;
 }
 
 export interface CompositionMetadataJson {

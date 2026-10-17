@@ -138,6 +138,7 @@ export interface PlanV2WithPublisherOptions {
    * can avoid a second set of data blocks.
    */
   readonly stagingParentDir?: string;
+  readonly fragmentedMp4?: boolean;
 }
 
 export interface PlanV2MaterializationResult {
@@ -284,8 +285,11 @@ function resolveExtractedVideoOutputDir(planDir: string, videoId: string): strin
 function artifactTargets(
   path: string,
   videoDependencies: ReadonlyMap<string, readonly number[]> | null,
+  chunksCarryAudio: boolean,
 ): Pick<PlanV2Artifact, "chunks" | "assembler"> {
-  if (isPlanAudioArtifactPath(path)) return { chunks: [], assembler: true };
+  if (isPlanAudioArtifactPath(path)) {
+    return chunksCarryAudio ? { chunks: "all", assembler: false } : { chunks: [], assembler: true };
+  }
   if (path === "plan.json" || path === "meta/chunks.json" || path === "meta/encoder.json") {
     return { chunks: "all", assembler: true };
   }
@@ -533,9 +537,11 @@ function buildPlanV2Publication(executionPlanDir: string): PlanV2Publication {
   }
   validateExtractionCacheCompleteSentinels(executionPlanDir);
   const videoDependencyPlan = buildVideoChunkDependencies(executionPlanDir, dimensions);
+  const encoder = readJsonFile(join(executionPlanDir, "meta", "encoder.json"), "meta/encoder.json");
+  const chunksCarryAudio = isRecord(encoder) && encoder.fragmentedMp4 === true;
   for (const file of listFiles(executionPlanDir)) {
     if (isExtractionCacheCompleteSentinelPath(file.path)) continue;
-    const targets = artifactTargets(file.path, videoDependencyPlan.dependencies);
+    const targets = artifactTargets(file.path, videoDependencyPlan.dependencies, chunksCarryAudio);
     if (
       (file.path.startsWith("video-frames/") || file.path.startsWith("video-sources/")) &&
       targets.chunks !== "all" &&
@@ -682,6 +688,7 @@ export async function planV2WithPublisher(
     await buildLocalExecutionPlan(projectDir, config, stagingRoot, {
       executionPlanSizeLimitBytes: Number.MAX_SAFE_INTEGER,
       deferVideoExtraction: true,
+      fragmentedMp4: options.fragmentedMp4,
     });
     return await publishPlanV2FromExecutionPlan(stagingRoot, publisher);
   } catch (error) {
