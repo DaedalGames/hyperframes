@@ -155,7 +155,6 @@ export interface PlanV2MaterializationResult {
   readonly audioPath: string | null;
 }
 
-/** Artifact path to an http(s) URL a chunk reads in place instead of a local copy. */
 export type PlanV2RemoteSources = Readonly<Record<string, string>>;
 
 export interface PlanV2MaterializeOptions {
@@ -1042,7 +1041,6 @@ export function validatePlanV2MaterializedTarget(
   return readValidatedPlanV2Materialization(planDir, expectedTarget)?.manifest ?? null;
 }
 
-/** {@link validatePlanV2MaterializedTarget}, plus the sources the chunk reads by URL. */
 export function readValidatedPlanV2Materialization(
   planDir: string,
   expectedTarget: PlanV2MaterializationTarget,
