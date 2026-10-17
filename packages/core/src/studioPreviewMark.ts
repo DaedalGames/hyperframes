@@ -23,4 +23,6 @@ export function applyAuthoredTiming(
 
 /** Whether `doc` loads media only near the playhead: Studio's preview, or a capture build that asks for that alone. */
 export const defersMedia = (doc: Document): boolean =>
-  doc.querySelector(`meta[name="${STUDIO_PREVIEW_MARK_META}"], meta[name="${DEFER_MEDIA_META}"]`) !== null;
+  doc.querySelector(
+    `meta[name="${STUDIO_PREVIEW_MARK_META}"], meta[name="${DEFER_MEDIA_META}"]`,
+  ) !== null;
