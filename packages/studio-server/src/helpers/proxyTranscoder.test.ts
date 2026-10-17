@@ -3,6 +3,7 @@ import { EventEmitter, once } from "node:events";
 import {
   existsSync,
   mkdtempSync,
+  readFileSync,
   readdirSync,
   realpathSync,
   rmSync,
@@ -549,6 +550,38 @@ describe("resolveProxy", () => {
       const full = await resolveProxy(projectDir, sourcePath);
       expect(size(full)).toBe("1080,1920");
       expect(new Set([boxed, roomy, full]).size).toBe(3);
+    },
+    60_000,
+  );
+
+  it.skipIf(!realFfmpeg || !findFfBinary("ffprobe"))(
+    "proxies an iPhone clip with its AAC voice when its first audio track cannot be decoded",
+    async () => {
+      vi.resetModules();
+      vi.doUnmock("./mediaMetadata.js");
+      const { resolveProxy } = await import("./proxyTranscoder.js");
+      const projectDir = tmpProject();
+      const base = join(projectDir, "base.mov");
+      execFileSync(realFfmpeg!, [
+        ...["-v", "error", "-f", "lavfi", "-i", "testsrc=s=64x64:d=0.5"],
+        ...["-f", "lavfi", "-i", "anoisesrc=d=0.5,aformat=channel_layouts=4.0"],
+        ...["-f", "lavfi", "-i", "sine=d=0.5"],
+        ...["-map", "0:v", "-map", "1:a", "-map", "2:a", "-c:v", "libx264"],
+        ...["-c:a:0", "pcm_s16le", "-c:a:1", "aac", "-movflags", "+faststart", base],
+      ]);
+      // Apple's spatial-audio fourcc on the PCM track: ffmpeg reads it as "unknown" and cannot decode it.
+      const bytes = readFileSync(base);
+      bytes.write("apac", bytes.indexOf("sowt"), "latin1");
+      const sourcePath = join(projectDir, "iphone.mov");
+      writeFileSync(sourcePath, bytes);
+
+      const proxyPath = await resolveProxy(projectDir, sourcePath);
+      const streams = execFileSync(
+        findFfBinary("ffprobe")!,
+        ["-v", "error", "-show_entries", "stream=codec_name", "-of", "csv=p=0", "--", proxyPath],
+        { encoding: "utf8" },
+      );
+      expect(streams.trim().split("\n")).toEqual(["h264", "aac"]);
     },
     60_000,
   );
