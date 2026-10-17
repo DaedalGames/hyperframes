@@ -2926,6 +2926,7 @@ export function initSandboxRuntimeModular(): void {
     if (decisionEdgesRevision !== timingRevision) {
       decisionEdges.clear();
       decisionEdgesRevision = timingRevision;
+      return null;
     }
     const windowOptions = {
       timelineRegistry: window.__timelines ?? {},
