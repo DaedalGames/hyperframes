@@ -17,7 +17,11 @@ import {
   STUDIO_PREVIEW_MARK_META,
   STUDIO_PREVIEW_ERRORS,
 } from "@hyperframes/core/studio-preview-mark";
-import { PREVIEW_PROXY_BOX_PARAM, parsePreviewProxyBox } from "@hyperframes/core";
+import {
+  PREVIEW_PROXY_BOX_PARAM,
+  parsePreviewProxyBox,
+  type PreviewProxyBox,
+} from "@hyperframes/core";
 import { gsapCdnDist, motionPathPluginUrl } from "@hyperframes/core/gsap-cdn";
 import { findStartTags, injectTagsAtHeadStart } from "@hyperframes/core/compiler/html-document";
 import { isWithinProjectRoot } from "@hyperframes/parsers/asset-resolution";
@@ -50,6 +54,7 @@ import { injectPreviewVariables } from "../helpers/previewVariables.js";
 import {
   notePreviewPlaying,
   resolveProxy,
+  servedProxyName,
   waitForProxy,
   ProxyCapacityError,
   ProxyTranscodeError,
@@ -412,6 +417,20 @@ const withPreviewBase = (html: string, projectId: string) =>
     ? html
     : injectTagsAtHeadStart(html, `<base href="${previewBaseHref(projectId)}">`);
 
+/** A source the transcoder refuses fails again in `resolveProxy`, which answers for it. */
+function servedCopyName(
+  projectDir: string,
+  file: string,
+  variant: ProxyVariant,
+  box: PreviewProxyBox | undefined,
+): string | undefined {
+  try {
+    return servedProxyName(projectDir, file, variant, box);
+  } catch {
+    return undefined;
+  }
+}
+
 export function registerPreviewRoutes(api: Hono, adapter: PreviewApiAdapter): void {
   const previewCacheHeaders = (etag: string) => ({
     "Cache-Control": "private, no-cache",
@@ -681,7 +700,9 @@ export function registerPreviewRoutes(api: Hono, adapter: PreviewApiAdapter): vo
     }
 
     const tag = settledFileTag(stat);
-    const etag = tag && `"${tag}${proxyEtagSalt(proxyVariant, proxyBox)}"`;
+    // Salted by the file served, since a smaller box is served its source's larger copy.
+    const servedCopy = proxyVariant && servedCopyName(project.dir, file, proxyVariant, proxyBox);
+    const etag = tag && `"${tag}${proxyEtagSalt(proxyVariant, servedCopy)}"`;
     const cacheHeaders: Record<string, string> = isText
       ? { "Cache-Control": "no-store" }
       : { "Cache-Control": "private, no-cache", ...(etag && { ETag: etag }) };
