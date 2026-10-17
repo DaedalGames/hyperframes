@@ -4495,8 +4495,8 @@ export function initSandboxRuntimeModular(): void {
             // Rest only where the visibility pass hides the host.
             hiddenFrom:
               node.hasAttribute("data-start") && !isDiscoveryStamped(node)
-              ? start + (resolveDurationForElement(node) ?? Infinity)
-              : Infinity,
+                ? start + (resolveDurationForElement(node) ?? Infinity)
+                : Infinity,
             playbackStart: readElementPlaybackStart(node),
             rate: readElementRateSpec(node),
             timelineDuration: getTimelineDurationSeconds(timeline),
