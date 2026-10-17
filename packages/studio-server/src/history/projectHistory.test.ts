@@ -752,6 +752,23 @@ describe("openProjectHistory", () => {
     expect(redone.ok && read("a/c/b.html")).toBe("b");
   });
 
+  it("removes the folders an undone change created and keeps the ones that still hold a file", async () => {
+    const { history, projectDir, read } = await project({ "compositions/keep.html": "k" });
+    const turn = await change(history, agent, "Import media", () => {
+      mkdirSync(join(projectDir, "compositions", "x", "assets"), { recursive: true });
+      writeFileSync(join(projectDir, "compositions", "x", "index.html"), "x");
+      writeFileSync(join(projectDir, "compositions", "x", "assets", "a.png"), "png");
+    });
+
+    const undone = await history.undo(turn.id, { who: you });
+
+    expect(undone.ok).toBe(true);
+    expect(existsSync(join(projectDir, "compositions", "x"))).toBe(false);
+    expect(read("compositions/keep.html")).toBe("k");
+    const redone = await history.undo(undone.ok ? undone.entry!.id : "", { who: you });
+    expect(redone.ok && read("compositions/x/assets/a.png")).toBe("png");
+  });
+
   it("refuses an undo that would have to delete a file added since, and leaves the files alone", async () => {
     const { history, projectDir, read } = await project({ a: "file" });
     const turn = await change(history, agent, "Agent turn", () => {
@@ -844,7 +861,7 @@ describe("openProjectHistory", () => {
       try {
         const window = await history.beginWindow(agent, "Agent turn", { idleMs: 50 });
         writeFileSync(join(staged, "b.html"), "b");
-        for (const until = Date.now() + 150; Date.now() < until; );
+        for (const until = Date.now() + 150; Date.now() < until;);
         rmSync(join(projectDir, file));
         renameSync(staged, join(projectDir, "a"));
         await window.close();
@@ -1388,7 +1405,7 @@ describe("openProjectHistory", () => {
       const window = await history.beginWindow(agent, "Retitle", { idleMs: 50 });
       write("index.html", "A2");
       await history.claim(you, "Nothing", []); // a claim scans first: the agent's write is seen
-      for (const until = Date.now() + 150; Date.now() < until; );
+      for (const until = Date.now() + 150; Date.now() < until;);
       write("index.html", "A3");
       await history.claim(you, "Dragged Title", ["index.html"], {
         overwrote: { "index.html": fileContentVersion("A2") },

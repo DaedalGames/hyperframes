@@ -13,7 +13,7 @@ import {
   rmSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import { replaceFileAtomically } from "@hyperframes/core/atomic-file";
 import {
   DELETED_VERSION,
@@ -278,6 +278,20 @@ async function removeEmptyFolders(dir: string): Promise<void> {
   for (const entry of entries)
     if (entry.isDirectory()) await removeEmptyFolders(join(dir, entry.name));
   await rmdir(dir);
+}
+
+/** Removes the folders above deleted project file `path` while they are empty; the project root is never one. */
+async function removeEmptiedFolders(root: string, path: string): Promise<void> {
+  for (let at = posix.dirname(path); at !== "."; at = posix.dirname(at)) {
+    try {
+      await rmdir(join(root, at));
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") continue;
+      if (code === "ENOTEMPTY" || code === "EEXIST" || code === "ENOTDIR") return;
+      throw error;
+    }
+  }
 }
 
 /** The first file or link under folder `dir` (project path `at`) not in `deleted`; links are not followed. */
@@ -815,7 +829,7 @@ class Engine {
   /** Walks the server's writes back from `change.after` to the stored bytes they replaced. */
   overwrittenBy(change: HistoryFileChange, told: string | undefined, seen: Set<string>) {
     let found: string | undefined;
-    for (let hash = change.after; hash; ) {
+    for (let hash = change.after; hash;) {
       // A loop (X, Y, back to X) says nothing about what was there first: the client's word stands.
       if (seen.has(hash)) return undefined;
       seen.add(hash);
@@ -1105,6 +1119,7 @@ class Engine {
     this.windows.push(group);
     try {
       for (const [path, hash] of changes) await this.writeProjectFile(path, hash);
+      for (const path of deleted) await removeEmptiedFolders(this.dir, path);
       await this.sweep();
     } finally {
       this.windows = this.windows.filter((open) => open !== group);
