@@ -816,14 +816,17 @@ describe("extractDeferredVideoFramesForChunk", () => {
     }
   });
 
-  it("reads a source by URL in byte ranges and extracts the same frames", async () => {
-    // Lossless keeps the file large next to what one seek reads.
-    const big = join(root, "big.mp4");
+  // Lossless keeps the file large next to what one seek reads.
+  const big = join(root, "big.mp4");
+  const synthBig = () => {
+    if (existsSync(big)) return;
     const synth = spawnSync("ffmpeg", [
       ...["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=640x360:r=30:d=120"],
       ...["-c:v", "libx264", "-preset", "ultrafast", "-qp", "0", "-g", "30", big],
     ]);
     if (synth.status !== 0) throw new Error(synth.stderr.toString());
+  };
+  const bigVideos = () => {
     const videos = planVideos(false);
     const bigRange = {
       ...range,
@@ -833,17 +836,21 @@ describe("extractDeferredVideoFramesForChunk", () => {
     };
     videos.videos[0] = { ...videos.videos[0]!, end: 120, mediaStart: 0 };
     videos.extracted[0] = { ...videos.extracted[0]!, totalFrames: 3600, deferredRange: bigRange };
-    const slice = { index: 5, startFrame: 1800, endFrame: 1815 };
-    const extract = (outputRoot: string, remoteSources?: Record<string, string>) =>
-      extractDeferredVideoFramesForChunk({
-        planDir: root,
-        planVideos: videos,
-        slice,
-        fps: { num: 30, den: 1 },
-        outputRoot,
-        cfg: {},
-        remoteSources,
-      });
+    return videos;
+  };
+  const extract = (outputRoot: string, remoteSources?: Record<string, string>) =>
+    extractDeferredVideoFramesForChunk({
+      planDir: root,
+      planVideos: bigVideos(),
+      slice: { index: 5, startFrame: 1800, endFrame: 1815 },
+      fps: { num: 30, den: 1 },
+      outputRoot,
+      cfg: {},
+      remoteSources,
+    });
+
+  it("reads a source by URL in byte ranges and extracts the same frames", async () => {
+    synthBig();
     mkdirSync(join(root, "compiled"), { recursive: true });
     copyFileSync(big, join(root, "compiled", "big.mp4"));
     const server = await serveFileByRange(big);
@@ -858,6 +865,33 @@ describe("extractDeferredVideoFramesForChunk", () => {
       // What it sends past the seek is socket buffering (a few MB), not the file.
       expect(server.served.bytes).toBeLessThan(server.size / 3);
     } finally {
+      server.close();
+    }
+  }, 60_000);
+
+  it("never surfaces a signed URL's query when ffmpeg fails", async () => {
+    synthBig();
+    // ffmpeg echoes its arguments, the signed URL among them, the way a real read failure does.
+    const failingFfmpeg = join(root, "failing-ffmpeg");
+    writeFileSync(failingFfmpeg, '#!/bin/sh\necho "cannot read: $*" >&2\nexit 1\n', {
+      mode: 0o755,
+    });
+    const server = await serveFileByRange(big);
+    const originalFfmpeg = process.env.HYPERFRAMES_FFMPEG_PATH;
+    process.env.HYPERFRAMES_FFMPEG_PATH = failingFfmpeg;
+    try {
+      const url = `${server.url}?X-Amz-Signature=supersecret`;
+      const error = await extract(join(root, "big-failed"), { "compiled/big.mp4": url }).catch(
+        (caught: unknown) => caught,
+      );
+      expect(error).toBeInstanceOf(Error);
+      const { message, stack } = error as Error;
+      const text = JSON.stringify({ ...(error as object), message, stack });
+      expect(text).toContain("/video.mp4?…");
+      expect(text).not.toContain("supersecret");
+    } finally {
+      if (originalFfmpeg === undefined) delete process.env.HYPERFRAMES_FFMPEG_PATH;
+      else process.env.HYPERFRAMES_FFMPEG_PATH = originalFfmpeg;
       server.close();
     }
   }, 60_000);
