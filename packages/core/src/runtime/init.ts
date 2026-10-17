@@ -1392,8 +1392,7 @@ export function initSandboxRuntimeModular(): void {
       invalidateCompositionTimingCaches();
   };
 
-  // A preview copy is the runtime's own write: no clip moved, so only the media is synced, which
-  // puts the new file on the playhead even while paused.
+  // A copy swap moves no clip; the forced sync lands the new file on the playhead even while paused.
   setOwnMediaWrite((el, write) => {
     withoutOwnTimingRecords(el, write);
     state.mediaForceSyncNextTick = true;
