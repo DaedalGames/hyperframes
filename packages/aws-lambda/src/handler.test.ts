@@ -35,7 +35,7 @@ import type { AssembleEvent, LambdaEvent, PlanEvent, RenderChunkEvent } from "./
 import { handler, unwrapEvent } from "./handler.js";
 
 interface FakeS3Op {
-  kind: "download" | "upload";
+  kind: "download" | "upload" | "copy";
   uri: string;
   bytes?: number;
 }
@@ -104,8 +104,24 @@ class FakeS3Client {
       if (metadata) this.metadata.set(uri, metadata);
       return {};
     }
+    if (cmdName === "CreateMultipartUploadCommand") return { UploadId: "upload-1" };
+    if (cmdName === "UploadPartCopyCommand") {
+      const input = (command as { input: { CopySource: string; PartNumber: number } }).input;
+      const source = `s3://${decodeURI(input.CopySource)}`;
+      this.ops.push({ kind: "copy", uri: source });
+      this.parts.set(input.PartNumber, this.objects.get(source) ?? Buffer.alloc(0));
+      return { CopyPartResult: { ETag: `"part-${input.PartNumber}"` } };
+    }
+    if (cmdName === "CompleteMultipartUploadCommand") {
+      const parts = (command as { input: { MultipartUpload: { Parts: { PartNumber: number }[] } } })
+        .input.MultipartUpload.Parts;
+      this.objects.set(uri, Buffer.concat(parts.map((part) => this.parts.get(part.PartNumber)!)));
+      return {};
+    }
     return {};
   }
+
+  parts = new Map<number, Buffer>();
 }
 
 const tmpDirs: string[] = [];
@@ -721,6 +737,91 @@ describe("handler dispatch", () => {
     ).toBe(true);
   });
 
+  async function planFragmented(chunkCount: number) {
+    const tmpRoot = makeTmpRoot();
+    const s3 = new FakeS3Client();
+    s3.objects.set("s3://bucket/project.tar.gz", await makeMinimalProjectTar());
+    const assembleMock = mock(
+      async (_p: string, _c: readonly string[], _a: string | null, outputPath: string) => {
+        writeFileSync(outputPath, "LOCAL-JOIN");
+        return { outputPath, durationMs: 1, framesEncoded: 30 * chunkCount, fileSize: 10 };
+      },
+    );
+    const planV2WithPublisherMock = mock(
+      async (_dir: string, _config: unknown, publisher: PlanV2ArtifactPublisher) => {
+        const v1Dir = join(tmpRoot, "v1");
+        makeMinimalV1PlanDir(v1Dir, true, { chunkCount, fragmentedMp4: true });
+        return publishPlanV2FromExecutionPlan(v1Dir, publisher);
+      },
+    );
+    const deps = {
+      s3: s3 as unknown as import("@aws-sdk/client-s3").S3Client,
+      primitives: {
+        planV2WithPublisher:
+          planV2WithPublisherMock as unknown as typeof import("@hyperframes/producer/distributed").planV2WithPublisher,
+        assemble:
+          assembleMock as unknown as typeof import("@hyperframes/producer/distributed").assemble,
+      },
+      tmpRoot,
+      skipChromeResolution: true,
+    };
+    const planned = await handler(
+      {
+        Action: "plan",
+        ProjectS3Uri: "s3://bucket/project.tar.gz",
+        PlanOutputS3Prefix: "s3://bucket/renders/f/",
+        Config: { fps: 30, width: 640, height: 360, format: "mp4" },
+      },
+      deps,
+    );
+    if (!("PlanProtocol" in planned) || planned.PlanProtocol !== "v2")
+      throw new Error("expected v2");
+    const assemble = (chunkS3Uris: string[]) =>
+      handler(
+        {
+          Action: "assemble",
+          PlanV2ManifestS3Uri: planned.PlanV2ManifestS3Uri,
+          PlanV2ArtifactS3Prefix: planned.PlanV2ArtifactS3Prefix,
+          PlanHash: planned.PlanHash,
+          ChunkS3Uris: chunkS3Uris,
+          AudioS3Uri: null,
+          OutputS3Uri: "s3://bucket/renders/f/output.mp4",
+          Format: "mp4",
+        },
+        deps,
+      );
+    return { s3, assembleMock, assemble };
+  }
+
+  it("stitches fragmented pieces inside S3 without downloading them", async () => {
+    const { s3, assembleMock, assemble } = await planFragmented(3);
+    const pieces = [6 * 1024 * 1024, 6 * 1024 * 1024, 3].map((size, index) => {
+      const uri = `s3://bucket/renders/f/chunks/000${index}.mp4`;
+      s3.objects.set(uri, Buffer.alloc(size, index + 1));
+      return uri;
+    });
+    const result = await assemble(pieces);
+    const output = s3.objects.get("s3://bucket/renders/f/output.mp4")!;
+    expect(output.equals(Buffer.concat(pieces.map((uri) => s3.objects.get(uri)!)))).toBe(true);
+    expect(result).toMatchObject({ FramesEncoded: 90, FileSize: output.length });
+    expect(s3.ops.filter((op) => op.kind === "copy").map((op) => op.uri)).toEqual(pieces);
+    expect(s3.ops.some((op) => op.kind === "download" && pieces.includes(op.uri))).toBe(false);
+    expect(assembleMock).not.toHaveBeenCalled();
+  });
+
+  it("joins locally when a piece before the last is under S3's 5 MiB part minimum", async () => {
+    const { s3, assembleMock, assemble } = await planFragmented(3);
+    const pieces = [6 * 1024 * 1024, 1024, 3].map((size, index) => {
+      const uri = `s3://bucket/renders/f/chunks/000${index}.mp4`;
+      s3.objects.set(uri, Buffer.alloc(size, index + 1));
+      return uri;
+    });
+    await assemble(pieces);
+    expect(assembleMock).toHaveBeenCalledTimes(1);
+    expect(s3.ops.some((op) => op.kind === "copy")).toBe(false);
+    expect(s3.objects.get("s3://bucket/renders/f/output.mp4")!.toString()).toBe("LOCAL-JOIN");
+  });
+
   it("rejects unknown plan protocol values", async () => {
     const tmpRoot = makeTmpRoot();
     const s3 = new FakeS3Client();
@@ -894,14 +995,19 @@ async function makeMinimalPlanTar(): Promise<Buffer> {
   return rf(tarPath);
 }
 
-function makeMinimalV1PlanDir(dir: string, withAudio: boolean): void {
+function makeMinimalV1PlanDir(
+  dir: string,
+  withAudio: boolean,
+  options: { chunkCount?: number; fragmentedMp4?: boolean } = {},
+): void {
+  const chunkCount = options.chunkCount ?? 1;
   mkdirSync(join(dir, "meta"), { recursive: true });
   mkdirSync(join(dir, "compiled"), { recursive: true });
   writeFileSync(join(dir, "compiled", "index.html"), "<html>aws v2 fixture</html>");
   const planJson = {
     planHash: "a".repeat(64),
-    chunkCount: 1,
-    totalFrames: 30,
+    chunkCount,
+    totalFrames: 30 * chunkCount,
     dimensions: { fpsNum: 30, fpsDen: 1, width: 640, height: 360, format: "mp4" },
     ffmpegVersion: "6.0",
     producerVersion: "test",
@@ -910,9 +1016,18 @@ function makeMinimalV1PlanDir(dir: string, withAudio: boolean): void {
   writeFileSync(join(dir, "plan.json"), JSON.stringify(planJson));
   writeFileSync(
     join(dir, "meta", "chunks.json"),
-    JSON.stringify([{ index: 0, startFrame: 0, endFrame: 30 }]),
+    JSON.stringify(
+      Array.from({ length: chunkCount }, (_, index) => ({
+        index,
+        startFrame: index * 30,
+        endFrame: (index + 1) * 30,
+      })),
+    ),
   );
-  writeFileSync(join(dir, "meta", "encoder.json"), "{}");
+  writeFileSync(
+    join(dir, "meta", "encoder.json"),
+    options.fragmentedMp4 ? JSON.stringify({ fragmentedMp4: true }) : "{}",
+  );
   if (withAudio) writeFileSync(join(dir, "audio.m4a"), "AAC");
   planJson.planHash = recomputePlanHashFromPlanDir(dir);
   writeFileSync(join(dir, "plan.json"), JSON.stringify(planJson));

@@ -141,7 +141,7 @@ export async function assemble(
     return mergePngFrameDirs(chunkPaths, outputPath, plan.totalFrames, audioPath, start);
   }
 
-  if (readsFragmentedPieces(planDir, cfr)) {
+  if (chunksAreFragmentedPieces(planDir, cfr)) {
     await concatenatePieces(chunkPaths, outputPath);
     return {
       outputPath,
@@ -396,7 +396,7 @@ function readEncoderJson(planDir: string): Partial<LockedRenderConfig> | null {
 }
 
 /** Fragmented-mp4 chunks already carry their audio and join by byte concatenation. */
-function readsFragmentedPieces(planDir: string, cfr: boolean): boolean {
+export function chunksAreFragmentedPieces(planDir: string, cfr: boolean): boolean {
   if (readEncoderJson(planDir)?.fragmentedMp4 !== true) return false;
   if (cfr) {
     throw new Error(

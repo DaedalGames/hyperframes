@@ -105,7 +105,11 @@ export {
 } from "./services/distributed/renderChunk.js";
 
 // ── Assemble (Activity C) ───────────────────────────────────────────────────
-export { assemble, type AssembleResult } from "./services/distributed/assemble.js";
+export {
+  assemble,
+  chunksAreFragmentedPieces,
+  type AssembleResult,
+} from "./services/distributed/assemble.js";
 
 // ── Cloud-agnostic adapter helpers ──────────────────────────────────────────
 // Shared by the distributed-render adapters (aws-lambda, gcp-cloud-run, …) so
