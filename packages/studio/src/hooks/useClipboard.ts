@@ -34,7 +34,7 @@ import {
 } from "../utils/authoredSource";
 import { serializeStudioFileMutations } from "../utils/studioFileMutationCoordinator";
 
-import { pasteSystemElement, readSystemClipboardText } from "./elementClipboardPaste";
+import { readPastePayload, readSystemClipboardText } from "./elementClipboardPaste";
 
 type InPlace = { inPlace?: boolean };
 
@@ -408,31 +408,23 @@ export function useClipboard({
       const project = projectIdRef.current;
       const isCurrentProject = () => projectIdRef.current === project;
       const pendingPayload = clipboardRef.current;
-      if (
-        await pasteSystemElement(
-          {
-            projectId: project.id,
-            isCurrentProject,
-            activeCompPath,
-            readOnlyPreview,
-            writeProjectFile,
-            recordEdit,
-            reloadPreview,
-            showToast,
-            waitForPendingDomEditSaves,
-            ignoredText: ignoredSystemText.current,
-          },
-          pasteTimelineClips,
-        )
-      )
-        return;
-      if (!isCurrentProject()) return;
-      const payload = await pendingPayload;
-      if (!isCurrentProject()) return;
-      if (!payload) {
-        showToast("Nothing to paste.", "info");
-        return;
-      }
+      const payload = await readPastePayload(
+        {
+          projectId: project.id,
+          isCurrentProject,
+          activeCompPath,
+          readOnlyPreview,
+          writeProjectFile,
+          recordEdit,
+          reloadPreview,
+          showToast,
+          waitForPendingDomEditSaves,
+          ignoredText: ignoredSystemText.current,
+        },
+        pendingPayload,
+        pasteTimelineClips,
+      );
+      if (!payload) return;
       const pid = project.id;
       if (!pid) return;
 

@@ -1,6 +1,7 @@
 import {
   ELEMENT_CLIPBOARD_PREFIX,
   parseElementClipboard,
+  type ElementClipboard,
 } from "@hyperframes/core/element-clipboard";
 import type { UseClipboardOptions, pasteTimelineClips } from "./useClipboard";
 import { usePlayerStore } from "../player";
@@ -9,6 +10,7 @@ import { saveProjectFilesWithHistory } from "../utils/studioFileHistory";
 import { extendRootDurationInSource } from "../utils/rootDuration";
 import { readFileContent } from "./timelineEditingHelpers";
 import { buildTimelineElementKey } from "../player/lib/timelineElementHelpers";
+import type { ClipboardPayload } from "../utils/clipboardPayload";
 
 export async function readSystemClipboardText(): Promise<string | null> {
   try {
@@ -33,6 +35,19 @@ type PasteOptions = Pick<
   isCurrentProject: () => boolean;
 };
 
+export async function readPastePayload(
+  options: PasteOptions,
+  pendingPayload: Promise<ClipboardPayload | null> | null,
+  insert: typeof pasteTimelineClips,
+): Promise<ClipboardPayload | null> {
+  if (await pasteSystemElement(options, insert)) return null;
+  if (!options.isCurrentProject()) return null;
+  const payload = await pendingPayload;
+  if (!options.isCurrentProject()) return null;
+  if (!payload) options.showToast("Nothing to paste.", "info");
+  return payload;
+}
+
 function elementIdsInSource(source: string): Set<string> {
   const roots: (Document | DocumentFragment)[] = [
     new DOMParser().parseFromString(source, "text/html"),
@@ -48,7 +63,7 @@ function elementIdsInSource(source: string): Set<string> {
 }
 
 /** Returns false only when the OS clipboard belongs to the existing internal paste path. */
-export async function pasteSystemElement(
+async function pasteSystemElement(
   options: PasteOptions,
   insert: typeof pasteTimelineClips,
 ): Promise<boolean> {
@@ -74,10 +89,20 @@ export async function pasteSystemElement(
     options.showToast("Preview is read-only.", "info");
     return true;
   }
+  await saveSystemElement(options, projectId, payload, insert);
+  return true;
+}
+
+async function saveSystemElement(
+  options: PasteOptions,
+  projectId: string,
+  payload: ElementClipboard,
+  insert: typeof pasteTimelineClips,
+): Promise<void> {
   const path = options.activeCompPath || "index.html";
   try {
     await options.waitForPendingDomEditSaves();
-    if (!options.isCurrentProject()) return true;
+    if (!options.isCurrentProject()) return;
     let ids: string[] = [];
     let warnings: string[] = [];
     await saveProjectFilesWithHistory({
@@ -120,7 +145,7 @@ export async function pasteSystemElement(
       writeFile: options.writeProjectFile,
       recordEdit: options.recordEdit,
     });
-    if (!options.isCurrentProject()) return true;
+    if (!options.isCurrentProject()) return;
     if (ids.length)
       usePlayerStore
         .getState()
@@ -137,5 +162,4 @@ export async function pasteSystemElement(
   } catch (error) {
     options.showToast(error instanceof Error ? error.message : "Failed to paste element", "error");
   }
-  return true;
 }
