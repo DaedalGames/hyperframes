@@ -2937,7 +2937,11 @@ export function initSandboxRuntimeModular(): void {
     const hi = Math.max(from, to);
     return (node) => {
       const decided = visibilityDecided.get(node);
-      if (decided === undefined || armedBy.has(node) || armedFrom.has(node)) return false;
+      if (
+        decided === undefined ||
+        (isMediaElement(node) && (armedBy.has(node) || armedFrom.has(node)))
+      )
+        return false;
       // A script that changed a clip's visibility gets it decided again, as a full pass would.
       if (
         !node.hasAttribute(RUNTIME_STAMPED_ATTR) &&
