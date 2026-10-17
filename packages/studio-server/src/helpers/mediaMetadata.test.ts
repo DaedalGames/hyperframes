@@ -87,6 +87,17 @@ describe("probeMediaMetadata", () => {
     });
   });
 
+  it("reads the video's coded size", async () => {
+    const stream = { codec_type: "video", codec_name: "h264", width: 1920, height: 1080 };
+    const metadata = await probeMediaMetadata("/tmp/clip.mp4", () => ({
+      status: 0,
+      stdout: JSON.stringify({ streams: [stream] }),
+      stderr: "",
+    }));
+
+    expect(metadata).toMatchObject({ width: 1920, height: 1080 });
+  });
+
   it("reports whether a video carries an audio stream", async () => {
     const withAudio = await probeMediaMetadata("/tmp/clip.mp4", () => ({
       status: 0,

@@ -73,12 +73,17 @@ export interface MediaMetadata {
   color: MediaColorMetadata;
   /** Video audio stream, when probed. Absent means the drop path stays muted. */
   hasAudio?: boolean;
+  /** Coded size of the video stream, when probed. */
+  width?: number;
+  height?: number;
   probeError?: string;
 }
 
 interface FfprobeStream {
   codec_type?: string;
   codec_name?: string;
+  width?: number;
+  height?: number;
   profile?: string;
   pix_fmt?: string;
   color_space?: string;
@@ -259,7 +264,7 @@ export async function probeMediaMetadata(
       "-v",
       "error",
       "-show_entries",
-      "stream=codec_type,codec_name,profile,pix_fmt,color_space,color_transfer,color_primaries,bits_per_raw_sample:stream_disposition=attached_pic",
+      "stream=codec_type,codec_name,width,height,profile,pix_fmt,color_space,color_transfer,color_primaries,bits_per_raw_sample:stream_disposition=attached_pic",
       "-of",
       "json",
       "--",
@@ -284,6 +289,10 @@ export async function probeMediaMetadata(
     const metadata: MediaMetadata = { kind, color: classifyMediaColor(stream) };
     if (kind === "video") {
       metadata.hasAudio = (parsed.streams ?? []).some((item) => item.codec_type === "audio");
+      if (stream?.width && stream.height) {
+        metadata.width = stream.width;
+        metadata.height = stream.height;
+      }
     }
     return metadata;
   } catch {

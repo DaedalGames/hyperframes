@@ -1319,6 +1319,7 @@ describe("hf-proxy negotiation and media codec map injection (U3)", () => {
       box?: { width: number; height: number },
     ) => Promise<string>;
     scanMapImpl?: ScanMapImpl;
+    notePreviewPlaying?: (playing: boolean) => void;
     probeAssetCodecImpl?: () => Promise<{
       codecName: string;
       browserHostile: boolean;
@@ -1343,6 +1344,7 @@ describe("hf-proxy negotiation and media codec map injection (U3)", () => {
       );
     vi.doMock("../helpers/proxyTranscoder.js", () => ({
       resolveProxy,
+      notePreviewPlaying: opts.notePreviewPlaying ?? (() => {}),
       waitForProxy,
       ProxyWaitTimeoutError,
       PROXY_PENDING_RETRY_AFTER_SECONDS,
@@ -1703,7 +1705,22 @@ describe("hf-proxy negotiation and media codec map injection (U3)", () => {
         join(projectDir, "clip.mp4"),
         "h264",
         { width: 1024, height: 724 },
+        { background: true },
       );
+    });
+
+    it("hears the preview play and pause, and refuses anything else", async () => {
+      const notePreviewPlaying = vi.fn();
+      const { registerPreviewRoutes: register } = await loadPreviewModule({ notePreviewPlaying });
+      const app = new Hono();
+      register(app, createAdapter(createProjectDir()));
+      const post = (body: string) =>
+        app.request("http://localhost/projects/demo/preview/playback", { method: "POST", body });
+
+      expect((await post('{"playing":true}')).status).toBe(204);
+      expect((await post('{"playing":false}')).status).toBe(204);
+      expect((await post('{"playing":"yes"}')).status).toBe(400);
+      expect(notePreviewPlaying.mock.calls).toEqual([[true], [false]]);
     });
 
     it("returns 404 without transcoding when the param value is not a proxy variant", async () => {

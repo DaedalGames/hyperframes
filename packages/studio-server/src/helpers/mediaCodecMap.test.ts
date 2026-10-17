@@ -45,7 +45,7 @@ function makeRunner(
 function keyframedRunner(codecName: string, keyframes: number[], end: number): FfprobeRunner {
   return (_command, args) => {
     if (!args.includes("packet=pts_time,flags")) {
-      const streams = [{ codec_type: "video", codec_name: codecName }];
+      const streams = [{ codec_type: "video", codec_name: codecName, width: 1920, height: 1080 }];
       return { status: 0, stdout: JSON.stringify({ streams }), stderr: "" };
     }
     const lines = [...keyframes.map((t) => `${t.toFixed(6)},K__`), `${end.toFixed(6)},___`];
@@ -216,7 +216,12 @@ describe("seek-hostile video", () => {
     );
 
     expect(Object.keys(map)).toEqual(["/sparse.mp4"]);
-    expect(map["/sparse.mp4"]).toMatchObject({ browserHostile: false, seekHostile: true });
+    expect(map["/sparse.mp4"]).toMatchObject({
+      browserHostile: false,
+      seekHostile: true,
+      width: 1920,
+      height: 1080,
+    });
   });
 
   it("counts a long last stretch, with one keyframe and nothing after it for 20 s", async () => {

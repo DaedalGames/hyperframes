@@ -36,6 +36,9 @@ export interface AssetCodecFacts {
   /** A browser-safe, opaque video whose keyframes are more than 2 s apart, so each jump decodes
    * far. Set only when true. Alpha is left out: its VP8 copy has no keyframe-every-second recipe. */
   seekHostile?: boolean;
+  /** Source size, carried by seek-hostile entries so a copy is sized before the video loads. */
+  width?: number;
+  height?: number;
 }
 
 const SEEK_HOSTILE_KEYFRAME_GAP_SECONDS = 2;
@@ -225,8 +228,8 @@ async function probeCodecFacts(
   const facts = codecFactsFor(codecName, pixelFormatHasAlpha(metadata.color.pixelFormat));
   if (facts.browserHostile || facts.hasAlpha) return facts;
   const gap = await probeKeyframeGap(filePath, runner);
-  if (gap !== null && gap > SEEK_HOSTILE_KEYFRAME_GAP_SECONDS) facts.seekHostile = true;
-  return facts;
+  if (gap === null || gap <= SEEK_HOSTILE_KEYFRAME_GAP_SECONDS) return facts;
+  return { ...facts, seekHostile: true, width: metadata.width, height: metadata.height };
 }
 
 interface CachedAssetProbe {
