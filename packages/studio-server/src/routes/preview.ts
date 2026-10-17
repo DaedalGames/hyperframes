@@ -321,8 +321,7 @@ function previewVariablesFromRequest(rawVariables: string | undefined):
   return { raw: rawVariables, values: parse.values };
 }
 
-/** Captures screenshot right after a seek, so they get every image eager and the capture mark: their media still
- * loads only near the moment shot, or a long film's still would load every clip it has. */
+/** Captures screenshot right after a seek: every image eager, media only near the moment (the capture mark). */
 export const PREVIEW_CAPTURE_PARAM = "hf-capture";
 
 // Studio's console capture attaches at the iframe's load; this keeps what was raised before it.
