@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { init } from "./hyper-shader.js";
+import { stubWebGl } from "./testWebGl.js";
 
 // The slice of a paused GSAP timeline that init() drives: time() fires the callbacks it
 // crosses unless events are suppressed, then onUpdate.
@@ -39,19 +40,6 @@ function stubGsap() {
   const timeline = (opts: { onUpdate?: () => void }) => ((onUpdate = opts.onUpdate), tl);
   vi.stubGlobal("gsap", { timeline, set: () => {}, to: () => {}, fromTo: () => {} });
   return { now: () => now };
-}
-
-function stubWebGl() {
-  vi.stubGlobal("CanvasRenderingContext2D", class {});
-  const gl = new Proxy(
-    {},
-    {
-      get: (_target, key) =>
-        key === "getShaderParameter" || key === "getProgramParameter" ? () => true : () => ({}),
-    },
-  );
-  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(((type: string) =>
-    type === "webgl" ? gl : null) as HTMLCanvasElement["getContext"]);
 }
 
 afterEach(() => {
