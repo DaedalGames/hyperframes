@@ -4622,10 +4622,6 @@ export function initSandboxRuntimeModular(): void {
         // playback rate. Re-seek registered children below with their host's
         // explicit source-time contract.
       }
-      // A second `activateSiblingTimelines` used to follow this call. Dropping it is
-      // safe because nothing between frames READS a sibling's paused() — grepped over
-      // the deterministic adapters, syncTimedElementVisibility, the hf-timelines-built
-      // handler and __hfReseekGpu. It only ever moved the state the seek left behind.
       seekStandaloneRegisteredTimelines(t, opts);
       tweensRenderedThrough.time = Math.max(tweensRenderedThrough.time, t);
       const pageAnimations = pageAnimationsForOnePass();
@@ -4650,12 +4646,7 @@ export function initSandboxRuntimeModular(): void {
   //
   // The watch is document-global (fine for today's single-composition Studio;
   // revisit if a multi-composition editor needs to scope this to one root).
-  // It used to be a `document.querySelector` on every paused frame, described
-  // here as negligible; measured, it was 1.8 ms/s on a 1689-element project and
-  // 3.0 ms/s — 6.4% of the whole paused main-thread budget — on a media-heavy
-  // one. An attribute-filtered observer answers the same question in O(edits),
-  // and its change callback is also what un-parks the transport when a drag
-  // starts or ends.
+  // Its attribute-filtered observer wakes the transport when a drag starts or ends.
   const manualEditGestureWatch = createManualEditGestureWatch(document, () => {
     wakeTransport();
   });
