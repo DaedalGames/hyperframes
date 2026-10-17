@@ -77,6 +77,28 @@ function sceneScriptEagerReason(script: string): string | null {
 
 // A quoted string in a script, in any of the three quote styles.
 const STRING_LITERAL_RE = /(["'`])((?:\\.|(?!\1)[^\\\n])*?)\1/g;
+// The timeline registry's own setup reads no scene: `window.__timelines = window.__timelines || {}`, ??=, ||=,
+// `= {}`, and the `if (!window.__timelines)` / `typeof` guards.
+const REGISTRY_SETUP_RE =
+  /(?:window\.)?__timelines\s*(?:\?\?=|\|\|=|=\s*(?:(?:window\.)?__timelines\s*(?:\|\||\?\?)\s*)?\{\s*\})|!\s*(?:window\.)?__timelines\s*\)|typeof\s+(?:window\.)?__timelines\b/g;
+// A registry key named outright, by string or by dot; a computed key being written reads nothing.
+const REGISTRY_KEY_RE =
+  /^\s*(?:(?:\?\.)?\s*\[\s*(["'`])([\w-]+)\1\s*\]|\??\.\s*([A-Za-z_$][\w$]*))/;
+const REGISTRY_WRITE_RE = /^\s*\[[^\]]*\]\s*=(?!=)/;
+
+/** The scene ids a script reads from the timeline registry; `everyScene` when a read is not to one named key. */
+export function registryReads(script: string): { names: string[]; everyScene: boolean } {
+  const rest = script.replace(REGISTRY_SETUP_RE, "");
+  const names: string[] = [];
+  for (const m of rest.matchAll(/__timelines\b/g)) {
+    const after = rest.slice(m.index + m[0].length, m.index + m[0].length + 200);
+    const key = REGISTRY_KEY_RE.exec(after);
+    if (key) names.push(key[2] ?? key[3] ?? "");
+    else if (!REGISTRY_WRITE_RE.test(after)) return { names, everyScene: true };
+  }
+  return { names, everyScene: false };
+}
+
 // Text ending where createElement takes its tag: that string makes a node, it selects none.
 const CREATES_ELEMENT_RE = /createElement\s*\(\s*$|createElementNS\s*\([^()]*,\s*$/;
 // A "*" after a comma is a later argument, like postMessage's target origin; selector calls take it first.
@@ -303,6 +325,8 @@ export interface InlineSubCompositionsResult {
 export interface SceneReads {
   hosts: Map<string, Element>;
   literals: Map<string, Set<string>>;
+  /** Scenes whose scripts read the timeline registry by a key no analysis can name. */
+  readEveryScene: Set<string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -369,6 +393,7 @@ export function inlineSubCompositions(
 
   const sceneHosts = new Map<string, Element>();
   const sceneLiterals = new Map<string, Set<string>>();
+  const readEveryScene = new Set<string>();
   const queue = hosts.map((element) => ({
     element,
     ancestry: [] as string[],
@@ -544,9 +569,15 @@ export function inlineSubCompositions(
         SCENE_EAGER_ATTR,
         () => unknownCode ?? (externalSrc ? null : sceneScriptEagerReason(authored)),
       );
-      if (scene && !externalSrc && !unknownCode)
-        for (const m of authored.matchAll(STRING_LITERAL_RE))
-          sceneLiterals.set(scene, (sceneLiterals.get(scene) ?? new Set()).add(m[2] ?? ""));
+      if (scene && !externalSrc && !unknownCode) {
+        const { names, everyScene } = registryReads(authored);
+        const literals = [...authored.matchAll(STRING_LITERAL_RE)].map((m) => m[2] ?? "");
+        sceneLiterals.set(
+          scene,
+          new Set([...(sceneLiterals.get(scene) ?? []), ...literals, ...names]),
+        );
+        if (everyScene) readEveryScene.add(scene);
+      }
       if (type === "importmap") {
         const map = parseImportMap(scriptEl.textContent || "", (url) => {
           // The rebase drops a leading "./" and a trailing "/"; an import map address needs both.
@@ -756,14 +787,14 @@ export function inlineSubCompositions(
     variablesByComp,
     importMaps,
     moduleScripts,
-    sceneReads: { hosts: sceneHosts, literals: sceneLiterals },
+    sceneReads: { hosts: sceneHosts, literals: sceneLiterals, readEveryScene },
   };
 }
 
 /** A script that names a scene's composition id reads what that scene's script left, so the scene runs at boot whenever
  * its reader does. Root scripts always run at boot; run this after every other eager mark. */
 export function keepScenesReadAtBootEager(
-  { hosts: sceneHosts, literals: sceneLiterals }: SceneReads,
+  { hosts: sceneHosts, literals: sceneLiterals, readEveryScene }: SceneReads,
   rootScripts: string[],
 ): void {
   const idsOf = (host: Element) =>
@@ -778,13 +809,19 @@ export function keepScenesReadAtBootEager(
     return [...ids].filter(([, other]) => named.some((l) => other.has(l))).map(([id]) => id);
   };
   const ROOT = "a root script";
-  const rootLiterals = rootScripts.flatMap((s) =>
-    [...s.matchAll(STRING_LITERAL_RE)].map((m) => m[2] ?? ""),
-  );
-  const readsOf = (reader: string) =>
-    reader === ROOT
+  const rootReads = rootScripts.map(registryReads);
+  const rootLiterals = [
+    ...rootScripts.flatMap((s) => [...s.matchAll(STRING_LITERAL_RE)].map((m) => m[2] ?? "")),
+    ...rootReads.flatMap(({ names }) => names),
+  ];
+  const rootReadsEveryScene = rootReads.some(({ everyScene }) => everyScene);
+  const readsOf = (reader: string) => {
+    if (reader === ROOT ? rootReadsEveryScene : readEveryScene.has(reader))
+      return [...ids.keys()].filter((id) => id !== reader);
+    return reader === ROOT
       ? namedBy(rootLiterals)
       : namedBy(sceneLiterals.get(reader) ?? [], ids.get(reader));
+  };
   for (const [scene, host] of sceneHosts) {
     const named = readsOf(scene)[0];
     if (named && !host.hasAttribute(SCENE_EAGER_ATTR))

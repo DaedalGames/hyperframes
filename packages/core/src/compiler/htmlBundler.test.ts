@@ -3377,6 +3377,44 @@ ${["b", "f", "g", "h"].map((id, i) => `    <div data-composition-id="${id}" data
     ]);
   });
 
+  it("keeps a scene a root script reads by dot eager, and every scene when a script reads the whole registry", async () => {
+    const scene = (id: string, script: string) =>
+      `<template id="${id}-template"><div data-composition-id="${id}"><p>${id}</p>
+  <script>${script}</script></div></template>`;
+    const project = (rootRead: string) =>
+      makeTempProject({
+        "index.html": `<!doctype html><html><head></head><body>
+  <div data-composition-id="main" data-width="1920" data-height="1080" data-duration="60">
+${["b", "h"].map((id, i) => `    <div data-composition-id="${id}" data-composition-src="compositions/${id}.html" data-start="${[30, 55][i]}" data-duration="5"></div>`).join("\n")}
+  </div>
+  <output id="status"></output>
+  <script>document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("status").textContent = String(${rootRead});
+  });</script></body></html>`,
+        "compositions/b.html": scene(
+          "b",
+          'window.__timelines = window.__timelines || {}; window.__timelines["b"] = gsap.timeline();',
+        ),
+        "compositions/h.html": scene(
+          "h",
+          'window.__timelines = window.__timelines || {}; window.__timelines["h"] = gsap.timeline();',
+        ),
+      });
+    const eager = async (rootRead: string) => {
+      const doc = parseHTML(
+        await bundleToSingleHtml(project(rootRead), { sceneParts: true }),
+      ).document;
+      return ["b", "h"].map((id) =>
+        doc.querySelector(`div[data-hf-scene="${id}"]`)?.getAttribute("data-hf-scene-eager"),
+      );
+    };
+    expect(await eager("Boolean(window.__timelines.b)")).toEqual(["a root script reads it", null]);
+    expect(await eager("Object.keys(window.__timelines).length")).toEqual([
+      "a root script reads it",
+      "a root script reads it",
+    ]);
+  });
+
   it("marks a scene whose own script leaves work running as not swappable, and only that scene", async () => {
     const dir = makeTempProject({
       "index.html": `<!doctype html><html><head>
