@@ -1,4 +1,9 @@
-import { REACHED_BY_ROOT_REASON, SCENE_EAGER_ATTR, SCENE_PART_ATTR } from "../sceneParts";
+import {
+  READ_BY_SCENE_REASON,
+  REACHED_BY_ROOT_REASON,
+  SCENE_EAGER_ATTR,
+  SCENE_PART_ATTR,
+} from "../sceneParts";
 import { fontFamilyKey } from "./afterFonts";
 import { parseStrictFiniteTimingNumber } from "./playbackRate";
 import { skipsHiddenImages } from "./timedClipHide";
@@ -26,7 +31,7 @@ function holdable(host: Element | undefined): HeldScene | null {
   if (start == null || duration == null || start <= SCENE_LEAD_SECONDS) return null;
   const eager = host.getAttribute(SCENE_EAGER_ATTR);
   if (eager == null) return { host, start, end: start + duration, scripts: [] };
-  if (eager.startsWith(REACHED_BY_ROOT_REASON)) return null;
+  if (eager.startsWith(REACHED_BY_ROOT_REASON) || eager.endsWith(READ_BY_SCENE_REASON)) return null;
   return { host, start: -Infinity, end: Infinity, scripts: [] };
 }
 

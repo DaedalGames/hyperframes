@@ -47,6 +47,7 @@ import {
 } from "./compositionAssembly";
 import {
   REACHED_BY_ROOT_REASON,
+  READ_BY_SCENE_REASON,
   SCENE_EAGER_ATTR,
   SCENE_NO_SWAP_ATTR,
   SCENE_PART_ATTR,
@@ -845,7 +846,7 @@ export function keepScenesReadAtBootEager(
     for (const provider of readsOf(reader)) {
       const host = sceneHosts.get(provider);
       if (!host || host.hasAttribute(SCENE_EAGER_ATTR)) continue;
-      host.setAttribute(SCENE_EAGER_ATTR, `${reader} reads it`);
+      host.setAttribute(SCENE_EAGER_ATTR, `${reader} ${READ_BY_SCENE_REASON}`);
       eager.push(provider);
     }
   }
