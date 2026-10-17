@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HF_COLOR_GRADING_ATTR, serializeHfColorGrading } from "../colorGrading";
 import {
-  DEFER_MEDIA_META,
+  STUDIO_PREVIEW_MARK,
   STUDIO_PREVIEW_LAZY_ATTR,
   STUDIO_PREVIEW_MARK_META,
 } from "../studioPreviewMark";
@@ -378,11 +378,11 @@ describe("runtime entry", () => {
     const loads: HTMLMediaElement[] = [];
     const spyLoad = () => {
       loads.length = 0;
-      vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(
-        function (this: HTMLMediaElement) {
-          loads.push(this);
-        },
-      );
+      vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(function (
+        this: HTMLMediaElement,
+      ) {
+        loads.push(this);
+      });
     };
     const loadsOf = (...els: HTMLMediaElement[]) =>
       els.map((el) => loads.filter((loaded) => loaded === el).length);
@@ -393,9 +393,12 @@ describe("runtime entry", () => {
 
     it("loads a capture build's media only near its moment, while every image of a hidden clip stays shown", async () => {
       spyLoad();
-      // What a capture build carries instead of the preview mark.
+      // What a capture build carries: the mark, with the capture value.
       document.head.appendChild(
-        Object.assign(document.createElement("meta"), { name: DEFER_MEDIA_META }),
+        Object.assign(document.createElement("meta"), {
+          name: STUDIO_PREVIEW_MARK_META,
+          content: STUDIO_PREVIEW_MARK.capture,
+        }),
       );
       const root = mountRoot();
       const [now, later] = videos(root, "0", "9");

@@ -8,7 +8,7 @@ import {
   settleFirstFrameCompositionReadiness,
 } from "./compositionReadiness.js";
 import { createRuntimeStartTimeResolver } from "./runtime/startResolver.js";
-import { DEFER_MEDIA_META, STUDIO_PREVIEW_MARK_META } from "./studioPreviewMark.js";
+import { STUDIO_PREVIEW_MARK, STUDIO_PREVIEW_MARK_META } from "./studioPreviewMark.js";
 import { isRuntimeElementVisibleAt } from "./runtime/timeline.js";
 
 function docWith(bodyHtml: string): Document {
@@ -190,7 +190,9 @@ describe("mediaReadinessInput", () => {
       .appendChild(preview.createElement("meta"))
       .setAttribute("name", STUDIO_PREVIEW_MARK_META);
     const capture = docWith(html);
-    capture.head.appendChild(capture.createElement("meta")).setAttribute("name", DEFER_MEDIA_META);
+    const captureMark = capture.head.appendChild(capture.createElement("meta"));
+    captureMark.setAttribute("name", STUDIO_PREVIEW_MARK_META);
+    captureMark.setAttribute("content", STUDIO_PREVIEW_MARK.capture);
     const plain = docWith(html);
     const ids = (doc: Document) =>
       scanPendingCompositionAssets(doc, { scope: "all" }).pendingMedia.map((el) => el.id);
