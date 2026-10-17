@@ -287,6 +287,28 @@ export async function putContentStoreFile(
   return outcome;
 }
 
+/** Confirm an object the caller never uploaded is in the content store, restarting an aging one. */
+export async function ensureContentStoreObject(
+  client: S3Client,
+  bucket: string,
+  sha256: string,
+  sizeBytes: number,
+): Promise<void> {
+  const uri = contentStoreUri(bucket, sha256);
+  const { key } = parseS3Uri(uri);
+  const existing = await inspectContentAddressedObject(client, bucket, key, sizeBytes, sha256);
+  if (existing.state === "matching") {
+    if (existing.lastModified) await refreshAgingObject(client, uri, sha256, existing.lastModified);
+    return;
+  }
+  if (existing.state === "conflict") throwImmutableObjectConflict(uri);
+  const error = new Error(
+    `[s3Transport] PLAN_ARTIFACT_MISSING: ${uri} is not in the content store`,
+  );
+  error.name = "PLAN_ARTIFACT_MISSING";
+  throw error;
+}
+
 // S3 lifecycle expiry counts from the last write, not the last read, so reuse has to write.
 async function refreshAgingObject(
   client: S3Client,

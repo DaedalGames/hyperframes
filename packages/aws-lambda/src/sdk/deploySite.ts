@@ -11,18 +11,28 @@
  * where `siteId` is derived from a SHA-256 over the project files.
  */
 
-import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { S3Client } from "@aws-sdk/client-s3";
+import { CONTENT_STORE_RETENTION_DAYS } from "../contentStore.js";
 import { hashProjectDir, listSiteFiles } from "@hyperframes/producer/distributed";
 import {
+  downloadS3ObjectToFile,
+  ensureContentStoreObject,
   mapConcurrent,
+  parseS3Uri,
   putContentStoreFile,
   sha256File,
   uploadContentAddressedFileToS3,
 } from "../s3Transport.js";
-import { serializeSiteManifest, siteManifestUri, type SiteFile } from "../siteManifest.js";
+import {
+  isSiteManifestUri,
+  parseSiteManifest,
+  serializeSiteManifest,
+  siteManifestUri,
+  type SiteFile,
+} from "../siteManifest.js";
 
 /** Options for {@link deploySite}. */
 export interface DeploySiteOptions {
@@ -62,6 +72,43 @@ export interface SiteHandle {
 export function siteHandleFromId(bucketName: string, siteId: string): SiteHandle {
   const projectS3Uri = siteManifestUri(bucketName, siteId);
   return { siteId, bucketName, projectS3Uri, bytes: 0, uploadedAt: "", uploaded: false };
+}
+
+/** Before a render reuses `site`, re-store any file the content store expired, from `projectDir`. */
+export async function ensureSiteStored(
+  site: SiteHandle,
+  s3: S3Client,
+  projectDir?: string,
+): Promise<void> {
+  if (!isSiteManifestUri(site.projectS3Uri)) return;
+  const { bucket } = parseS3Uri(site.projectS3Uri);
+  const workdir = mkdtempSync(join(tmpdir(), "hf-site-check-"));
+  try {
+    const manifestPath = join(workdir, "files.json");
+    await downloadS3ObjectToFile(s3, site.projectS3Uri, manifestPath);
+    const files = parseSiteManifest(readFileSync(manifestPath, "utf-8"));
+    const missing: string[] = [];
+    await mapConcurrent(files, 16, async ({ path, sha256, sizeBytes }) => {
+      try {
+        await ensureContentStoreObject(s3, bucket, sha256, sizeBytes);
+      } catch (error) {
+        if ((error as Error).name !== "PLAN_ARTIFACT_MISSING") throw error;
+        if (!projectDir) return void missing.push(path);
+        await putContentStoreFile(s3, join(projectDir, path), bucket, sha256);
+      }
+    });
+    if (missing.length > 0) {
+      const error = new Error(
+        `[deploySite] SITE_FILES_MISSING: ${missing.length} of ${files.length} files of site ` +
+          `${site.siteId} are no longer stored (unused for ${CONTENT_STORE_RETENTION_DAYS} days). ` +
+          "Run `hyperframes lambda sites create`, or pass projectDir to re-upload them.",
+      );
+      error.name = "SITE_FILES_MISSING";
+      throw error;
+    }
+  } finally {
+    rmSync(workdir, { recursive: true, force: true });
+  }
 }
 
 /** Upload `projectDir`'s files to the content store and write the site manifest. */

@@ -8,6 +8,7 @@
  * `deploySite`'s `finally` block has rmSync'd it.
  */
 
+import { Readable } from "node:stream";
 import { buffer } from "node:stream/consumers";
 import type { S3Client } from "@aws-sdk/client-s3";
 
@@ -26,26 +27,30 @@ export class FakeS3 {
   async send(command: unknown): Promise<unknown> {
     const cmdName = (command as { constructor: { name: string } }).constructor.name;
     const input = (
-      command as { input: { Bucket: string; Key: string; Metadata?: Record<string, string> } }
+      command as {
+        input: { Bucket: string; Key: string; Metadata?: Record<string, string>; Body?: unknown };
+      }
     ).input;
     const id = `${input.Bucket}/${input.Key}`;
-    if (cmdName === "HeadObjectCommand") {
-      this.ops.push({ kind: "head", bucket: input.Bucket, key: input.Key });
-      return this.head(id);
-    }
-    if (cmdName === "PutObjectCommand") {
-      this.ops.push({ kind: "put", bucket: input.Bucket, key: input.Key });
-      this.existing.add(id);
-      this.metadata.set(id, input.Metadata);
-      this.bodies.set(
-        id,
-        await drainBody(
-          (command as { input: { Body: NodeJS.ReadableStream | Buffer } }).input.Body,
-        ),
-      );
-      return {};
-    }
-    throw new Error(`FakeS3: unexpected command ${cmdName}`);
+    const handlers: Record<string, () => Promise<unknown>> = {
+      HeadObjectCommand: async () => {
+        this.ops.push({ kind: "head", bucket: input.Bucket, key: input.Key });
+        return this.head(id);
+      },
+      GetObjectCommand: async () => ({
+        Body: Readable.from([this.bodies.get(id) ?? Buffer.alloc(0)]),
+      }),
+      PutObjectCommand: async () => {
+        this.ops.push({ kind: "put", bucket: input.Bucket, key: input.Key });
+        this.existing.add(id);
+        this.metadata.set(id, input.Metadata);
+        this.bodies.set(id, await drainBody(input.Body as NodeJS.ReadableStream | Buffer));
+        return {};
+      },
+    };
+    const handler = handlers[cmdName];
+    if (!handler) throw new Error(`FakeS3: unexpected command ${cmdName}`);
+    return handler();
   }
 
   private head(id: string): unknown {

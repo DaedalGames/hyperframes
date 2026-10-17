@@ -131,7 +131,7 @@ export async function runRender(args: RenderArgs): Promise<void> {
   const siteHandle = args.siteId ? siteHandleFromId(stack.bucketName, args.siteId) : undefined;
 
   const handle = await renderToLambda({
-    projectDir: siteHandle ? undefined : projectDir,
+    projectDir,
     siteHandle,
     bucketName: stack.bucketName,
     stateMachineArn: stack.stateMachineArn,

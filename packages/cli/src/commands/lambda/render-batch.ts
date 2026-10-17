@@ -271,6 +271,7 @@ export async function runRenderBatch(args: RenderBatchArgs): Promise<void> {
     }
     try {
       const handle = await renderToLambda({
+        projectDir,
         siteHandle,
         bucketName: stack.bucketName,
         stateMachineArn: stack.stateMachineArn,
