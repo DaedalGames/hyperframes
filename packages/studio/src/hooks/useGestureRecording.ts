@@ -1,4 +1,7 @@
-import { setTimedClipPaintVisibility } from "@hyperframes/core/runtime/timed-clip-hide";
+import {
+  setTimedClipPaintVisibility,
+  showHiddenClipFilters,
+} from "@hyperframes/core/runtime/timed-clip-hide";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePlayerStore, liveTime } from "../player/store/playerStore";
 import { frameToSeconds, secondsToFrame } from "../player/lib/time";
@@ -122,10 +125,15 @@ function applyRuntimePreview(
   properties: Record<string, number>,
 ): void {
   const seekTime = Math.min(runtime.startTime + time, runtime.maxSeekTime);
-  runtime.timeline.seek(seekTime);
-  runtime.element.style.setProperty("translate", "none");
-  runtime.gsap.set(runtime.element, { ...properties });
-  setTimedClipPaintVisibility(runtime.element, "visible");
+  const restoreFilters = showHiddenClipFilters(runtime.element.ownerDocument);
+  try {
+    runtime.timeline.seek(seekTime);
+    runtime.element.style.setProperty("translate", "none");
+    runtime.gsap.set(runtime.element, { ...properties });
+    setTimedClipPaintVisibility(runtime.element, "visible");
+  } finally {
+    restoreFilters();
+  }
   liveTime.notify(seekTime);
   usePlayerStore.getState().setCurrentTime(seekTime);
 }

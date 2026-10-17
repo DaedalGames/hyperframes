@@ -153,4 +153,23 @@ describe("timed clip paint transitions", () => {
     restore();
     expect(clip.style.visibility).toBe("hidden");
   });
+
+  it("borrows only hidden filters in an explicitly supplied preview document", () => {
+    const outside = mount();
+    setTimedClipVisibility(outside, "hidden");
+    const iframe = document.createElement("iframe");
+    document.body.appendChild(iframe);
+    const preview = iframe.contentDocument!;
+    const clip = preview.createElement("div");
+    preview.body.appendChild(clip);
+    setTimedClipVisibility(clip, "hidden");
+    const restore = showHiddenClipFilters(preview);
+    expect(clip.hasAttribute("data-hf-filter-sampling")).toBe(true);
+    expect(outside.hasAttribute("data-hf-filter-sampling")).toBe(false);
+    showHiddenClipFilters(preview)();
+    expect(clip.hasAttribute("data-hf-filter-sampling")).toBe(true);
+    restore();
+    expect(clip.hasAttribute("data-hf-filter-sampling")).toBe(false);
+    expect(clip.style.visibility).toBe("hidden");
+  });
 });

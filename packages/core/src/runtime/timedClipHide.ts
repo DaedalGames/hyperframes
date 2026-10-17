@@ -95,8 +95,8 @@ export function showHiddenClips(): () => void {
   };
 }
 
-export function showHiddenClipFilters(): () => void {
-  const hidden = Array.from(document.querySelectorAll<StylableElement>(FILTERED_CLIP));
+export function showHiddenClipFilters(root: Document = document): () => void {
+  const hidden = Array.from(root.querySelectorAll<StylableElement>(FILTERED_CLIP));
   changeClipPaintBatch(
     hidden.map((el) => ({
       el,
