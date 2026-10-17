@@ -95,4 +95,19 @@ describe.skipIf(!hasBrowser)("HDR stacking of content inside an HDR element's ho
       ids.filter((id) => id !== "host"),
     );
   });
+
+  it("puts a timed overlay without an id in a layer above the HDR video", async () => {
+    await page.setContent(PAGE.replace('<div id="title"', '<div class="label" data-start="0"'));
+    const stacking = await queryElementStacking(page, new Set(["hdr"]));
+    const unitId = await page.$eval(
+      ".label",
+      (el, attr) => el.getAttribute(attr),
+      HDR_LAYER_UNIT_ATTR,
+    );
+
+    expect(unitId).toBeTruthy();
+    expect(groupIntoLayers(stacking).map((l) => (l.type === "hdr" ? "hdr" : l.elementIds))).toEqual(
+      [["host"], "hdr", [unitId]],
+    );
+  });
 });

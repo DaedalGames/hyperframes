@@ -846,16 +846,18 @@ export async function queryElementStacking(
       }
 
       const hdrElements: Element[] = [];
+      const described = new Set<Element>();
       for (const el of elements) {
         // Report the render id so callers can match these back to the media list.
         // `||`, not `??`: `__hfMediaId` yields "" for an element with neither id.
         const id = window.__hfMediaId?.(el) || el.id;
         if (!id) continue;
         results.push(describe(el, id));
+        described.add(el);
         if (hdrSet.has(id)) hdrElements.push(el);
       }
 
-      // Untimed content that paints above an HDR element (a later sibling of it or of an
+      // Content without its own entry that paints above an HDR element (a later sibling of it or of an
       // ancestor, or one with a higher z-index) is its own layer, so the HDR blit stays under it.
       const lastHdrBelow = new Map<Element, Element>();
       for (const hdrEl of hdrElements) {
@@ -871,10 +873,7 @@ export async function queryElementStacking(
               afterNode = true;
               continue;
             }
-            if (
-              sibling.hasAttribute("data-start") ||
-              sibling.matches("script,style,template,link,meta")
-            )
+            if (described.has(sibling) || sibling.matches("script,style,template,link,meta"))
               continue;
             if (sibling.id.startsWith(prefix) || sibling.id.startsWith(canvasPrefix)) continue;
             const siblingZ = getEffectiveZIndex(sibling);
