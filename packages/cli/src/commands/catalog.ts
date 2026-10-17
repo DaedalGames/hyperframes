@@ -766,7 +766,7 @@ async function offerLocalModel(
   console.log(
     c.dim(
       vectors
-        ? "  Run the search again to download the model and rank by meaning."
+        ? "  Run `hyperframes catalog --on-device` once to download the model and rank by meaning."
         : "  Could not fetch the catalog vectors; offline ranking stays off until they are available.",
     ),
   );

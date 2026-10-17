@@ -737,6 +737,24 @@ describe("the on-device download offer", () => {
     expect(err).toContain("declined, but could not save the answer in settings");
   });
 
+  it("after a first-time yes, names the one command that sets the tier up", async () => {
+    state.modelStatus = "not-asked";
+    state.confirmAnswer = true;
+    state.runtimeOnDisk = false;
+
+    const first = await asATerminal(() => runForExit({ query: "count up" }));
+    expect(first.err).toContain("Run `hyperframes catalog --on-device` once");
+
+    // Consent saved, no model, no runtime: what the plain re-run actually meets.
+    state.consentRecorded = [];
+    state.modelStatus = "unavailable";
+    const rerun = await runEnvelope({ query: "count up" });
+    expect([state.runtimeInstalls, state.downloads, rerun.tier]).toEqual([0, 0, "words"]);
+
+    await runEnvelope({ query: "count up", "on-device": true });
+    expect([state.runtimeInstalls, state.downloads]).toEqual([1, 1]);
+  });
+
   it("says so when a no given to the thin-results offer could not be saved", async () => {
     state.modelStatus = "not-asked";
     state.confirmAnswer = false;
