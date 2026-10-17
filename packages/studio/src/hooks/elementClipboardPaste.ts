@@ -27,7 +27,11 @@ type PasteOptions = Pick<
   | "showToast"
   | "readOnlyPreview"
   | "waitForPendingDomEditSaves"
-> & { projectId: string | null; ignoredText: Promise<string | null> };
+> & {
+  projectId: string | null;
+  ignoredText: Promise<string | null>;
+  isCurrentProject: () => boolean;
+};
 
 function elementIdsInSource(source: string): Set<string> {
   const roots: (Document | DocumentFragment)[] = [
@@ -57,6 +61,7 @@ export async function pasteSystemElement(
     !text.startsWith(ELEMENT_CLIPBOARD_PREFIX)
   )
     return false;
+  if (!options.isCurrentProject()) return true;
   const payload = parseElementClipboard(text);
   if (!payload) {
     options.showToast(
@@ -72,6 +77,7 @@ export async function pasteSystemElement(
   const path = options.activeCompPath || "index.html";
   try {
     await options.waitForPendingDomEditSaves();
+    if (!options.isCurrentProject()) return true;
     let ids: string[] = [];
     let warnings: string[] = [];
     await saveProjectFilesWithHistory({
@@ -79,6 +85,8 @@ export async function pasteSystemElement(
       label: "Paste element",
       files: {
         [path]: (source) => {
+          if (!options.isCurrentProject())
+            throw new Error("Project changed before paste completed.");
           const taken = elementIdsInSource(source);
           let index = 1;
           while (
@@ -112,6 +120,7 @@ export async function pasteSystemElement(
       writeFile: options.writeProjectFile,
       recordEdit: options.recordEdit,
     });
+    if (!options.isCurrentProject()) return true;
     if (ids.length)
       usePlayerStore
         .getState()
