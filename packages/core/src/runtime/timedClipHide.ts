@@ -19,7 +19,7 @@ const SKIP_HIDDEN_IMAGES = `${SKIPPED_CLIP} img { display: none !important; }`;
 const STUDIO_PREVIEW_MARK = `meta[name="${STUDIO_PREVIEW_MARK_META}"]`;
 export const CLIP_HIDDEN_ATTR = "data-hf-clip-hidden";
 const CONTENTS_ATTR = "data-hf-hidden-clip-contents";
-const FILTER_SAMPLING_ATTR = "data-hf-filter-sampling";
+export const FILTER_SAMPLING_ATTR = "data-hf-filter-sampling";
 const HIDDEN_CLIP = `[${CLIP_HIDDEN_ATTR}][style*="visibility: hidden"]`;
 const FILTERED_CLIP = `${HIDDEN_CLIP}:not([${FILTER_SAMPLING_ATTR}])`;
 // feColorMatrix can make hidden input opaque; filter the final group without changing layout.
