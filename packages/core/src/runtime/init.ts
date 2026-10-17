@@ -4581,13 +4581,8 @@ export function initSandboxRuntimeModular(): void {
       : null;
     try {
       if (tl) {
-        // #10: when data-duration exceeds the timeline's intrinsic length the
-        // engine requests frames past the last tween. Seeking a paused GSAP
-        // timeline past its end can revert from()-tweens to their empty initial
-        // state, blanking the final poster. Clamp the MASTER seek to the
-        // timeline's full extent so it holds the final computed frame instead.
-        // Adapters still receive the raw `t` (their media may run longer).
-        // totalDuration() includes repeats; Infinity (infinite repeat) → no clamp.
+        // Clamp the master seek to its full extent so the final frame holds.
+        // Adapters receive raw `t`; infinite timelines remain unclamped.
         let tlSeekTime = t;
         if (typeof tl.totalDuration === "function") {
           try {
