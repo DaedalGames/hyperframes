@@ -102,7 +102,10 @@ export interface ExtractVideosStageResult {
   /** Frame-lookup table for the runtime video-frame injector, or `null` if no frames were extracted. */
   frameLookup: FrameLookupTable | null;
   /** Re-extracts these videos tone-mapped to SDR and swaps them into `frameLookup`. */
-  toneMapVideosToSdr: (videoIds: ReadonlySet<string>) => Promise<void>;
+  toneMapVideosToSdr: (
+    videoIds: ReadonlySet<string>,
+    hdrTransfer: HdrTransfer | undefined,
+  ) => Promise<void>;
   videoReadinessSkipIds: string[];
   videoMetadataHints: CaptureVideoMetadataHint[];
   /** Set of video IDs whose ORIGINAL color space was HDR (pre-extraction). */
@@ -559,7 +562,10 @@ export async function runExtractVideosStage(
   }
   const videoExtractMs = Date.now() - stage2Start;
 
-  const toneMapVideosToSdr = async (videoIds: ReadonlySet<string>): Promise<void> => {
+  const toneMapVideosToSdr = async (
+    videoIds: ReadonlySet<string>,
+    hdrTransfer: HdrTransfer | undefined,
+  ): Promise<void> => {
     const videos = composition.videos.filter((video) => videoIds.has(video.id));
     if (videos.length === 0 || !frameLookup) return;
     const result = await extractAllVideoFrames(
@@ -568,6 +574,7 @@ export async function runExtractVideosStage(
       {
         ...extractionOptions,
         toneMapHdrToSdr: true,
+        hdrTransferAfterToneMap: hdrTransfer,
         outputDir: join(compiledDir, SDR_FRAME_ROOT),
       },
       abortSignal,

@@ -103,7 +103,10 @@ export interface CaptureHdrStageInput {
   nativeHdrVideoIds: Set<string>;
   nativeHdrImageIds: Set<string>;
   /** Re-extracts these HDR videos tone-mapped to SDR, for the frame injector to show. */
-  toneMapVideosToSdr: (videoIds: ReadonlySet<string>) => Promise<void>;
+  toneMapVideosToSdr: (
+    videoIds: ReadonlySet<string>,
+    hdrTransfer: HdrTransfer | undefined,
+  ) => Promise<void>;
   videoTransfers: Map<string, HdrTransfer>;
   imageTransfers: Map<string, HdrTransfer>;
   hdrImageSrcPaths: Map<string, string>;
@@ -228,10 +231,14 @@ export async function runCaptureHdrStage(
     );
     for (const { id, filter } of filtered) {
       log.info(
-        `[Render] HDR video "${id}" renders through the SDR path: CSS filter ${filter} applies to it`,
+        `[Render] HDR video "${id}" renders through the SDR path: CSS filter ${filter} applies to it at its start`,
       );
     }
-    if (filtered.length > 0) await toneMapVideosToSdr(new Set(filtered.map((f) => f.id)));
+    const compositeTransfer = resolveCompositeTransfer(hasHdrContent, effectiveHdr);
+    const hdrTargetTransfer = compositeTransfer === "srgb" ? undefined : compositeTransfer;
+    if (filtered.length > 0) {
+      await toneMapVideosToSdr(new Set(filtered.map((f) => f.id)), hdrTargetTransfer);
+    }
     const sdrVideoIds = new Set(filtered.map((f) => f.id));
     const nativeHdrVideoIds = new Set([...probedHdrVideoIds].filter((id) => !sdrVideoIds.has(id)));
     const nativeHdrIds = new Set([...nativeHdrVideoIds, ...nativeHdrImageIds]);
@@ -343,8 +350,6 @@ export async function runCaptureHdrStage(
       if (debugDumpDir && !existsSync(debugDumpDir)) {
         mkdirSync(debugDumpDir, { recursive: true });
       }
-      const compositeTransfer = resolveCompositeTransfer(hasHdrContent, effectiveHdr);
-      const hdrTargetTransfer = compositeTransfer === "srgb" ? undefined : compositeTransfer;
       const hdrCacheMaxBytes = process.env.HDR_TRANSFER_CACHE_MAX_BYTES
         ? Number(process.env.HDR_TRANSFER_CACHE_MAX_BYTES)
         : undefined;
