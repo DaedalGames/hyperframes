@@ -284,15 +284,9 @@ export function decodePngToRgb48le(buf: Buffer): { width: number; height: number
  * ## Convention
  *
  * "Linear" here means **scene light in [0, 1] relative to SDR reference white**
- * (not absolute nits). Both branches place SDR white at the ITU-R BT.2408
- * reference level, so SDR content (text, UI, graded or SDR video) sits at
- * SDR-white brightness inside an HDR frame instead of at peak:
- *
- * - HLG: 75% signal. The OETF's input is scene light relative to HLG PEAK, so
- *   SDR-relative light is first scaled to the scene light the inverse OETF
- *   gives for 0.75. No OOTF: the overlay blends onto HLG video pixels, which
- *   are already in scene-light signal space.
- * - PQ: 203 nits, normalized against the 10,000-nit peak.
+ * (not absolute nits). Both branches put SDR white at BT.2408 reference white,
+ * below peak: HLG at 75% signal (the OETF takes peak-relative light, so it is
+ * scaled first; no OOTF), PQ at 203 nits of the 10,000-nit peak.
  *
  * Note: converts the transfer function but not the color primaries (bt709 →
  * bt2020). For neutral/near-neutral content (text, UI) the gamut difference
