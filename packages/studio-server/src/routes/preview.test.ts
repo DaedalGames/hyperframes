@@ -2029,6 +2029,42 @@ describe("hf-proxy negotiation and media codec map injection (U3)", () => {
       expect(proxyRes.status).toBe(404);
       expect(resolveProxyMock).not.toHaveBeenCalled();
     });
+
+    it("leaves the codec map out of every capture document, so a thumbnail never asks for a copy", async () => {
+      const projectDir = createProjectDir();
+      mkdirSync(join(projectDir, "compositions"));
+      writeFileSync(
+        join(projectDir, "compositions/scene.html"),
+        `<template><section data-composition-id="scene"></section></template>`,
+      );
+      const { registerPreviewRoutes: register } = await loadPreviewModule({
+        scanMapImpl: async () => ({
+          "/clip.mp4": { codecName: "hevc", browserHostile: true, representativeMime: null },
+        }),
+      });
+      const app = new Hono();
+      register(app, createAdapter(projectDir));
+      const failingBundle = new Hono();
+      register(
+        failingBundle,
+        createAdapter(projectDir, {
+          bundle: async () => {
+            throw new Error("bundler unavailable");
+          },
+        }),
+      );
+
+      for (const [server, path] of [
+        [app, "demo/preview"],
+        [app, "demo/preview/comp/compositions/scene.html"],
+        [failingBundle, "fallback/preview"],
+      ] as const) {
+        const url = `http://localhost/projects/${path}`;
+        expect(await (await server.request(url)).text()).toContain("__HF_MEDIA_CODEC_MAP__");
+        const capture = await (await server.request(`${url}?${PREVIEW_CAPTURE_PARAM}=1`)).text();
+        expect(capture).not.toContain("__HF_MEDIA_CODEC_MAP__");
+      }
+    });
   });
 });
 

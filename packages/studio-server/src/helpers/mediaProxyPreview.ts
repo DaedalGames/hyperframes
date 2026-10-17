@@ -134,7 +134,8 @@ export async function injectMediaCodecMapIntoHtml(
 
 /**
  * Adapter-aware wrapper used by the studio preview routes: skipped entirely
- * (no scan, no injection) when auto-proxy is off for this adapter.
+ * (no scan, no injection) when auto-proxy is off for this adapter, and for a
+ * capture document, whose server-side browser shows the video to nobody.
  */
 export async function injectMediaCodecMap(
   html: string,
@@ -142,8 +143,9 @@ export async function injectMediaCodecMap(
   projectDir: string,
   compSrcPath: string,
   probeCache: MediaCodecProbeCache,
+  capture: boolean,
 ): Promise<string> {
-  if (!isAutoProxyEnabled(adapter)) return html;
+  if (capture || !isAutoProxyEnabled(adapter)) return html;
   return injectMediaCodecMapIntoHtml(
     html,
     projectDir,
