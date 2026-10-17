@@ -82,9 +82,7 @@ describe("motion-shot adapter seeking", () => {
   it("launches through the shared GPU policy and WebGPU requirement guard", () => {
     const source = readFileSync(motionShotSourcePath, "utf8");
 
-    expect(source).toContain("resolveManagedGpuMode");
-    expect(source).toContain("compositionRequiresWebGpu(html)");
-    expect(source).toContain("resolveLocalWebGpu(resolvedGpuMode, requiresWebGpu)");
+    expect(source).toContain("localCaptureChrome(");
     expect(source).toContain("assertWebGpuAdapterAvailable(page, requiresWebGpu, softwareWebGpu)");
     expect(source).not.toContain('"--disable-gpu"');
   });

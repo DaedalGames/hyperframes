@@ -1,6 +1,9 @@
 import type { Browser, LaunchOptions, PuppeteerNode } from "puppeteer-core";
 import {
+  compositionRequiresWebGpu,
   resolveCaptureBrowserGpuMode,
+  resolveLocalBrowserGpuMode,
+  resolveLocalWebGpu,
   type BrowserGpuMode,
   type ResolvedBrowserGpuMode,
 } from "./gpuPolicy.js";
@@ -69,6 +72,24 @@ export async function resolveManagedGpuMode(
     },
     close: closeManagedBrowser,
   });
+}
+
+export async function localCaptureChrome(
+  html: string,
+  viewport: { width: number; height: number },
+  executablePath: string,
+  requestedMode: BrowserGpuMode = resolveLocalBrowserGpuMode(),
+  context?: Parameters<typeof resolveManagedGpuMode>[2],
+) {
+  const resolvedGpuMode = await resolveManagedGpuMode(requestedMode, executablePath, context);
+  const requiresWebGpu = compositionRequiresWebGpu(html);
+  const { gpuConfig, softwareWebGpu } = resolveLocalWebGpu(resolvedGpuMode, requiresWebGpu);
+  const { buildChromeArgs } = await import("@hyperframes/engine");
+  const args = buildChromeArgs(
+    { ...viewport, captureMode: "screenshot", requiresWebGpu },
+    gpuConfig,
+  );
+  return { args, requiresWebGpu, softwareWebGpu };
 }
 
 /** One owner for every CLI browser, including a launch cancelled before its connection is ready. */

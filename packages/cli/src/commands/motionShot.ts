@@ -1,4 +1,4 @@
-import { launchManagedBrowser, resolveManagedGpuMode } from "../browser/launch.js";
+import { launchManagedBrowser, localCaptureChrome } from "../browser/launch.js";
 // Onion-skin motion screenshot: seek the LIVE timeline at N equal-time steps and
 // project the REAL element at each step, so an agent can SELF-VERIFY motion (the
 // rendered result — every channel: position, rotation, scale, opacity, colour),
@@ -17,12 +17,7 @@ import { resolveDiagnosticNavigationTimeoutMs } from "../utils/renderArgs.js";
 import { gotoWhenSent } from "../capture/navigateForCapture.js";
 import { resolveCompositionViewportFromHtml } from "../utils/compositionViewport.js";
 import { waitForRuntimeReady } from "../capture/captureCompositionFrame.js";
-import {
-  assertWebGpuAdapterAvailable,
-  compositionRequiresWebGpu,
-  resolveLocalBrowserGpuMode,
-  resolveLocalWebGpu,
-} from "../browser/gpuPolicy.js";
+import { assertWebGpuAdapterAvailable } from "../browser/gpuPolicy.js";
 import {
   buildOnionSvg,
   buildRenderedStripSvg,
@@ -413,16 +408,16 @@ async function openCompositionPage(
   size: FrameSize;
 }> {
   const puppeteer = await import("puppeteer-core");
-  const { buildChromeArgs } = await import("@hyperframes/engine");
   const size = resolveCompositionViewportFromHtml(html);
-  const requestedGpuMode = resolveLocalBrowserGpuMode();
-  const resolvedGpuMode = await resolveManagedGpuMode(requestedGpuMode, executablePath);
-  const requiresWebGpu = compositionRequiresWebGpu(html);
-  const { gpuConfig, softwareWebGpu } = resolveLocalWebGpu(resolvedGpuMode, requiresWebGpu);
+  const { args, requiresWebGpu, softwareWebGpu } = await localCaptureChrome(
+    html,
+    size,
+    executablePath,
+  );
   const browser = await launchManagedBrowser(puppeteer.default, {
     headless: true,
     executablePath,
-    args: buildChromeArgs({ ...size, captureMode: "screenshot", requiresWebGpu }, gpuConfig),
+    args,
   });
   try {
     const page = await browser.newPage();

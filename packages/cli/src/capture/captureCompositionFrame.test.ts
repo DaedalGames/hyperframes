@@ -286,11 +286,12 @@ describe("screenshot Chrome arguments", () => {
       "utf8",
     );
     const layoutSource = readFileSync(new URL("../commands/layout.ts", import.meta.url), "utf8");
+    const launchSource = readFileSync(new URL("../browser/launch.ts", import.meta.url), "utf8");
 
-    expect(captureSource).toContain("resolveManagedGpuMode(");
-    expect(captureSource).toContain("resolveLocalWebGpu(resolvedGpuMode, requiresWebGpu)");
-    expect(layoutSource).toContain("resolveManagedGpuMode(");
-    expect(layoutSource).toContain("resolveLocalWebGpu(resolvedGpuMode, requiresWebGpu)");
+    expect(captureSource).toContain("localCaptureChrome(");
+    expect(layoutSource).toContain("localCaptureChrome(");
+    expect(launchSource).toContain("resolveManagedGpuMode(requestedMode, executablePath, context)");
+    expect(launchSource).toContain("resolveLocalWebGpu(resolvedGpuMode, requiresWebGpu)");
   });
 });
 

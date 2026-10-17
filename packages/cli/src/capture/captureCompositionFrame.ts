@@ -1,7 +1,7 @@
 import {
   rethrowAfterBrowserCleanup,
   launchManagedBrowser,
-  resolveManagedGpuMode,
+  localCaptureChrome,
 } from "../browser/launch.js";
 import { spawn } from "node:child_process";
 import type { Browser, Page } from "puppeteer-core";
@@ -9,9 +9,7 @@ import type { InProcessRequest, InProcessResponse } from "../utils/staticProject
 import { c } from "../ui/colors.js";
 import {
   assertWebGpuAdapterAvailable,
-  compositionRequiresWebGpu,
   resolveLocalBrowserGpuMode,
-  resolveLocalWebGpu,
   type BrowserGpuMode,
 } from "../browser/gpuPolicy.js";
 import { windowsChromeCrashRemediation } from "../browser/windowsCrash.js";
@@ -206,31 +204,27 @@ export async function openSettledCompositionPage(
   const { ensureBrowser, findSystemBrowser } = await import("../browser/manager.js");
   const browser = await ensureBrowser({ signal: options.signal });
   const puppeteer = await import("puppeteer-core");
-  const { buildChromeArgs } = await import("@hyperframes/engine");
   const requestedGpuMode = options.browserGpuMode ?? resolveCliChromeGpuMode();
   // Nothing may listen (a sandbox refused it): DevTools over a pipe, one process, pages answered in-process.
   const answer = (await import("../utils/staticProjectServer.js")).inProcessAnswer(url);
-  const requiresWebGpu = compositionRequiresWebGpu(html);
+  let requiresWebGpu = false;
   let softwareWebGpu = false;
   const launch = async (executablePath: string): Promise<Browser> => {
     options.signal?.throwIfAborted();
-    const resolvedGpuMode = await resolveManagedGpuMode(requestedGpuMode, executablePath, {
+    const chrome = await localCaptureChrome(html, viewport, executablePath, requestedGpuMode, {
       signal: options.signal,
       onBrowser: options.onBrowser,
       noListen: answer !== undefined,
     });
     options.signal?.throwIfAborted();
-    const webGpu = resolveLocalWebGpu(resolvedGpuMode, requiresWebGpu);
-    softwareWebGpu = webGpu.softwareWebGpu;
-    const args = buildChromeArgs(
-      { ...viewport, captureMode: "screenshot", requiresWebGpu },
-      webGpu.gpuConfig,
-    );
+    ({ requiresWebGpu, softwareWebGpu } = chrome);
     return launchManagedBrowser(puppeteer.default, {
       headless: true,
       signal: options.signal,
       executablePath,
-      ...(answer ? { pipe: true, args: [...args, "--single-process"] } : { args }),
+      ...(answer
+        ? { pipe: true, args: [...chrome.args, "--single-process"] }
+        : { args: chrome.args }),
     });
   };
 

@@ -34,7 +34,7 @@ const { default: browserCommand } = await import("./browser.js");
 
 function runEnsure(force: boolean) {
   return browserCommand.run!({
-    args: { _: [], subcommand: "ensure", force },
+    args: { _: [], subcommand: "ensure", dir: "", force },
     rawArgs: [],
     cmd: browserCommand,
   });

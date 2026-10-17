@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { failCommand } from "../utils/commandResult.js";
 import { defineCommand } from "citty";
 import type { Example } from "./_examples.js";
@@ -8,6 +9,7 @@ export const examples: Example[] = [
   ["Find or download Chrome for rendering", "hyperframes browser ensure"],
   ["Purge a stale/partial download and re-download", "hyperframes browser ensure --force"],
   ["Print the Chrome executable path", "hyperframes browser path"],
+  ["Print the Chrome and flags check uses for a project, as JSON", "hyperframes browser args ."],
   ["Remove cached Chrome download", "hyperframes browser clear"],
 ];
 import { formatBytes } from "../ui/format.js";
@@ -121,6 +123,21 @@ async function runPath(): Promise<void> {
   process.stdout.write(result.executablePath + "\n");
 }
 
+/** The Chrome and flags `check` opens this project with, for a script that launches its own Chrome. */
+async function runArgs(projectDir: string): Promise<void> {
+  const { bundleToSingleHtml } = await import("@hyperframes/core/compiler");
+  const { localCaptureChrome } = await import("../browser/launch.js");
+  const { resolveCompositionViewportFromHtml } = await import("../utils/compositionViewport.js");
+  const html = await bundleToSingleHtml(resolve(projectDir));
+  const { executablePath } = await ensureBrowser();
+  const { args } = await localCaptureChrome(
+    html,
+    resolveCompositionViewportFromHtml(html),
+    executablePath,
+  );
+  process.stdout.write(JSON.stringify({ executablePath, args }) + "\n");
+}
+
 function runClear(): void {
   clack.intro(c.bold("hyperframes browser clear"));
 
@@ -138,7 +155,12 @@ export default defineCommand({
     subcommand: {
       type: "positional",
       description:
-        "ensure = find or download Chrome, path = print executable path, clear = remove cached download",
+        "ensure = find or download Chrome, path = print executable path, args = print a project's browser and flags, clear = remove cached download",
+      required: false,
+    },
+    dir: {
+      type: "positional",
+      description: "args only: the project folder (default: the current folder)",
       required: false,
     },
     force: {
@@ -160,6 +182,7 @@ Manage the Chrome browser used for rendering.
 ${c.bold("SUBCOMMANDS:")}
   ${c.accent("ensure")}   ${c.dim("Find or download Chrome for rendering")}
   ${c.accent("path")}     ${c.dim("Print browser executable path (for scripting)")}
+  ${c.accent("args")}     ${c.dim("Print the browser and flags check uses for a project, as JSON")}
   ${c.accent("clear")}    ${c.dim("Remove cached Chrome download")}
 
 ${c.bold("EXAMPLES:")}
@@ -176,6 +199,8 @@ ${c.bold("EXAMPLES:")}
         return runEnsure({ force: args.force });
       case "path":
         return runPath();
+      case "args":
+        return runArgs(args.dir ?? ".");
       case "clear":
         return runClear();
       default:

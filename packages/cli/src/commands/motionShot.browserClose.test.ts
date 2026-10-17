@@ -29,7 +29,7 @@ vi.mock("../utils/staticProjectServer.js", () => ({
 }));
 vi.mock("../browser/launch.js", () => ({
   launchManagedBrowser: async () => browser,
-  resolveManagedGpuMode: async () => "software",
+  localCaptureChrome: async () => ({ args: [], requiresWebGpu: false, softwareWebGpu: false }),
 }));
 vi.mock("../capture/captureCompositionFrame.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../capture/captureCompositionFrame.js")>()),

@@ -1,4 +1,4 @@
-import { launchManagedBrowser, resolveManagedGpuMode } from "../browser/launch.js";
+import { launchManagedBrowser, localCaptureChrome } from "../browser/launch.js";
 // The media-metadata wait exists twice on purpose: once Node-side and once
 // inside a page.evaluate() body, which is serialized into the browser and
 // cannot import the Node helper. Line-level markers don't survive the clone
@@ -437,17 +437,18 @@ async function validateInBrowser(
   try {
     const browser = await ensureBrowser();
     const puppeteer = await import("puppeteer-core");
-    const { buildChromeArgs, analyzeClipMediaFit } = await import("@hyperframes/engine");
-    const requestedGpuMode = resolveCliChromeGpuMode();
-    const { assertWebGpuAdapterAvailable, compositionRequiresWebGpu, resolveLocalWebGpu } =
-      await import("../browser/gpuPolicy.js");
-    const resolvedGpuMode = await resolveManagedGpuMode(requestedGpuMode, browser.executablePath);
-    const requiresWebGpu = compositionRequiresWebGpu(html);
-    const { gpuConfig, softwareWebGpu } = resolveLocalWebGpu(resolvedGpuMode, requiresWebGpu);
+    const { analyzeClipMediaFit } = await import("@hyperframes/engine");
+    const { assertWebGpuAdapterAvailable } = await import("../browser/gpuPolicy.js");
+    const { args, requiresWebGpu, softwareWebGpu } = await localCaptureChrome(
+      html,
+      viewport,
+      browser.executablePath,
+      resolveCliChromeGpuMode(),
+    );
     const chromeBrowser = await launchManagedBrowser(puppeteer.default, {
       headless: true,
       executablePath: browser.executablePath,
-      args: buildChromeArgs({ ...viewport, captureMode: "screenshot", requiresWebGpu }, gpuConfig),
+      args,
     });
 
     try {
