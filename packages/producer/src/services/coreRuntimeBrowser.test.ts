@@ -240,6 +240,156 @@ describe("core runtime browser contract", () => {
     }
   });
 
+  it.each([1, 2])(
+    "samples a stylesheet-only filter endpoint when its tween starts at %ss",
+    async (fromAt) => {
+      const sequential = await browser.newPage();
+      const reference = await browser.newPage();
+      try {
+        for (const target of [sequential, reference]) {
+          await target.setViewport({ width: 320, height: 180 });
+          await target.setContent(
+            `<style>body{margin:0}#fade{position:absolute;width:100px;height:80px;background:red;filter:opacity(1)}</style><div data-composition-id="root" data-duration="6" data-width="320" data-height="180"><div id="fade" class="clip" data-start="2" data-duration="3"></div></div>`,
+          );
+        }
+        await sequential.addScriptTag({
+          path: resolve(import.meta.dirname, "../../../core/node_modules/gsap/dist/gsap.min.js"),
+        });
+        await sequential.addScriptTag({
+          content: `window.__timelines={root:gsap.timeline({paused:true}).from("#fade",{filter:"opacity(0)",duration:1,immediateRender:false,lazy:false,ease:"none"},${fromAt})};`,
+        });
+        await addRuntime(sequential);
+        const samples = await sequential.evaluate(() => {
+          const records = [];
+          for (let frame = 0; frame <= 90; frame++) {
+            window.__player!.renderSeek!(frame / 30, { exact: true });
+            if ([59, 60, 75, 90].includes(frame)) {
+              const clip = document.getElementById("fade")!;
+              records.push({
+                frame,
+                visibility: clip.style.visibility,
+                filter: getComputedStyle(clip).filter,
+              });
+            }
+          }
+          return records;
+        });
+        expect(samples).toEqual([
+          { frame: 59, visibility: "hidden", filter: "opacity(0)" },
+          { frame: 60, visibility: "visible", filter: fromAt === 1 ? "opacity(1)" : "opacity(0)" },
+          {
+            frame: 75,
+            visibility: "visible",
+            filter: fromAt === 1 ? "opacity(1)" : "opacity(0.5)",
+          },
+          { frame: 90, visibility: "visible", filter: "opacity(1)" },
+        ]);
+        expect(Buffer.from(await sequential.screenshot())).toEqual(
+          Buffer.from(await reference.screenshot()),
+        );
+      } finally {
+        await sequential.close();
+        await reference.close();
+      }
+    },
+  );
+
+  it("samples stylesheet filters in source-offset standalone timelines before clip activation", async () => {
+    const child = await browser.newPage();
+    try {
+      await child.setContent(
+        `<style>#fade{filter:opacity(1)}</style><div data-composition-id="root" data-duration="6" data-width="320" data-height="180"><div data-composition-id="child" data-start="0" data-duration="6" data-playback-start="1"><div id="fade" data-start="2" data-duration="3"></div></div></div>`,
+      );
+      await child.addScriptTag({
+        path: resolve(import.meta.dirname, "../../../core/node_modules/gsap/dist/gsap.min.js"),
+      });
+      await child.addScriptTag({
+        content: `window.__timelines={root:gsap.timeline({paused:true}).to({}, {duration:6}),child:gsap.timeline({paused:true}).from("#fade",{filter:"opacity(0)",duration:1,immediateRender:false,lazy:false,ease:"none"},2)};`,
+      });
+      await addRuntime(child);
+      const result = await child.evaluate(() => {
+        for (let frame = 0; frame <= 90; frame++)
+          window.__player!.renderSeek!(frame / 30, { exact: true });
+        return {
+          filter: getComputedStyle(document.getElementById("fade")!).filter,
+          flags: document.querySelectorAll("[data-hf-filter-sampling]").length,
+        };
+      });
+      expect(result).toEqual({ filter: "opacity(1)", flags: 0 });
+    } finally {
+      await child.close();
+    }
+  });
+
+  it("keeps filter sampling available through adapter seeks and restores it after errors", async () => {
+    const adapted = await browser.newPage();
+    try {
+      await adapted.setContent(
+        `<style>#fade{filter:opacity(1)}</style><div data-composition-id="root" data-duration="6" data-width="320" data-height="180"><div id="fade" data-start="2" data-duration="3"></div></div>`,
+      );
+      await adapted.addScriptTag({
+        content: `window.samples=[];window.__hfAnime=[{pause(){},play(){},seek(ms){if(ms>=1000){const el=document.getElementById("fade");window.samples.push({filter:getComputedStyle(el).filter,visibility:el.style.visibility});throw new Error("authored adapter failure");}}}];`,
+      });
+      await addRuntime(adapted);
+      const result = await adapted.evaluate(() => {
+        for (let frame = 0; frame <= 45; frame++)
+          window.__player!.renderSeek!(frame / 30, { exact: true });
+        return {
+          samples: (window as unknown as { samples: unknown[] }).samples,
+          flags: document.querySelectorAll("[data-hf-filter-sampling]").length,
+          filter: getComputedStyle(document.getElementById("fade")!).filter,
+        };
+      });
+      expect(result.samples.length).toBeGreaterThan(0);
+      for (const sample of result.samples)
+        expect(sample).toEqual({ filter: "opacity(1)", visibility: "hidden" });
+      expect(result.flags).toBe(0);
+      expect(result.filter).toBe("opacity(0)");
+    } finally {
+      await adapted.close();
+    }
+  });
+
+  it("keeps Studio future images unfetched during sequential filter sampling", async () => {
+    const preview = await browser.newPage();
+    const hits: string[] = [];
+    try {
+      await preview.setRequestInterception(true);
+      preview.on("request", (request) => {
+        if (request.url().startsWith("https://assets.invalid/")) {
+          hits.push(request.url());
+          void request.respond({
+            status: 200,
+            contentType: "image/png",
+            body: Buffer.from(PNG_1PX, "base64"),
+          });
+        } else void request.continue();
+      });
+      await preview.setContent(
+        `<meta name="hyperframes-studio-preview"><style>.clip{position:absolute;width:100px;height:80px;filter:opacity(1)}</style><div data-composition-id="root" data-duration="30" data-width="320" data-height="180"><div class="clip" data-start="1" data-duration="4"><img id="near" loading="lazy"></div><div class="clip" data-start="20" data-duration="2"><img id="far" loading="lazy"></div></div>`,
+      );
+      await addRuntime(preview);
+      await preview.evaluate(() => {
+        for (const id of ["near", "far"])
+          (document.getElementById(id) as HTMLImageElement).src =
+            `https://assets.invalid/${id}.png`;
+        for (let frame = 0; frame <= 90; frame++)
+          window.__player!.renderSeek!(frame / 30, { exact: true });
+      });
+      await preview.waitForFunction(
+        () => (document.getElementById("near") as HTMLImageElement).naturalWidth > 0,
+      );
+      const far = await preview.evaluate(() => ({
+        display: getComputedStyle(document.getElementById("far")!).display,
+        width: (document.getElementById("far") as HTMLImageElement).naturalWidth,
+      }));
+      expect(hits).toEqual(["https://assets.invalid/near.png"]);
+      expect(far).toEqual({ display: "none", width: 0 });
+    } finally {
+      await preview.close();
+    }
+  });
+
   it("leaves existing author filter, clip-path and transform transitions running", async () => {
     const authorPage = await browser.newPage();
     try {

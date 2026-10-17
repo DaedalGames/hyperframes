@@ -19,10 +19,12 @@ const SKIP_HIDDEN_IMAGES = `${SKIPPED_CLIP} img { display: none !important; }`;
 const STUDIO_PREVIEW_MARK = `meta[name="${STUDIO_PREVIEW_MARK_META}"]`;
 export const CLIP_HIDDEN_ATTR = "data-hf-clip-hidden";
 const CONTENTS_ATTR = "data-hf-hidden-clip-contents";
+const FILTER_SAMPLING_ATTR = "data-hf-filter-sampling";
 const HIDDEN_CLIP = `[${CLIP_HIDDEN_ATTR}][style*="visibility: hidden"]`;
+const FILTERED_CLIP = `${HIDDEN_CLIP}:not([${FILTER_SAMPLING_ATTR}])`;
 // feColorMatrix can make hidden input opaque; filter the final group without changing layout.
 const HIDE_HIDDEN_CLIP_CONTENTS = `${HIDDEN_CLIP} * { visibility: hidden !important; }
-${HIDDEN_CLIP} { filter: opacity(0) !important; }`;
+${FILTERED_CLIP} { filter: opacity(0) !important; }`;
 
 function isHostFilterTransition(animation: Animation, el: StylableElement): boolean {
   if (!("transitionProperty" in animation)) return false;
@@ -40,21 +42,31 @@ function isHostFilterTransition(animation: Animation, el: StylableElement): bool
   );
 }
 
-function changeClipPaint(el: StylableElement, hidden: boolean, change: () => void): void {
-  const edge = el.matches(HIDDEN_CLIP) !== hidden;
-  const before =
-    edge && typeof el.getAnimations === "function" ? new Set(el.getAnimations()) : null;
-  change();
-  if (!before) return;
-  // Finish only new gate transitions; authored, descendant, and pseudo effects keep running.
-  for (const animation of el.getAnimations()) {
-    if (before.has(animation) || !isHostFilterTransition(animation, el)) continue;
-    try {
-      animation.finish();
-    } catch (err) {
-      swallow("runtime.timedClipHide.finishGateTransition", err);
+type PaintChange = { el: StylableElement; hidden: boolean; change: () => void };
+
+function changeClipPaintBatch(changes: PaintChange[]): void {
+  const before = changes.map(({ el, hidden }) =>
+    el.matches(FILTERED_CLIP) !== hidden && typeof el.getAnimations === "function"
+      ? new Set(el.getAnimations())
+      : null,
+  );
+  for (const { change } of changes) change();
+  const after = changes.map(({ el }, i) => (before[i] ? el.getAnimations() : []));
+  for (const [i, { el }] of changes.entries()) {
+    // Finish only new gate transitions; authored, descendant, and pseudo effects keep running.
+    for (const animation of after[i] ?? []) {
+      if (before[i]?.has(animation) || !isHostFilterTransition(animation, el)) continue;
+      try {
+        animation.finish();
+      } catch (err) {
+        swallow("runtime.timedClipHide.finishGateTransition", err);
+      }
     }
   }
+}
+
+function changeClipPaint(el: StylableElement, hidden: boolean, change: () => void): void {
+  changeClipPaintBatch([{ el, hidden: hidden && !el.hasAttribute(FILTER_SAMPLING_ATTR), change }]);
 }
 
 /** null leaves Studio-stamped visibility authored while removing its runtime hide flag. */
@@ -76,10 +88,33 @@ export function setTimedClipPaintVisibility(el: StylableElement, visibility: str
 }
 
 export function showHiddenClips(): () => void {
-  const hidden = Array.from(document.querySelectorAll<StylableElement>(`[${CLIP_HIDDEN_ATTR}]`));
+  const hidden = Array.from(document.querySelectorAll<StylableElement>(HIDDEN_CLIP));
   for (const el of hidden) setTimedClipPaintVisibility(el, "visible");
   return () => {
     for (const el of hidden) setTimedClipPaintVisibility(el, "hidden");
+  };
+}
+
+export function showHiddenClipFilters(): () => void {
+  const hidden = Array.from(document.querySelectorAll<StylableElement>(FILTERED_CLIP));
+  changeClipPaintBatch(
+    hidden.map((el) => ({
+      el,
+      hidden: false,
+      change: () => el.setAttribute(FILTER_SAMPLING_ATTR, ""),
+    })),
+  );
+  let restored = false;
+  return () => {
+    if (restored) return;
+    restored = true;
+    changeClipPaintBatch(
+      hidden.map((el) => ({
+        el,
+        hidden: el.matches(HIDDEN_CLIP),
+        change: () => el.removeAttribute(FILTER_SAMPLING_ATTR),
+      })),
+    );
   };
 }
 

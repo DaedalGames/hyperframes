@@ -4,6 +4,7 @@ import {
   setTimedClipPaintVisibility,
   setTimedClipVisibility,
   showHiddenClips,
+  showHiddenClipFilters,
 } from "./timedClipHide";
 
 const mount = () => document.body.appendChild(document.createElement("div"));
@@ -96,5 +97,60 @@ describe("timed clip paint transitions", () => {
     expect(clip.style.visibility).toBe("hidden");
     expect(clip.hasAttribute(CLIP_HIDDEN_ATTR)).toBe(false);
     expect(gate.finish).toHaveBeenCalledOnce();
+  });
+  it("borrows only the filter and restores owned flags after nested calls and authored changes", () => {
+    const clip = mount();
+    setTimedClipVisibility(clip, "hidden");
+    const restore = showHiddenClipFilters();
+    expect(clip.style.visibility).toBe("hidden");
+    expect(clip.hasAttribute("data-hf-filter-sampling")).toBe(true);
+    const restoreNested = showHiddenClipFilters();
+    restoreNested();
+    expect(clip.hasAttribute("data-hf-filter-sampling")).toBe(true);
+    const scans = vi.fn().mockReturnValue([]);
+    Object.defineProperty(clip, "getAnimations", { value: scans });
+    setTimedClipPaintVisibility(clip, "visible");
+    expect(scans).not.toHaveBeenCalled();
+    clip.remove();
+    restore();
+    expect(scans).not.toHaveBeenCalled();
+    expect(clip.hasAttribute("data-hf-filter-sampling")).toBe(false);
+    expect(clip.style.visibility).toBe("visible");
+    clip.setAttribute("data-hf-filter-sampling", "");
+    restore();
+    expect(clip.hasAttribute("data-hf-filter-sampling")).toBe(true);
+  });
+
+  it("collects the whole batch before finishing any newly created transition", () => {
+    const clips = [mount(), mount()];
+    const order: string[] = [];
+    for (const [i, clip] of clips.entries()) {
+      setTimedClipVisibility(clip, "hidden");
+      const transition = {
+        transitionProperty: "filter",
+        effect: { target: clip },
+        finish: () => order.push(`finish${i}`),
+      };
+      Object.defineProperty(clip, "getAnimations", {
+        value: () => {
+          order.push(`read${i}`);
+          return clip.hasAttribute("data-hf-filter-sampling") ? [transition] : [];
+        },
+      });
+    }
+    const restore = showHiddenClipFilters();
+    expect(order).toEqual(["read0", "read1", "read0", "read1", "finish0", "finish1"]);
+    restore();
+    for (const clip of clips) expect(clip.hasAttribute("data-hf-filter-sampling")).toBe(false);
+  });
+
+  it("keeps an outer jump reveal visible when a nested reveal restores", () => {
+    const clip = mount();
+    setTimedClipVisibility(clip, "hidden");
+    const restore = showHiddenClips();
+    showHiddenClips()();
+    expect(clip.style.visibility).toBe("visible");
+    restore();
+    expect(clip.style.visibility).toBe("hidden");
   });
 });
