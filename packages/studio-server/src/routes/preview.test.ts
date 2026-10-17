@@ -1321,6 +1321,7 @@ describe("hf-proxy negotiation and media codec map injection (U3)", () => {
     scanMapImpl?: ScanMapImpl;
     notePreviewPlaying?: (playing: boolean) => void;
     servedProxyName?: () => string;
+    finishedProxyPath?: () => string | null;
     probeAssetCodecImpl?: () => Promise<{
       codecName: string;
       browserHostile: boolean;
@@ -1345,6 +1346,7 @@ describe("hf-proxy negotiation and media codec map injection (U3)", () => {
       );
     vi.doMock("../helpers/proxyTranscoder.js", () => ({
       resolveProxy,
+      finishedProxyPath: opts.finishedProxyPath ?? (() => null),
       notePreviewPlaying: opts.notePreviewPlaying ?? (() => {}),
       servedProxyName:
         opts.servedProxyName ??
@@ -1531,6 +1533,46 @@ describe("hf-proxy negotiation and media codec map injection (U3)", () => {
       );
       expect(sized.headers.get("ETag")).toBeTruthy();
       expect(sized.headers.get("ETag")).not.toBe(full.headers.get("ETag"));
+    });
+
+    it("starts no copy for a capture, which gets the original under the original's tag", async () => {
+      const projectDir = createProjectDir();
+      writeFileSync(join(projectDir, "clip.mp4"), "original-hevc-bytes");
+      pastSettleWindow();
+      const resolveProxyMock = vi.fn(async () => "should-not-be-called");
+      const { registerPreviewRoutes: register } = await loadPreviewModule({
+        resolveProxyImpl: resolveProxyMock,
+      });
+      const app = new Hono();
+      register(app, createAdapter(projectDir));
+
+      const capture = await app.request(
+        `http://localhost/projects/demo/preview/clip.mp4?hf-proxy=h264&hf-proxy-box=256x256&${PREVIEW_CAPTURE_PARAM}=1`,
+      );
+      const original = await app.request("http://localhost/projects/demo/preview/clip.mp4");
+      expect(capture.status).toBe(200);
+      expect(await capture.text()).toBe("original-hevc-bytes");
+      expect(capture.headers.get("ETag")).toBe(original.headers.get("ETag"));
+      expect(resolveProxyMock).not.toHaveBeenCalled();
+    });
+
+    it("serves a capture the finished copy when one exists", async () => {
+      const projectDir = createProjectDir();
+      writeFileSync(join(projectDir, "clip.mp4"), "original-hevc-bytes");
+      const proxyPath = join(projectDir, "proxy.mp4");
+      writeFileSync(proxyPath, "proxy-bytes");
+      const { registerPreviewRoutes: register } = await loadPreviewModule({
+        resolveProxyImpl: async () => proxyPath,
+        finishedProxyPath: () => proxyPath,
+      });
+      const app = new Hono();
+      register(app, createAdapter(projectDir));
+
+      const capture = await app.request(
+        `http://localhost/projects/demo/preview/clip.mp4?hf-proxy=h264&hf-proxy-box=256x256&${PREVIEW_CAPTURE_PARAM}=1`,
+      );
+      expect(capture.status).toBe(200);
+      expect(await capture.text()).toBe("proxy-bytes");
     });
 
     it.each([

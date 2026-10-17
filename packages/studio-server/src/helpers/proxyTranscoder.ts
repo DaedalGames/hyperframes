@@ -236,6 +236,16 @@ function finishedCopyFor(
   return boxedCopies(source, variant).find((copy) => covers(copy.box, box))?.path ?? null;
 }
 
+/** The finished copy a request would be served, or null while there is none. */
+export function finishedProxyPath(
+  projectDir: string,
+  absoluteSourcePath: string,
+  variant: ProxyVariant,
+  box?: PreviewProxyBox,
+): string | null {
+  return finishedCopyFor(canonicalizeProxySource(projectDir, absoluteSourcePath), variant, box);
+}
+
 /** The file name a request is served from, so a validator changes when the file does. */
 export function servedProxyName(
   projectDir: string,

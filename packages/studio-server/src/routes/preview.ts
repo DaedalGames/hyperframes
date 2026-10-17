@@ -18,6 +18,7 @@ import {
   STUDIO_PREVIEW_ERRORS,
 } from "@hyperframes/core/studio-preview-mark";
 import {
+  PREVIEW_CAPTURE_PARAM,
   PREVIEW_PROXY_BOX_PARAM,
   parsePreviewProxyBox,
   type PreviewProxyBox,
@@ -52,6 +53,7 @@ import {
 import { isVariablesPayload, VARIABLES_PAYLOAD_ERROR } from "../helpers/variablesPayload.js";
 import { injectPreviewVariables } from "../helpers/previewVariables.js";
 import {
+  finishedProxyPath,
   notePreviewPlaying,
   resolveProxy,
   servedProxyName,
@@ -327,7 +329,7 @@ function previewVariablesFromRequest(rawVariables: string | undefined):
 }
 
 /** Captures screenshot right after a seek, so they get every image eager and no preview mark. */
-export const PREVIEW_CAPTURE_PARAM = "hf-capture";
+export { PREVIEW_CAPTURE_PARAM };
 
 // Studio's console capture attaches at the iframe's load; this keeps what was raised before it.
 const EARLY_ERRORS_SCRIPT = `<script>(function(){var seen=window.${STUDIO_PREVIEW_ERRORS}=[];
@@ -687,7 +689,8 @@ export function registerPreviewRoutes(api: Hono, adapter: PreviewApiAdapter): vo
         return c.text("not found", 404);
       }
       const facts = await probeAssetCodec(file, undefined, mediaCodecProbeCache);
-      const eligibility = decideMediaProxyEligibility(facts, proxyBox);
+      const capture = c.req.query(PREVIEW_CAPTURE_PARAM) !== undefined;
+      const eligibility = decideMediaProxyEligibility(facts, proxyBox, capture);
       if (!eligibility.eligible) {
         return c.text(`media proxy unavailable: ${eligibility.reason}`, 422);
       }
@@ -696,6 +699,13 @@ export function registerPreviewRoutes(api: Hono, adapter: PreviewApiAdapter): vo
       proxyVariant = resolveProxyVariantRequest(proxyParam, facts) ?? undefined;
       if (!proxyVariant) {
         return c.text("media proxy variant does not match asset", 422);
+      }
+      // No copy to lend and none may start: the original, under its own tag.
+      if (
+        !eligibility.mayStartCopy &&
+        !finishedProxyPath(project.dir, file, proxyVariant, proxyBox)
+      ) {
+        proxyVariant = undefined;
       }
     }
 
