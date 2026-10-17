@@ -20,8 +20,7 @@ const STUDIO_PREVIEW_MARK = `meta[name="${STUDIO_PREVIEW_MARK_META}"]`;
 export const CLIP_HIDDEN_ATTR = "data-hf-clip-hidden";
 const CONTENTS_ATTR = "data-hf-hidden-clip-contents";
 const HIDDEN_CLIP = `[${CLIP_HIDDEN_ATTR}][style*="visibility: hidden"]`;
-// visibility hides a filter's input, but feColorMatrix can make transparent input opaque again.
-// Filter the final group without changing layout, authored opacity, or SVG definitions.
+// feColorMatrix can make hidden input opaque; filter the final group without changing layout.
 const HIDE_HIDDEN_CLIP_CONTENTS = `${HIDDEN_CLIP} * { visibility: hidden !important; }
 ${HIDDEN_CLIP} { filter: opacity(0) !important; }`;
 
@@ -47,8 +46,7 @@ function changeClipPaint(el: StylableElement, hidden: boolean, change: () => voi
     edge && typeof el.getAnimations === "function" ? new Set(el.getAnimations()) : null;
   change();
   if (!before) return;
-  // Authored filter transitions can delay the paint gate. Finish only transitions this gate created;
-  // keep an author's existing animations and transitions (including pseudo-elements) running.
+  // Finish only new gate transitions; authored, descendant, and pseudo effects keep running.
   for (const animation of el.getAnimations()) {
     if (before.has(animation) || !isHostFilterTransition(animation, el)) continue;
     try {
