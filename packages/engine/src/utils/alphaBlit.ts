@@ -284,17 +284,15 @@ export function decodePngToRgb48le(buf: Buffer): { width: number; height: number
  * ## Convention
  *
  * "Linear" here means **scene light in [0, 1] relative to SDR reference white**
- * (not absolute nits). The HLG branch applies the OETF directly — no OOTF (no
- * gamma 1.2 scene→display conversion). This is the right choice for DOM
- * overlays that will be composited ON TOP of HLG video pixels (which are
- * already in HLG signal space); we need the overlay to sit in the same space
- * as what it’s blending onto. Applying the OOTF here would double-apply it
- * when the HDR video already carries scene-light semantics.
+ * (not absolute nits). Both branches place SDR white at the ITU-R BT.2408
+ * reference level, so SDR content (text, UI, graded or SDR video) sits at
+ * SDR-white brightness inside an HDR frame instead of at peak:
  *
- * For PQ, SDR white is placed at 203 nits per ITU-R BT.2408 ("SDR white"
- * reference level) and normalized against 10,000-nit peak. This lets SDR
- * content (text, UI) sit at the conventional SDR-white brightness within a
- * PQ frame rather than at peak brightness.
+ * - HLG: 75% signal. The OETF's input is scene light relative to HLG PEAK, so
+ *   SDR-relative light is first scaled to the scene light the inverse OETF
+ *   gives for 0.75. No OOTF: the overlay blends onto HLG video pixels, which
+ *   are already in scene-light signal space.
+ * - PQ: 203 nits, normalized against the 10,000-nit peak.
  *
  * Note: converts the transfer function but not the color primaries (bt709 →
  * bt2020). For neutral/near-neutral content (text, UI) the gamut difference
@@ -313,6 +311,7 @@ function buildSrgbToSignalLut(transfer: "hlg" | "pq" | "srgb"): Uint16Array {
   const hlgA = 0.17883277;
   const hlgB = 1 - 4 * hlgA;
   const hlgC = 0.5 - hlgA * Math.log(4 * hlgA);
+  const hlgSdrWhite = (Math.exp((0.75 - hlgC) / hlgA) + hlgB) / 12;
 
   // PQ (SMPTE 2084) OETF constants
   const pqM1 = 0.1593017578125;
@@ -333,8 +332,8 @@ function buildSrgbToSignalLut(transfer: "hlg" | "pq" | "srgb"): Uint16Array {
 
     let signal: number;
     if (transfer === "hlg") {
-      signal =
-        linear <= 1 / 12 ? Math.sqrt(3 * linear) : hlgA * Math.log(12 * linear - hlgB) + hlgC;
+      const scene = linear * hlgSdrWhite;
+      signal = scene <= 1 / 12 ? Math.sqrt(3 * scene) : hlgA * Math.log(12 * scene - hlgB) + hlgC;
     } else {
       // PQ OETF: linear light (in SDR nits) → PQ signal
       const Lp = Math.max(0, (linear * sdrNits) / pqMaxNits);
