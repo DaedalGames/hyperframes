@@ -110,6 +110,42 @@ describe("scene scripts held until the playhead nears", () => {
     expect(ran()).toBe("near tied far ");
   });
 
+  it.each([0, 10])(
+    "runs a nested held scene on its first direct root-time seek, with parent in-point %s",
+    async (inPoint) => {
+      (globalThis as { CSS?: { escape?: (v: string) => string } }).CSS ??= {};
+      globalThis.CSS.escape ??= (v: string) => v;
+      document.head.appendChild(
+        Object.assign(document.createElement("meta"), { name: STUDIO_PREVIEW_MARK_META }),
+      );
+      document.body.innerHTML =
+        `<div data-composition-id="main" data-root="true" data-start="0" data-duration="60" data-width="1920" data-height="1080">` +
+        `<div data-composition-id="group" data-start="20" data-duration="40" data-playback-start="${inPoint}">` +
+        host("far", 30) +
+        `</div></div>` +
+        sceneScript("far");
+      window.__timelines = { main: timeline(60) };
+      const register = () => {
+        window.__timelines!.far = timeline(5);
+      };
+      document.addEventListener("scene-ran", register);
+      try {
+        vi.resetModules();
+        await import("./entry");
+        await vi.waitFor(() => expect(window.__player).toBeDefined());
+        expect(ran()).toBe("");
+        window.__player!.seek(51 - inPoint);
+        await window.__hfWaitForSeekCompletion?.();
+        expect(ran()).toBe("far ");
+        window.__player!.seek(52 - inPoint);
+        await window.__hfWaitForSeekCompletion?.();
+        expect(ran()).toBe("far ");
+      } finally {
+        document.removeEventListener("scene-ran", register);
+      }
+    },
+  );
+
   it("runs a far scene the playback reaches without pausing the clock", async () => {
     await boot(true);
     window.__player!.seek(19.5);

@@ -1,6 +1,7 @@
 import { SCENE_EAGER_ATTR, SCENE_PART_ATTR } from "../sceneParts";
 import { parseStrictFiniteTimingNumber } from "./playbackRate";
 import { skipsHiddenImages } from "./timedClipHide";
+import { createRuntimeStartTimeResolver } from "./startResolver";
 
 /** How far ahead of the playhead a held scene's scripts run, so they finish before it shows. */
 const SCENE_LEAD_SECONDS = 10;
@@ -17,13 +18,18 @@ const held = new Map<string, HeldScene>();
 const timing = (host: Element, name: string) =>
   parseStrictFiniteTimingNumber(host.getAttribute(name));
 
-function holdable(host: Element | undefined): HeldScene | null {
+function holdable(
+  host: Element | undefined,
+  resolveStart: (host: Element, fallback?: number) => number,
+): HeldScene | null {
   // Swaps and boot give captions their edited words; a mount would not.
   if (!host || host.hasAttribute(SCENE_EAGER_ATTR) || host.querySelector(".caption-group"))
     return null;
-  const start = timing(host, "data-start");
+  const authoredStart = timing(host, "data-start");
   const duration = timing(host, "data-duration");
-  if (start == null || duration == null || start <= SCENE_LEAD_SECONDS) return null;
+  if (authoredStart == null || duration == null) return null;
+  const start = resolveStart(host, NaN);
+  if (!Number.isFinite(start) || start <= SCENE_LEAD_SECONDS) return null;
   return { host, start, end: start + duration, scripts: [] };
 }
 
@@ -32,6 +38,10 @@ function holdable(host: Element | undefined): HeldScene | null {
 export function holdFarSceneScripts(scripts: Element[]): Element[] {
   held.clear();
   if (!skipsHiddenImages()) return scripts;
+  const { resolveStartForElement } = createRuntimeStartTimeResolver({
+    documentRef: document,
+    includeAuthoredTimingAttrs: true,
+  });
   const hosts = new Map<string, Element>();
   for (const el of document.querySelectorAll(`[${SCENE_PART_ATTR}]`))
     if (el.tagName !== "SCRIPT" && el.tagName !== "STYLE")
@@ -39,7 +49,7 @@ export function holdFarSceneScripts(scripts: Element[]): Element[] {
   return scripts.filter((script) => {
     const scene = script.getAttribute(SCENE_PART_ATTR);
     if (scene == null || script.hasAttribute("src")) return true;
-    const entry = held.get(scene) ?? holdable(hosts.get(scene));
+    const entry = held.get(scene) ?? holdable(hosts.get(scene), resolveStartForElement);
     if (!entry) return true;
     held.set(scene, entry);
     entry.scripts.push(script);

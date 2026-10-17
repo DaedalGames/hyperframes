@@ -1109,7 +1109,19 @@ describe("registryReads", () => {
       registryReads(
         'window.__timelines["a"] = tl; window.__timelines.b.progress(1); __timelines?.["c"]; __timelines?.d;',
       ),
-    ).toEqual({ names: ["a", "b", "c", "d"], everyScene: false });
+    ).toEqual({ names: ["b", "c", "d"], everyScene: false });
+  });
+  it("keeps member reads through comment trivia without treating a bare typeof guard as a dependency", () => {
+    for (const trivia of [" /* availability */ ", " // availability\n "]) {
+      expect(registryReads(`typeof window.__timelines${trivia}.b`)).toEqual({
+        names: ["b"],
+        everyScene: false,
+      });
+      expect(registryReads(`typeof window.__timelines${trivia};`)).toEqual({
+        names: [],
+        everyScene: false,
+      });
+    }
   });
   it("reads every scene when a read is not to one named key", () => {
     for (const script of [

@@ -1080,6 +1080,30 @@ describe("bundleToSingleHtml", () => {
     expect(bundled).toContain('var __hfTimelineCompId = "scene__hf2"');
   });
 
+  it("gives a mount that shares the page root's id its own runtime id", async () => {
+    const cliRoot = (title: string) =>
+      `<div id="root" data-composition-id="main" data-width="1920" data-height="1080"><h1>${title}</h1>`;
+    const dir = makeTempProject({
+      "index.html": `<!doctype html>
+<html><head></head><body>
+  ${cliRoot("Host")}
+    <div id="main_2" data-composition-id="main" data-composition-src="compositions/scene.html"></div>
+  </div>
+  <script>window.__timelines={};</script>
+</body></html>`,
+      "compositions/scene.html": `<!doctype html><html><body>${cliRoot("Scene")}</div>
+  <script>window.__timelines["main"] = "scene";</script>
+</body></html>`,
+    });
+
+    const bundled = await bundleToSingleHtml(dir);
+    const host = parseHTML(bundled).document.querySelector("#main_2");
+
+    expect(host?.getAttribute("data-composition-id")).toBe("main__hf1");
+    expect(host?.getAttribute("data-hf-original-composition-id")).toBe("main");
+    expect(bundled).toContain('var __hfTimelineCompId = "main__hf1"');
+  });
+
   it("uniquifies duplicate sub-compositions across inline-template and external hosts", async () => {
     const dir = makeTempProject({
       "index.html": `<!doctype html>
@@ -3158,7 +3182,7 @@ describe("bundleToSingleHtml sceneParts", () => {
   const partsOf = (doc: Document, scene: string) =>
     [...doc.querySelectorAll(`[data-hf-scene="${scene}"]`)].map((el) => el.tagName.toLowerCase());
 
-  it("keeps each scene's own copy of a shared @font-face, so one scene still swaps alone", async () => {
+  it("puts a @font-face two scenes share in one style outside the scenes, once", async () => {
     const face = `@font-face { font-family: "Brand"; src: url('assets/fonts/brand.woff2'); }`;
     const dir = makeTempProject({
       "index.html": `<!doctype html>
@@ -3178,8 +3202,14 @@ describe("bundleToSingleHtml sceneParts", () => {
       const css = [...doc.querySelectorAll(`style[data-hf-scene="${scene}"]`)]
         .map((el) => el.textContent ?? "")
         .join("\n");
-      expect(css).toContain("@font-face");
+      expect(css).not.toContain("@font-face");
     }
+    const fonts = doc.querySelector("style[data-hf-scene-fonts]");
+    expect(fonts?.hasAttribute("data-hf-scene")).toBe(false);
+    const faces = (css: string) => css.match(/@font-face/g)?.length ?? 0;
+    expect(faces(fonts?.textContent ?? "")).toBe(1);
+    const allCss = [...doc.querySelectorAll("style")].map((el) => el.textContent ?? "").join("\n");
+    expect(faces(allCss)).toBe(1);
   });
 
   it("tags each top-level scene's host, styles and scripts, with nested scenes in their parent's parts", async () => {
@@ -3313,6 +3343,66 @@ ${["a", "b", "c", "d", "e", "f"].map((id, i) => `    <div data-composition-id="$
     // Swap refusals are their own: a canvas scene cannot swap, yet it can wait for the playhead.
     expect(doc.querySelector('div[data-hf-scene="a"]')?.getAttribute("data-hf-scene-no-swap")).toBe(
       "its script uses getContext",
+    );
+  });
+
+  it("keeps the classic provider of an eager inline module available at boot", async () => {
+    const dir = makeTempProject({
+      "index.html": `<!doctype html><html><head></head><body>
+<div data-composition-id="main" data-duration="60" data-width="1920" data-height="1080">
+<div data-composition-id="b" data-composition-src="b.html" data-start="30" data-duration="5"></div>
+<div data-composition-id="a" data-composition-src="a.html" data-start="0" data-duration="5"></div>
+</div></body></html>`,
+      "b.html": `<template><div data-composition-id="b"><p>provider</p><script>
+window.__timelines = window.__timelines || {}; window.__timelines.b = gsap.timeline();
+</script></div></template>`,
+      "a.html": `<template><div data-composition-id="a"><output class="answer"></output>
+<script type="module">document.querySelector(".answer").textContent = typeof window.__timelines.b;</script>
+</div></template>`,
+    });
+    const doc = parseHTML(await bundleToSingleHtml(dir, { sceneParts: true })).document;
+    expect(doc.querySelector('div[data-hf-scene="b"]')?.hasAttribute("data-hf-scene-eager")).toBe(
+      true,
+    );
+  });
+
+  it("keeps the other provider of a scene reader's shared authored alias eager", async () => {
+    const dir = makeTempProject({
+      "index.html": `<!doctype html><html><head></head><body>
+<div data-composition-id="main" data-duration="60" data-width="1920" data-height="1080">
+<div data-composition-id="b" data-composition-src="b.html" data-start="30" data-duration="5"></div>
+<div data-composition-id="b" data-composition-src="b.html" data-start="0" data-duration="5"></div>
+</div></body></html>`,
+      "b.html": `<template><div data-composition-id="b"><output class="answer"></output><script>
+window.__timelines = window.__timelines || {};
+document.querySelector(".answer").textContent = typeof window.__timelines.b;
+window.__timelines.b = gsap.timeline();
+</script></div></template>`,
+    });
+    const doc = parseHTML(await bundleToSingleHtml(dir, { sceneParts: true })).document;
+    const copies = [
+      ...doc.querySelectorAll('[data-hf-original-composition-id="b"][data-hf-scene]'),
+    ];
+    expect(copies).toHaveLength(2);
+    expect(copies.every((host) => host.hasAttribute("data-hf-scene-eager"))).toBe(true);
+  });
+
+  it("keeps a root reader's provider eager through a comment after typeof's registry", async () => {
+    const dir = makeTempProject({
+      "index.html": `<!doctype html><html><head></head><body>
+<div data-composition-id="main" data-duration="60" data-width="1920" data-height="1080">
+<div data-composition-id="b" data-composition-src="b.html" data-start="30" data-duration="5"></div>
+</div><output id="answer"></output><script>
+document.addEventListener("DOMContentLoaded", () => {
+ document.getElementById("answer").textContent = typeof window.__timelines /* availability */ .b;
+});</script></body></html>`,
+      "b.html": `<template><div data-composition-id="b"><p>provider</p><script>
+window.__timelines = window.__timelines || {}; window.__timelines.b = gsap.timeline();
+</script></div></template>`,
+    });
+    const doc = parseHTML(await bundleToSingleHtml(dir, { sceneParts: true })).document;
+    expect(doc.querySelector('div[data-hf-scene="b"]')?.hasAttribute("data-hf-scene-eager")).toBe(
+      true,
     );
   });
 
