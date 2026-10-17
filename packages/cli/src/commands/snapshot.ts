@@ -465,7 +465,12 @@ export function computeSnapshotTimes(
 }
 
 // Capture pages paint frames from the original with FFmpeg, and a served copy transcodes the whole clip first.
-export function serveCapturePage(projectDir: string, html: string, proxy: boolean | undefined, bindError?: string) {
+export function serveCapturePage(
+  projectDir: string,
+  html: string,
+  proxy: boolean | undefined,
+  bindError?: string,
+) {
   return serveStaticProjectHtml(projectDir, html, bindError, [], proxy === true);
 }
 
