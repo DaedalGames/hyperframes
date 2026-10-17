@@ -3409,7 +3409,33 @@ ${["b", "h"].map((id, i) => `    <div data-composition-id="${id}" data-compositi
       );
     };
     expect(await eager("Boolean(window.__timelines.b)")).toEqual(["a root script reads it", null]);
+    expect(await eager("typeof window.__timelines.b")).toEqual(["a root script reads it", null]);
     expect(await eager("Object.keys(window.__timelines).length")).toEqual([
+      "a root script reads it",
+      "a root script reads it",
+    ]);
+  });
+
+  it("keeps every renamed copy of a scene a root script reads eager, by the id its author gave it", async () => {
+    const dir = makeTempProject({
+      "index.html": `<!doctype html><html><head></head><body>
+  <div data-composition-id="main" data-width="1920" data-height="1080" data-duration="60">
+    <div data-composition-id="b" data-composition-src="compositions/b.html" data-start="30" data-duration="5"></div>
+    <div data-composition-id="b" data-composition-src="compositions/b.html" data-start="45" data-duration="5"></div>
+  </div>
+  <output id="status"></output>
+  <script>document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("status").textContent = String(Boolean(window.__timelines.b));
+  });</script></body></html>`,
+      "compositions/b.html": `<template id="b-template"><div data-composition-id="b"><p>b</p>
+  <script>window.__timelines = window.__timelines || {}; window.__timelines["b"] = gsap.timeline();</script></div></template>`,
+    });
+    const doc = parseHTML(await bundleToSingleHtml(dir, { sceneParts: true })).document;
+    const copies = [
+      ...doc.querySelectorAll('[data-hf-original-composition-id="b"][data-hf-scene]'),
+    ];
+    expect(copies).toHaveLength(2);
+    expect(copies.map((el) => el.getAttribute("data-hf-scene-eager"))).toEqual([
       "a root script reads it",
       "a root script reads it",
     ]);

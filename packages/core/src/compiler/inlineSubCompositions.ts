@@ -80,7 +80,7 @@ const STRING_LITERAL_RE = /(["'`])((?:\\.|(?!\1)[^\\\n])*?)\1/g;
 // The timeline registry's own setup reads no scene: `window.__timelines = window.__timelines || {}`, ??=, ||=,
 // `= {}`, and the `if (!window.__timelines)` / `typeof` guards.
 const REGISTRY_SETUP_RE =
-  /(?:window\.)?__timelines\s*(?:\?\?=|\|\|=|=\s*(?:(?:window\.)?__timelines\s*(?:\|\||\?\?)\s*)?\{\s*\})|!\s*(?:window\.)?__timelines\s*\)|typeof\s+(?:window\.)?__timelines\b/g;
+  /(?:window\.)?__timelines\s*(?:\?\?=|\|\|=|=\s*(?:(?:window\.)?__timelines\s*(?:\|\||\?\?)\s*)?\{\s*\})|!\s*(?:window\.)?__timelines\s*\)|typeof\s+(?:window\.)?__timelines\b(?!\s*(?:\?\.|\.|\[))/g;
 // A registry key named outright, by string or by dot; a computed key being written reads nothing.
 const REGISTRY_KEY_RE =
   /^\s*(?:(?:\?\.)?\s*\[\s*(["'`])([\w-]+)\1\s*\]|\??\.\s*([A-Za-z_$][\w$]*))/;
@@ -797,11 +797,16 @@ export function keepScenesReadAtBootEager(
   { hosts: sceneHosts, literals: sceneLiterals, readEveryScene }: SceneReads,
   rootScripts: string[],
 ): void {
+  // A renamed duplicate (`b__hf1`) still registers under the id its author gave it.
   const idsOf = (host: Element) =>
     new Set(
-      [host, ...host.querySelectorAll("[data-composition-id]")].map(
-        (el) => el.getAttribute("data-composition-id") ?? "",
-      ),
+      [
+        host,
+        ...host.querySelectorAll("[data-composition-id], [data-hf-original-composition-id]"),
+      ].flatMap((el) => [
+        el.getAttribute("data-composition-id") ?? "",
+        el.getAttribute("data-hf-original-composition-id") ?? "",
+      ]),
     );
   const ids = new Map([...sceneHosts].map(([scene, host]) => [scene, idsOf(host)]));
   const namedBy = (literals: Iterable<string>, own = new Set<string>()) => {
