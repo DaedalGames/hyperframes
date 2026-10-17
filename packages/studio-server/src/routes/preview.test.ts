@@ -1556,23 +1556,25 @@ describe("hf-proxy negotiation and media codec map injection (U3)", () => {
       expect(resolveProxyMock).not.toHaveBeenCalled();
     });
 
-    it("serves a capture the finished copy when one exists", async () => {
+    it("serves a capture the finished copy it is lent, without asking for one its size", async () => {
       const projectDir = createProjectDir();
       writeFileSync(join(projectDir, "clip.mp4"), "original-hevc-bytes");
-      const proxyPath = join(projectDir, "proxy.mp4");
-      writeFileSync(proxyPath, "proxy-bytes");
+      const pageCopy = join(projectDir, "page-copy-256x512.mp4");
+      writeFileSync(pageCopy, "proxy-bytes");
+      const resolveProxyMock = vi.fn(async () => "should-not-be-called");
       const { registerPreviewRoutes: register } = await loadPreviewModule({
-        resolveProxyImpl: async () => proxyPath,
-        finishedProxyPath: () => proxyPath,
+        resolveProxyImpl: resolveProxyMock,
+        finishedProxyPath: () => pageCopy,
       });
       const app = new Hono();
       register(app, createAdapter(projectDir));
 
       const capture = await app.request(
-        `http://localhost/projects/demo/preview/clip.mp4?hf-proxy=h264&hf-proxy-box=256x256&${PREVIEW_CAPTURE_PARAM}=1`,
+        `http://localhost/projects/demo/preview/clip.mp4?hf-proxy=h264&hf-proxy-box=1448x2048&${PREVIEW_CAPTURE_PARAM}=1`,
       );
       expect(capture.status).toBe(200);
       expect(await capture.text()).toBe("proxy-bytes");
+      expect(resolveProxyMock).not.toHaveBeenCalled();
     });
 
     it.each([

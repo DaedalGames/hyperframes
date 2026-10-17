@@ -236,14 +236,17 @@ function finishedCopyFor(
   return boxedCopies(source, variant).find((copy) => covers(copy.box, box))?.path ?? null;
 }
 
-/** The finished copy a request would be served, or null while there is none. */
+/** This source's largest finished copy, whatever its size, or null while there is none. */
 export function finishedProxyPath(
   projectDir: string,
   absoluteSourcePath: string,
   variant: ProxyVariant,
-  box?: PreviewProxyBox,
 ): string | null {
-  return finishedCopyFor(canonicalizeProxySource(projectDir, absoluteSourcePath), variant, box);
+  const source = canonicalizeProxySource(projectDir, absoluteSourcePath);
+  const sourceSize = getCanonicalProxyCachePath(source, variant);
+  if (existsSync(sourceSize)) return sourceSize;
+  const area = ({ box }: { box: PreviewProxyBox }) => box.width * box.height;
+  return boxedCopies(source, variant).sort((a, b) => area(b) - area(a))[0]?.path ?? null;
 }
 
 /** The file name a request is served from, so a validator changes when the file does. */

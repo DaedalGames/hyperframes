@@ -3,6 +3,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   realpathSync,
@@ -513,6 +514,26 @@ describe("resolveProxy", () => {
 
     expect(await resultPromise).toBe(boxedPath);
     expect(boxedPath).not.toBe(getProxyCachePath(projectDir, sourcePath, "h264"));
+  });
+
+  it("lends a capture this source's largest finished copy, even one smaller than it shows", async () => {
+    const { finishedProxyPath, getProxyCachePath } = await import("./proxyTranscoder.js");
+    const projectDir = tmpProject();
+    const sourcePath = join(projectDir, "clip.mov");
+    writeFileSync(sourcePath, "source-bytes");
+    const copy = (width: number, height: number) => {
+      const path = getProxyCachePath(projectDir, sourcePath, "h264", { width, height });
+      writeFileSync(path, "copy-bytes");
+      return path;
+    };
+
+    expect(finishedProxyPath(projectDir, sourcePath, "h264")).toBeNull();
+    mkdirSync(join(projectDir, ".transcode-cache"));
+    const pageCopy = copy(256, 512);
+    expect(finishedProxyPath(projectDir, sourcePath, "h264")).toBe(pageCopy);
+    copy(256, 256);
+    const larger = copy(724, 1024);
+    expect(finishedProxyPath(projectDir, sourcePath, "h264")).toBe(larger);
   });
 
   it("uses Chromium-compatible VP8 alpha args and a distinct WebM cache path", async () => {

@@ -2,7 +2,7 @@ import type { Hono } from "hono";
 import { parseHTML } from "linkedom";
 import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { Readable } from "node:stream";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import {
   AFTER_FONTS_SCRIPT_TYPE,
@@ -680,6 +680,7 @@ export function registerPreviewRoutes(api: Hono, adapter: PreviewApiAdapter): vo
     }
     let proxyVariant: ProxyVariant | undefined;
     let seekCopy = false;
+    let lentCopy: string | null = null;
     if (proxyParam !== undefined) {
       if (
         !isProxyVariantRequest(proxyParam) ||
@@ -700,18 +701,18 @@ export function registerPreviewRoutes(api: Hono, adapter: PreviewApiAdapter): vo
       if (!proxyVariant) {
         return c.text("media proxy variant does not match asset", 422);
       }
-      // No copy to lend and none may start: the original, under its own tag.
-      if (
-        !eligibility.mayStartCopy &&
-        !finishedProxyPath(project.dir, file, proxyVariant, proxyBox)
-      ) {
-        proxyVariant = undefined;
+      // Lent the largest finished copy, as none may start; without one, the original under its own tag.
+      if (!eligibility.mayStartCopy) {
+        lentCopy = finishedProxyPath(project.dir, file, proxyVariant);
+        if (!lentCopy) proxyVariant = undefined;
       }
     }
 
     const tag = settledFileTag(stat);
     // Salted by the file served, since a smaller box is served its source's larger copy.
-    const servedCopy = proxyVariant && servedCopyName(project.dir, file, proxyVariant, proxyBox);
+    const servedCopy =
+      proxyVariant &&
+      (lentCopy ? basename(lentCopy) : servedCopyName(project.dir, file, proxyVariant, proxyBox));
     const etag = tag && `"${tag}${proxyEtagSalt(proxyVariant, servedCopy)}"`;
     const cacheHeaders: Record<string, string> = isText
       ? { "Cache-Control": "no-store" }
@@ -733,10 +734,14 @@ export function registerPreviewRoutes(api: Hono, adapter: PreviewApiAdapter): vo
       try {
         // A cached copy settles before any timer; a transcode never holds one of
         // the browser's few connections to this host. 202 until the copy lands.
-        const copy = seekCopy
-          ? resolveProxy(project.dir, file, proxyVariant, proxyBox, { background: true })
-          : resolveProxy(project.dir, file, proxyVariant, proxyBox);
-        servedPath = await waitForProxy(copy, 0);
+        servedPath =
+          lentCopy ??
+          (await waitForProxy(
+            seekCopy
+              ? resolveProxy(project.dir, file, proxyVariant, proxyBox, { background: true })
+              : resolveProxy(project.dir, file, proxyVariant, proxyBox),
+            0,
+          ));
       } catch (err) {
         if (err instanceof ProxyWaitTimeoutError) {
           return c.text("media proxy is being made", 202, {
