@@ -11,6 +11,7 @@ import {
   revealTimedClipsAfterFirstPass,
   SKIPPED_CLIP,
   showHiddenClips,
+  setTimedClipVisibility,
   skipsHiddenImages,
 } from "./timedClipHide";
 import {
@@ -2960,8 +2961,10 @@ export function initSandboxRuntimeModular(): void {
         clipChainVisibleAt(rawNode.parentElement, currentTime, visibleAt, rootComp);
       visibilityDecided.set(rawNode, isVisibleNow);
       const isRuntimeStamped = stampsForStudio && rawNode.hasAttribute(RUNTIME_STAMPED_ATTR);
-      if (!isRuntimeStamped) rawNode.style.visibility = isVisibleNow ? "visible" : "hidden";
-      rawNode.toggleAttribute(CLIP_HIDDEN_ATTR, !isRuntimeStamped && !isVisibleNow);
+      setTimedClipVisibility(
+        rawNode,
+        isRuntimeStamped ? null : isVisibleNow ? "visible" : "hidden",
+      );
       const upcoming =
         hiddenImagesSkipped && !isVisibleNow && dueSoon(rawNode, visibleAt, currentTime);
       if (upcoming && !rawNode.hasAttribute(STUDIO_PREVIEW_UPCOMING_ATTR))
