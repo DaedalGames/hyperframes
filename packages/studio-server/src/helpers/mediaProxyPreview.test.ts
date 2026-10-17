@@ -155,7 +155,6 @@ describe("seek-only entries", () => {
       projectDir,
       "index.html",
       new Map(),
-      false,
     );
 
     expect(elsewhere).toContain("/videos/broll.mov");

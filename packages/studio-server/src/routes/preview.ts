@@ -501,7 +501,6 @@ export function registerPreviewRoutes(api: Hono, adapter: PreviewApiAdapter): vo
         project.dir,
         mainCompositionPath,
         mediaCodecProbeCache,
-        capture,
       );
       bundled = addScenePartsManifest(bundled, [`meta[name="${PROJECT_SIGNATURE_META}"]`]);
       if (createProjectSignature(project.dir) === signature) {
@@ -534,7 +533,6 @@ export function registerPreviewRoutes(api: Hono, adapter: PreviewApiAdapter): vo
           project.dir,
           fallback.compositionPath,
           mediaCodecProbeCache,
-          capture,
         );
         return fallbackAugmented;
       }
@@ -632,14 +630,7 @@ export function registerPreviewRoutes(api: Hono, adapter: PreviewApiAdapter): vo
     html = ensureHfIds(await transformPreviewHtml(html, adapter, project, compPath));
     html = injectStudioPreviewAugmentations(html, adapter, project.dir, compPath, capture);
     if (previewVariables) html = injectPreviewVariables(html, previewVariables);
-    html = await injectMediaCodecMap(
-      html,
-      adapter,
-      project.dir,
-      compPath,
-      mediaCodecProbeCache,
-      capture,
-    );
+    html = await injectMediaCodecMap(html, adapter, project.dir, compPath, mediaCodecProbeCache);
     return c.html(html, 200, previewCacheHeaders(etag));
   });
 
