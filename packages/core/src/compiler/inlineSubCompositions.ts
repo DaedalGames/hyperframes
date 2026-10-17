@@ -296,6 +296,13 @@ export interface InlineSubCompositionsResult {
   importMaps: ImportMap[];
   /** Mounted files' inline module scripts, each already carrying its scoped `__hyperframes`. */
   moduleScripts: string[];
+  /** With `tagScenes`: each scene's host and the literals its scripts use; see `keepScenesReadAtBootEager`. */
+  sceneReads: SceneReads;
+}
+
+export interface SceneReads {
+  hosts: Map<string, Element>;
+  literals: Map<string, Set<string>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -727,8 +734,6 @@ export function inlineSubCompositions(
     }
   });
 
-  keepScenesNamingOthersEager(sceneHosts, sceneLiterals);
-
   const rootReferences = readSvgReferenceAliases(
     document.documentElement,
     SVG_REFERENCE_ALIASES_ATTR,
@@ -751,13 +756,15 @@ export function inlineSubCompositions(
     variablesByComp,
     importMaps,
     moduleScripts,
+    sceneReads: { hosts: sceneHosts, literals: sceneLiterals },
   };
 }
 
-/** A scene script that names another scene's composition id reads what that scene's script left: both run at boot. */
-function keepScenesNamingOthersEager(
-  sceneHosts: Map<string, Element>,
-  sceneLiterals: Map<string, Set<string>>,
+/** A script that names a scene's composition id reads what that scene's script left, so the scene runs at boot whenever
+ * its reader does. Root scripts always run at boot; run this after every other eager mark. */
+export function keepScenesReadAtBootEager(
+  { hosts: sceneHosts, literals: sceneLiterals }: SceneReads,
+  rootScripts: string[],
 ): void {
   const idsOf = (host: Element) =>
     new Set(
@@ -766,23 +773,33 @@ function keepScenesNamingOthersEager(
       ),
     );
   const ids = new Map([...sceneHosts].map(([scene, host]) => [scene, idsOf(host)]));
-  const providersOf = (scene: string) => {
-    const own = ids.get(scene) ?? new Set<string>();
-    const literals = [...(sceneLiterals.get(scene) ?? [])].filter((l) => l && !own.has(l));
-    return [...ids].filter(([, other]) => literals.some((l) => other.has(l))).map(([id]) => id);
+  const namedBy = (literals: Iterable<string>, own = new Set<string>()) => {
+    const named = [...literals].filter((l) => l && !own.has(l));
+    return [...ids].filter(([, other]) => named.some((l) => other.has(l))).map(([id]) => id);
   };
+  const ROOT = "a root script";
+  const rootLiterals = rootScripts.flatMap((s) =>
+    [...s.matchAll(STRING_LITERAL_RE)].map((m) => m[2] ?? ""),
+  );
+  const readsOf = (reader: string) =>
+    reader === ROOT
+      ? namedBy(rootLiterals)
+      : namedBy(sceneLiterals.get(reader) ?? [], ids.get(reader));
   for (const [scene, host] of sceneHosts) {
-    const named = providersOf(scene)[0];
+    const named = readsOf(scene)[0];
     if (named && !host.hasAttribute(SCENE_EAGER_ATTR))
       host.setAttribute(SCENE_EAGER_ATTR, `its script names ${named}`);
   }
-  const eager = [...sceneHosts].filter(([, host]) => host.hasAttribute(SCENE_EAGER_ATTR));
-  for (const [reader] of eager) {
-    for (const provider of providersOf(reader)) {
+  const eager = [
+    ROOT,
+    ...[...sceneHosts].filter(([, host]) => host.hasAttribute(SCENE_EAGER_ATTR)).map(([s]) => s),
+  ];
+  for (const reader of eager) {
+    for (const provider of readsOf(reader)) {
       const host = sceneHosts.get(provider);
       if (!host || host.hasAttribute(SCENE_EAGER_ATTR)) continue;
       host.setAttribute(SCENE_EAGER_ATTR, `${reader} reads it`);
-      eager.push([provider, host]);
+      eager.push(provider);
     }
   }
 }

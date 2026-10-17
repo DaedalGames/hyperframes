@@ -3347,6 +3347,36 @@ ${["a", "b", "c", "d", "e", "f"].map((id, i) => `    <div data-composition-id="$
     ]);
   });
 
+  it("keeps every scene a root script reads eager, and what a root-selected scene reads", async () => {
+    const scene = (id: string, script: string) =>
+      `<template id="${id}-template"><div data-composition-id="${id}"><p class="${id}-text">${id}</p>
+  <script>${script}</script></div></template>`;
+    const dir = makeTempProject({
+      "index.html": `<!doctype html><html><head></head><body>
+  <div data-composition-id="main" data-width="1920" data-height="1080" data-duration="60">
+${["b", "f", "g", "h"].map((id, i) => `    <div data-composition-id="${id}" data-composition-src="compositions/${id}.html" data-start="${[30, 0, 50, 55][i]}" data-duration="5"></div>`).join("\n")}
+  </div>
+  <output id="status"></output>
+  <script>document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("status").textContent = String(Boolean(window.__timelines["b"]));
+    document.querySelector(".f-text");
+  });</script></body></html>`,
+      "compositions/b.html": scene("b", 'window.__timelines["b"] = gsap.timeline();'),
+      "compositions/f.html": scene("f", 'window.__timelines["f"] = window.__timelines["g"];'),
+      "compositions/g.html": scene("g", 'window.__timelines["g"] = gsap.timeline();'),
+      "compositions/h.html": scene("h", 'window.__timelines["h"] = gsap.timeline();'),
+    });
+    const doc = parseHTML(await bundleToSingleHtml(dir, { sceneParts: true })).document;
+    const eager = (id: string) =>
+      doc.querySelector(`div[data-hf-scene="${id}"]`)?.getAttribute("data-hf-scene-eager");
+    expect(["b", "f", "g", "h"].map(eager)).toEqual([
+      "a root script reads it",
+      "a script outside the scene selects .f-text",
+      "f reads it",
+      null,
+    ]);
+  });
+
   it("marks a scene whose own script leaves work running as not swappable, and only that scene", async () => {
     const dir = makeTempProject({
       "index.html": `<!doctype html><html><head>

@@ -65,6 +65,7 @@ import {
   ensureExternalLinkTag,
   inlineSubCompositions,
   refuseScenesReachedByRootScripts,
+  keepScenesReadAtBootEager,
 } from "./inlineSubCompositions";
 import { isSafePath, resolveWithinProject } from "../safePath.js";
 import { ensureHfIds } from "@hyperframes/parsers/hf-ids";
@@ -1155,6 +1156,7 @@ async function bundleProject(projectDir: string, options?: BundleOptions): Promi
     },
   });
   refuseScenesReachedByRootScripts(document, rootScripts);
+  keepScenesReadAtBootEager(subCompResult.sceneReads, rootScripts);
   const styleRuns: PartRun<CompositionStyle>[] = [];
   subCompResult.styles.forEach((style, i) =>
     pushRun(styleRuns, subCompResult.styleScenes[i], style),
