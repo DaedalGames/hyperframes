@@ -3,7 +3,6 @@ import { EventEmitter, once } from "node:events";
 import {
   existsSync,
   mkdtempSync,
-  readFileSync,
   readdirSync,
   realpathSync,
   rmSync,
@@ -16,6 +15,7 @@ import { basename, join } from "node:path";
 import { hdrToSdrToneMapFilter } from "@hyperframes/core";
 import { findFfBinary } from "@hyperframes/parsers/ff-binaries";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { writeIphoneClip } from "./iphoneClip.test-helpers.js";
 
 const FFMPEG_PATH = "/usr/bin/ffmpeg";
 const realFfmpeg = findFfBinary("ffmpeg");
@@ -561,19 +561,7 @@ describe("resolveProxy", () => {
       vi.doUnmock("./mediaMetadata.js");
       const { resolveProxy } = await import("./proxyTranscoder.js");
       const projectDir = tmpProject();
-      const base = join(projectDir, "base.mov");
-      execFileSync(realFfmpeg!, [
-        ...["-v", "error", "-f", "lavfi", "-i", "testsrc=s=64x64:d=0.5"],
-        ...["-f", "lavfi", "-i", "anoisesrc=d=0.5,aformat=channel_layouts=4.0"],
-        ...["-f", "lavfi", "-i", "sine=d=0.5"],
-        ...["-map", "0:v", "-map", "1:a", "-map", "2:a", "-c:v", "libx264"],
-        ...["-c:a:0", "pcm_s16le", "-c:a:1", "aac", "-movflags", "+faststart", base],
-      ]);
-      // Apple's spatial-audio fourcc on the PCM track: ffmpeg reads it as "unknown" and cannot decode it.
-      const bytes = readFileSync(base);
-      bytes.write("apac", bytes.indexOf("sowt"), "latin1");
-      const sourcePath = join(projectDir, "iphone.mov");
-      writeFileSync(sourcePath, bytes);
+      const sourcePath = writeIphoneClip(realFfmpeg!, projectDir, 0.5);
 
       const proxyPath = await resolveProxy(projectDir, sourcePath);
       const streams = execFileSync(
