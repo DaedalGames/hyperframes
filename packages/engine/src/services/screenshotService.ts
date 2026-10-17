@@ -560,6 +560,25 @@ export async function applyDomLayerMask(
  * we strip opacity here and then seek to the same time for the next layer,
  * GSAP won't put it back and the wrapper will render fully opaque.
  */
+/** Layer units inside the elements named by `ids`; their ids are minted per frame, so earlier id lists miss them. */
+export async function layerUnitsInside(page: Page, ids: string[]): Promise<string[]> {
+  return page.evaluate(
+    (args: { ids: string[]; attr: string }) => {
+      const owners = new Set(args.ids);
+      const inside = (unit: Element) => {
+        for (let node: Element | null = unit; node; node = node.parentElement) {
+          if (owners.has(node.id)) return true;
+        }
+        return false;
+      };
+      return Array.from(document.querySelectorAll(`[${args.attr}]`))
+        .filter(inside)
+        .map((unit) => unit.getAttribute(args.attr) ?? "");
+    },
+    { ids, attr: HDR_LAYER_UNIT_ATTR },
+  );
+}
+
 export async function removeDomLayerMask(page: Page, _extraHideIds: string[]): Promise<void> {
   await page.evaluate(
     (args: {

@@ -3,7 +3,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
 import { groupIntoLayers } from "../utils/layerCompositor.js";
 import { resolveHeadlessShellPath } from "./browserManager.js";
-import { HDR_LAYER_UNIT_ATTR, applyDomLayerMask, removeDomLayerMask } from "./screenshotService.js";
+import {
+  HDR_LAYER_UNIT_ATTR,
+  applyDomLayerMask,
+  layerUnitsInside,
+  removeDomLayerMask,
+} from "./screenshotService.js";
 import { queryElementStacking } from "./videoFrameInjector.js";
 
 const chromePath = resolveHeadlessShellPath();
@@ -47,6 +52,18 @@ describe.skipIf(!hasBrowser)("HDR stacking of content inside an HDR element's ho
     expect(groupIntoLayers(stacking).map((l) => (l.type === "hdr" ? "hdr" : l.elementIds))).toEqual(
       [["host"], "hdr", [unitId]],
     );
+  });
+
+  it("finds a layer unit inside the elements that hold it, and only there", async () => {
+    await queryElementStacking(page, new Set(["hdr"]));
+    const unitId = await page.$eval(
+      "#title",
+      (el, attr) => el.getAttribute(attr),
+      HDR_LAYER_UNIT_ATTR,
+    );
+
+    expect(await layerUnitsInside(page, ["host"])).toEqual([unitId]);
+    expect(await layerUnitsInside(page, ["hdr"])).toEqual([]);
   });
 
   it("captures the overlay only in its own layer", async () => {
