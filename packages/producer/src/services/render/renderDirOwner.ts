@@ -35,7 +35,7 @@ function pidScope(): { host: string; boot?: string; pidns?: string } {
     // Without /proc (macOS, Windows) the boot time, to the minute, stands in for the boot id.
     boot:
       attempt(() => readFileSync("/proc/sys/kernel/random/boot_id", "utf-8").trim()) ??
-      String(Math.round(Date.now() / 60_000 - uptime() / 60)),
+      attempt(() => String(Math.round(Date.now() / 60_000 - uptime() / 60))),
     pidns: attempt(() => readlinkSync("/proc/self/ns/pid")),
   };
 }
