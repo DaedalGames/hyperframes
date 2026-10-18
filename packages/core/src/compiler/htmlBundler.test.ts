@@ -3585,11 +3585,15 @@ ${["g", "h", "i", "j"].map((id, i) => `    <div data-composition-id="${id}" data
       x: "((document) => { const a = document.querySelectorAll('.x'); a[0].__hfReady = 'ready'; })({ querySelectorAll: () => [window] });",
       y: "const a = document.querySelectorAll('[id=\"r-y\"]'); a[0] = window; a[0].__hfReady = 'ready';",
       z: "const a = document.querySelectorAll('[id=\"r-z\"]'); [a[0]] = [window]; a[0].__hfReady = 'ready';",
+      aa: "const a = document.querySelectorAll('[id=\"r-aa\"]'); a['fill'](window); a[0].__hfReady = 'ready';",
+      ab: "const a = document.querySelectorAll({ toString() { return 'html'; } }); a[0].__hfReady = 'ready';",
+      ac: "for (document of [{ querySelectorAll: () => [window] }]) {} const a = document.querySelectorAll('.x'); a[0].__hfReady = 'ready';",
+      ad: "const a = document.querySelectorAll('[id=\"r-ad\"]'); eval('a[0] = window'); a[0].__hfReady = 'ready';",
     };
     const ids = Object.keys(scripts);
     const dir = makeTempProject({
       "index.html": `<!doctype html><html><head></head><body>
-  <div data-composition-id="main" data-width="1920" data-height="1080" data-duration="90">
+  <div data-composition-id="main" data-width="1920" data-height="1080" data-duration="120">
 ${ids.map((id, i) => `    <div data-composition-id="${id}" data-composition-src="compositions/${id}.html" data-start="${20 + i * 5}" data-duration="5"></div>`).join("\n")}
   </div></body></html>`,
       ...Object.fromEntries(ids.map((id) => [`compositions/${id}.html`, scene(id, scripts[id]!)])),
@@ -3614,6 +3618,10 @@ ${ids.map((id, i) => `    <div data-composition-id="${id}" data-composition-src=
       ["x", true],
       ["y", true],
       ["z", true],
+      ["aa", true],
+      ["ab", true],
+      ["ac", true],
+      ["ad", true],
     ]);
   });
 

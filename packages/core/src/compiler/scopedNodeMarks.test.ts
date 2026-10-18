@@ -52,4 +52,52 @@ describe("sharedHfMark", () => {
     );
     expect(sharedHfMark(`${query} a[0].__hfClaimed = 1; a[0].style.color = "red";`)).toBeNull();
   });
+
+  it("shares a mark unless every use of the list is a numeric index or its length, from a literal selector", () => {
+    const query = 'const a = document.querySelectorAll(".x");';
+    const unproven = [
+      `${query} a["fill"](window); a[0].__hfReady = "ready";`,
+      `${query} a["splice"](0, 1, window); a[0].__hfReady = "ready";`,
+      `${query} const k = "fill"; a[k](window); a[0].__hfReady = "ready";`,
+      `${query} const i = "fill"; a[i](window); a[0].__hfReady = "ready";`,
+      `${query} a["fill"].__hfReady = "ready";`,
+      `${query} a["0"].__hfReady = "ready";`,
+      `${query} let i = 0; i = "fill"; a[i](window); a[0].__hfReady = "ready";`,
+      'const a = document.querySelectorAll({ toString() { return "html"; } }); a[0].__hfReady = "ready";',
+      'const s = ".x"; const a = document.querySelectorAll(s); a[0].__hfReady = "ready";',
+      'const a = document.querySelectorAll(`${"html"}`); a[0].__hfReady = "ready";',
+    ];
+    expect(unproven.map((script) => sharedHfMark(script)?.text ?? null)).toEqual(
+      unproven.map(() => "__hfReady"),
+    );
+    expect(
+      sharedHfMark(`${query} for (let i = 0; i < a.length; i++) a[i].__hfClaimed = 1;`),
+    ).toBeNull();
+  });
+
+  it("shares a mark when any write site, a for-of or for-in target included, rebinds `document`", () => {
+    const fake = "{ querySelectorAll: () => [window] }";
+    const rebound = [
+      `for (document of [${fake}]) {} const a = document.querySelectorAll(".x"); a[0].__hfReady = "ready";`,
+      `for (document in { x: 1 }) {} const a = document.querySelectorAll(".x"); a[0].__hfReady = "ready";`,
+      `[document] = [${fake}]; const a = document.querySelectorAll(".x"); a[0].__hfReady = "ready";`,
+      `({ d: document } = { d: ${fake} }); const a = document.querySelectorAll(".x"); a[0].__hfReady = "ready";`,
+    ];
+    expect(rebound.map((script) => sharedHfMark(script)?.text ?? null)).toEqual(
+      rebound.map(() => "__hfReady"),
+    );
+  });
+
+  it("shares a mark when the script can run code it does not show, through eval", () => {
+    const query = 'const a = document.querySelectorAll(".x");';
+    const hidden = [
+      `${query} eval("a[0] = window"); a[0].__hfReady = "ready";`,
+      `${query} eval?.("a[0] = window"); a[0].__hfReady = "ready";`,
+      `${query} const run = eval; run("a[0] = window"); a[0].__hfReady = "ready";`,
+    ];
+    expect(hidden.map((script) => sharedHfMark(script)?.text ?? null)).toEqual(
+      hidden.map(() => "__hfReady"),
+    );
+    expect(sharedHfMark(`${query} window.evaluate = 1; a[0].__hfClaimed = 1;`)).toBeNull();
+  });
 });
