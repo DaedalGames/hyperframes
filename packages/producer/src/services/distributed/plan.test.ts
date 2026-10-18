@@ -991,11 +991,20 @@ describe.skipIf(spawnSync("ffmpeg", ["-version"]).status !== 0)("stitched mp4 pl
       .split("\n")
       .filter((line) => / aac -b:a /.test(line));
     expect(aacEncodes).toHaveLength(1);
+    const planAudio = join(planDir, "audio.m4a");
     const shown = spawnSync(
       "ffprobe",
       [
-        ...["-v", "error", "-select_streams", "a:0"],
-        ...["-show_entries", "stream=duration_ts", "-of", "csv=p=0", join(planDir, "audio.m4a")],
+        "-v",
+        "error",
+        "-select_streams",
+        "a:0",
+        "-show_entries",
+        "stream=duration_ts",
+        "-of",
+        "csv=p=0",
+        "--",
+        planAudio,
       ],
       { encoding: "utf-8" },
     );
