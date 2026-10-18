@@ -110,9 +110,11 @@ import {
   fetchCaptionOverrides,
 } from "./captionOverrides";
 import {
+  SCENE_FONTS_ATTR,
   SCENE_NO_SWAP_ATTR,
   SCENE_PART_ATTR,
   SCENE_PARTS_META,
+  fontFaceBlocks,
   type SceneParts,
 } from "../sceneParts";
 import {
@@ -3810,6 +3812,24 @@ export function initSandboxRuntimeModular(): void {
       }
     }
   };
+  // Only the rules not here yet: rewriting a loaded rule's style would load its font again.
+  const addNewFontFaces = (next: Document) => {
+    const holders = (doc: Document) =>
+      Array.from(doc.querySelectorAll(`style[${SCENE_FONTS_ATTR}]`));
+    const live = holders(document);
+    const have = new Set(live.flatMap((el) => fontFaceBlocks(el.textContent ?? "")));
+    const added = new Set(
+      holders(next)
+        .flatMap((el) => fontFaceBlocks(el.textContent ?? ""))
+        .filter((face) => !have.has(face)),
+    );
+    if (added.size === 0) return;
+    const style = document.createElement("style");
+    style.setAttribute(SCENE_FONTS_ATTR, "");
+    style.textContent = [...added].join("\n");
+    if (live.length > 0) live.at(-1)!.after(style);
+    else document.head.prepend(style);
+  };
   // Swap edited scenes in place from a rebuilt preview document. Refuses before changing anything unless
   // the documents differ only inside existing scenes; a later failure is left to the caller's reload.
   // Nests the timelines a scene's scripts just made and redraws the current frame with them.
@@ -4006,6 +4026,7 @@ export function initSandboxRuntimeModular(): void {
       swappedHosts.push(host);
       if (host.querySelector(".caption-group")) captionHosts.push(host);
     }
+    addNewFontFaces(next);
     // Run once every host is replaced, so no new script binds to a scene still to be swapped.
     refreshSvgSelectorAliases();
     const sceneScripts = swaps.flatMap(({ newParts }) =>
@@ -4349,6 +4370,7 @@ export function initSandboxRuntimeModular(): void {
     forceDispatchSeekEvent(t);
   };
   window.__hfWaitForSeekCompletion = waitForSeekCompletion;
+  mountHeldScenesNear(state.currentTime);
   runtimeCleanupCallbacks.push(() => {
     if (window.__hfWaitForSeekCompletion === waitForSeekCompletion) {
       delete window.__hfWaitForSeekCompletion;

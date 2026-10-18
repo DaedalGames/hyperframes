@@ -45,7 +45,14 @@ import {
   planCompositionAssembly,
   extractedCompositionAssets,
 } from "./compositionAssembly";
-import { SCENE_EAGER_ATTR, SCENE_NO_SWAP_ATTR, SCENE_PART_ATTR } from "../sceneParts";
+import {
+  REACHED_BY_ROOT_REASON,
+  READ_BY_SCENE_REASON,
+  SCENE_AFTER_BOOT_ATTR,
+  SCENE_EAGER_ATTR,
+  SCENE_NO_SWAP_ATTR,
+  SCENE_PART_ATTR,
+} from "../sceneParts";
 
 // Anything a scene script can leave running, pending or registered outside its timeline, or that
 // throws when run again: only the timeline is torn down when a scene is swapped, so when unsure, refuse.
@@ -64,10 +71,12 @@ function sceneScriptSwapRefusal(script: string): string | null {
   return match ? `its script uses ${match[0].trim()}` : null;
 }
 
-// What ties a scene script to boot order: reaching outside its root, or leaving state on window for
-// other scripts (the timeline registry aside).
+// What ties a scene script to boot order: reaching outside its root, or leaving state on window for others. Two
+// reads stay inside: an `__hf` mark on an indexed node its scoped `document` found (`a[i].__hfClaimed`), and the
+// compiler's own `data-composition-variables` off `<html>`, which no script writes. Any other `__hf` receiver
+// (`document`, a window alias) and any other `<html>` attribute is shared with every scene.
 const REACHES_OUTSIDE_RE =
-  /\b(documentElement|getElementsBy\w+|__hf[A-Z]\w*)\b|document\s*\.\s*(head|body)\b|querySelector(All)?\(\s*["'](head|body)["']|defineProperty\s*\(\s*(window|globalThis|self|document)\b|\b(window|globalThis|self)\s*(\.\s*(?!__timelines\b)[A-Za-z_$][\w$]*|\[[^\]]*\])\s*=(?!=)/;
+  /\bgetElementsBy\w+\b|\bdocumentElement\b(?!\s*\.\s*(?:get|has)Attribute\s*\(\s*(["'])data-composition-variables\1\s*\))|(?<!\]\s*\.\s*)\b__hf[A-Z]\w*\b|document\s*\.\s*(head|body)\b|querySelector(All)?\(\s*["'](head|body)["']|defineProperty\s*\(\s*(window|globalThis|self|document)\b|\b(window|globalThis|self)\s*(\.\s*(?!__timelines\b)[A-Za-z_$][\w$]*|\[[^\]]*\])\s*=(?!=)/;
 
 /** Why an authored scene script must run at boot rather than when the playhead nears, or null. */
 function sceneScriptEagerReason(script: string): string | null {
@@ -85,16 +94,24 @@ const REGISTRY_SETUP_RE =
 const REGISTRY_KEY_RE =
   /^\s*(?:(?:\?\.)?\s*\[\s*(["'`])([\w-]+)\1\s*\]|\??\.\s*([A-Za-z_$][\w$]*))/;
 const REGISTRY_WRITE_RE = /^\s*\[[^\]]*\]\s*=(?!=)/;
+const leadingTrivia = (text: string) =>
+  text.replace(/^(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\r\n]*(?:\r?\n|$))+/, "");
 
 /** The scene ids a script reads from the timeline registry; `everyScene` when a read is not to one named key. */
 export function registryReads(script: string): { names: string[]; everyScene: boolean } {
-  const rest = script.replace(REGISTRY_SETUP_RE, "");
+  const rest = script.replace(REGISTRY_SETUP_RE, (setup: string, at: number) =>
+    setup.startsWith("typeof") &&
+    /^(?:\?\.|\.|\[)/.test(leadingTrivia(script.slice(at + setup.length)))
+      ? setup
+      : "",
+  );
   const names: string[] = [];
   for (const m of rest.matchAll(/__timelines\b/g)) {
-    const after = rest.slice(m.index + m[0].length, m.index + m[0].length + 200);
+    const after = leadingTrivia(rest.slice(m.index + m[0].length, m.index + m[0].length + 200));
     const key = REGISTRY_KEY_RE.exec(after);
-    if (key) names.push(key[2] ?? key[3] ?? "");
-    else if (!REGISTRY_WRITE_RE.test(after)) return { names, everyScene: true };
+    if (key) {
+      if (!/^\s*=(?!=)/.test(after.slice(key[0].length))) names.push(key[2] ?? key[3] ?? "");
+    } else if (!REGISTRY_WRITE_RE.test(after)) return { names, everyScene: true };
   }
   return { names, everyScene: false };
 }
@@ -164,7 +181,7 @@ export function refuseScenesReachedByRootScripts(document: Document, rootScripts
     for (const host of reached)
       for (const attr of [SCENE_NO_SWAP_ATTR, SCENE_EAGER_ATTR])
         if (!host.hasAttribute(attr))
-          host.setAttribute(attr, `a script outside the scene selects ${literal}`);
+          host.setAttribute(attr, `${REACHED_BY_ROOT_REASON} ${literal}`);
   }
 }
 
@@ -325,6 +342,7 @@ export interface InlineSubCompositionsResult {
 export interface SceneReads {
   hosts: Map<string, Element>;
   literals: Map<string, Set<string>>;
+  registryNames: Map<string, Set<string>>;
   /** Scenes whose scripts read the timeline registry by a key no analysis can name. */
   readEveryScene: Set<string>;
 }
@@ -393,6 +411,7 @@ export function inlineSubCompositions(
 
   const sceneHosts = new Map<string, Element>();
   const sceneLiterals = new Map<string, Set<string>>();
+  const registryNames = new Map<string, Set<string>>();
   const readEveryScene = new Set<string>();
   const queue = hosts.map((element) => ({
     element,
@@ -569,13 +588,11 @@ export function inlineSubCompositions(
         SCENE_EAGER_ATTR,
         () => unknownCode ?? (externalSrc ? null : sceneScriptEagerReason(authored)),
       );
-      if (scene && !externalSrc && !unknownCode) {
+      if (scene && !externalSrc && type !== "importmap") {
         const { names, everyScene } = registryReads(authored);
         const literals = [...authored.matchAll(STRING_LITERAL_RE)].map((m) => m[2] ?? "");
-        sceneLiterals.set(
-          scene,
-          new Set([...(sceneLiterals.get(scene) ?? []), ...literals, ...names]),
-        );
+        sceneLiterals.set(scene, new Set([...(sceneLiterals.get(scene) ?? []), ...literals]));
+        registryNames.set(scene, new Set([...(registryNames.get(scene) ?? []), ...names]));
         if (everyScene) readEveryScene.add(scene);
       }
       if (type === "importmap") {
@@ -787,14 +804,14 @@ export function inlineSubCompositions(
     variablesByComp,
     importMaps,
     moduleScripts,
-    sceneReads: { hosts: sceneHosts, literals: sceneLiterals, readEveryScene },
+    sceneReads: { hosts: sceneHosts, literals: sceneLiterals, registryNames, readEveryScene },
   };
 }
 
 /** A script that names a scene's composition id reads what that scene's script left, so the scene runs at boot whenever
  * its reader does. Root scripts always run at boot; run this after every other eager mark. */
 export function keepScenesReadAtBootEager(
-  { hosts: sceneHosts, literals: sceneLiterals, readEveryScene }: SceneReads,
+  { hosts: sceneHosts, literals: sceneLiterals, registryNames, readEveryScene }: SceneReads,
   rootScripts: string[],
 ): void {
   // A renamed duplicate (`b__hf1`) still registers under the id its author gave it.
@@ -809,9 +826,11 @@ export function keepScenesReadAtBootEager(
       ]),
     );
   const ids = new Map([...sceneHosts].map(([scene, host]) => [scene, idsOf(host)]));
-  const namedBy = (literals: Iterable<string>, own = new Set<string>()) => {
-    const named = [...literals].filter((l) => l && !own.has(l));
-    return [...ids].filter(([, other]) => named.some((l) => other.has(l))).map(([id]) => id);
+  const namedBy = (literals: Iterable<string>, reader?: string) => {
+    const named = [...literals].filter(Boolean);
+    return [...ids]
+      .filter(([id, other]) => id !== reader && named.some((l) => other.has(l)))
+      .map(([id]) => id);
   };
   const ROOT = "a root script";
   const rootReads = rootScripts.map(registryReads);
@@ -823,25 +842,39 @@ export function keepScenesReadAtBootEager(
   const readsOf = (reader: string) => {
     if (reader === ROOT ? rootReadsEveryScene : readEveryScene.has(reader))
       return [...ids.keys()].filter((id) => id !== reader);
-    return reader === ROOT
-      ? namedBy(rootLiterals)
-      : namedBy(sceneLiterals.get(reader) ?? [], ids.get(reader));
+    if (reader === ROOT) return namedBy(rootLiterals);
+    const own = ids.get(reader);
+    return namedBy(
+      [
+        ...[...(sceneLiterals.get(reader) ?? [])].filter((name) => !own?.has(name)),
+        ...(registryNames.get(reader) ?? []),
+      ],
+      reader,
+    );
   };
+  // Eager only to read others: nothing it writes is shared, so it may run after boot unless a scene reads it.
+  const readersOnly = new Set<string>();
   for (const [scene, host] of sceneHosts) {
     const named = readsOf(scene)[0];
-    if (named && !host.hasAttribute(SCENE_EAGER_ATTR))
-      host.setAttribute(SCENE_EAGER_ATTR, `its script names ${named}`);
+    if (!named || host.hasAttribute(SCENE_EAGER_ATTR)) continue;
+    host.setAttribute(SCENE_EAGER_ATTR, `its script names ${named}`);
+    readersOnly.add(scene);
   }
   const eager = [
     ROOT,
     ...[...sceneHosts].filter(([, host]) => host.hasAttribute(SCENE_EAGER_ATTR)).map(([s]) => s),
   ];
+  // Every scene some eager script reads, whatever made it eager first.
+  const read = new Set<string>();
   for (const reader of eager) {
     for (const provider of readsOf(reader)) {
+      read.add(provider);
       const host = sceneHosts.get(provider);
       if (!host || host.hasAttribute(SCENE_EAGER_ATTR)) continue;
-      host.setAttribute(SCENE_EAGER_ATTR, `${reader} reads it`);
+      host.setAttribute(SCENE_EAGER_ATTR, `${reader} ${READ_BY_SCENE_REASON}`);
       eager.push(provider);
     }
   }
+  for (const scene of readersOnly)
+    if (!read.has(scene)) sceneHosts.get(scene)?.setAttribute(SCENE_AFTER_BOOT_ATTR, "");
 }

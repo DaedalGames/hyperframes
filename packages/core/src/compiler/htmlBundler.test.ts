@@ -3182,7 +3182,7 @@ describe("bundleToSingleHtml sceneParts", () => {
   const partsOf = (doc: Document, scene: string) =>
     [...doc.querySelectorAll(`[data-hf-scene="${scene}"]`)].map((el) => el.tagName.toLowerCase());
 
-  it("keeps each scene's own copy of a shared @font-face, so one scene still swaps alone", async () => {
+  it("puts a @font-face two scenes share in one style outside the scenes, once", async () => {
     const face = `@font-face { font-family: "Brand"; src: url('assets/fonts/brand.woff2'); }`;
     const dir = makeTempProject({
       "index.html": `<!doctype html>
@@ -3202,8 +3202,14 @@ describe("bundleToSingleHtml sceneParts", () => {
       const css = [...doc.querySelectorAll(`style[data-hf-scene="${scene}"]`)]
         .map((el) => el.textContent ?? "")
         .join("\n");
-      expect(css).toContain("@font-face");
+      expect(css).not.toContain("@font-face");
     }
+    const fonts = doc.querySelector("style[data-hf-scene-fonts]");
+    expect(fonts?.hasAttribute("data-hf-scene")).toBe(false);
+    const faces = (css: string) => css.match(/@font-face/g)?.length ?? 0;
+    expect(faces(fonts?.textContent ?? "")).toBe(1);
+    const allCss = [...doc.querySelectorAll("style")].map((el) => el.textContent ?? "").join("\n");
+    expect(faces(allCss)).toBe(1);
   });
 
   it("tags each top-level scene's host, styles and scripts, with nested scenes in their parent's parts", async () => {
@@ -3340,6 +3346,66 @@ ${["a", "b", "c", "d", "e", "f"].map((id, i) => `    <div data-composition-id="$
     );
   });
 
+  it("keeps the classic provider of an eager inline module available at boot", async () => {
+    const dir = makeTempProject({
+      "index.html": `<!doctype html><html><head></head><body>
+<div data-composition-id="main" data-duration="60" data-width="1920" data-height="1080">
+<div data-composition-id="b" data-composition-src="b.html" data-start="30" data-duration="5"></div>
+<div data-composition-id="a" data-composition-src="a.html" data-start="0" data-duration="5"></div>
+</div></body></html>`,
+      "b.html": `<template><div data-composition-id="b"><p>provider</p><script>
+window.__timelines = window.__timelines || {}; window.__timelines.b = gsap.timeline();
+</script></div></template>`,
+      "a.html": `<template><div data-composition-id="a"><output class="answer"></output>
+<script type="module">document.querySelector(".answer").textContent = typeof window.__timelines.b;</script>
+</div></template>`,
+    });
+    const doc = parseHTML(await bundleToSingleHtml(dir, { sceneParts: true })).document;
+    expect(doc.querySelector('div[data-hf-scene="b"]')?.hasAttribute("data-hf-scene-eager")).toBe(
+      true,
+    );
+  });
+
+  it("keeps the other provider of a scene reader's shared authored alias eager", async () => {
+    const dir = makeTempProject({
+      "index.html": `<!doctype html><html><head></head><body>
+<div data-composition-id="main" data-duration="60" data-width="1920" data-height="1080">
+<div data-composition-id="b" data-composition-src="b.html" data-start="30" data-duration="5"></div>
+<div data-composition-id="b" data-composition-src="b.html" data-start="0" data-duration="5"></div>
+</div></body></html>`,
+      "b.html": `<template><div data-composition-id="b"><output class="answer"></output><script>
+window.__timelines = window.__timelines || {};
+document.querySelector(".answer").textContent = typeof window.__timelines.b;
+window.__timelines.b = gsap.timeline();
+</script></div></template>`,
+    });
+    const doc = parseHTML(await bundleToSingleHtml(dir, { sceneParts: true })).document;
+    const copies = [
+      ...doc.querySelectorAll('[data-hf-original-composition-id="b"][data-hf-scene]'),
+    ];
+    expect(copies).toHaveLength(2);
+    expect(copies.every((host) => host.hasAttribute("data-hf-scene-eager"))).toBe(true);
+  });
+
+  it("keeps a root reader's provider eager through a comment after typeof's registry", async () => {
+    const dir = makeTempProject({
+      "index.html": `<!doctype html><html><head></head><body>
+<div data-composition-id="main" data-duration="60" data-width="1920" data-height="1080">
+<div data-composition-id="b" data-composition-src="b.html" data-start="30" data-duration="5"></div>
+</div><output id="answer"></output><script>
+document.addEventListener("DOMContentLoaded", () => {
+ document.getElementById("answer").textContent = typeof window.__timelines /* availability */ .b;
+});</script></body></html>`,
+      "b.html": `<template><div data-composition-id="b"><p>provider</p><script>
+window.__timelines = window.__timelines || {}; window.__timelines.b = gsap.timeline();
+</script></div></template>`,
+    });
+    const doc = parseHTML(await bundleToSingleHtml(dir, { sceneParts: true })).document;
+    expect(doc.querySelector('div[data-hf-scene="b"]')?.hasAttribute("data-hf-scene-eager")).toBe(
+      true,
+    );
+  });
+
   it("keeps every scene an eager scene reads eager too, however far out it starts", async () => {
     const scene = (id: string, script: string) =>
       `<template id="${id}-template"><div data-composition-id="${id}"><p>${id}</p>
@@ -3463,6 +3529,124 @@ ${["b", "h"].map((id, i) => `    <div data-composition-id="${id}" data-compositi
       "a root script reads it",
       "a root script reads it",
     ]);
+  });
+
+  it("lets a scene wait when its script only marks a node in its own root or reads an attribute off <html>", async () => {
+    const scene = (id: string, script: string) =>
+      `<template id="${id}-template"><div data-composition-id="${id}" id="r-${id}"><p>${id}</p>
+  <script>${script}</script></div></template>`;
+    const claim = (id: string) =>
+      `const root = (function(){var a=document.querySelectorAll('[id="r-${id}"]');for(var i=0;i<a.length;i++){if(!a[i].__hfClaimed){a[i].__hfClaimed=1;return a[i];}}return document.getElementById('r-${id}');})();`;
+    const dir = makeTempProject({
+      "index.html": `<!doctype html><html><head></head><body>
+  <div data-composition-id="main" data-width="1920" data-height="1080" data-duration="8">
+${["g", "h", "i", "j"].map((id, i) => `    <div data-composition-id="${id}" data-composition-src="compositions/${id}.html" data-start="${i * 2}" data-duration="2"></div>`).join("\n")}
+  </div></body></html>`,
+      "compositions/g.html": scene("g", claim("g")),
+      "compositions/h.html": scene(
+        "h",
+        'JSON.parse(document.documentElement.getAttribute("data-composition-variables") || "[]");',
+      ),
+      "compositions/i.html": scene("i", "document.documentElement.classList.add('dark');"),
+      "compositions/j.html": scene("j", "window.__hfClaimed = true;"),
+    });
+    const doc = parseHTML(await bundleToSingleHtml(dir, { sceneParts: true })).document;
+    const eager = (id: string) =>
+      doc.querySelector(`div[data-hf-scene="${id}"]`)?.getAttribute("data-hf-scene-eager");
+    expect(["g", "h", "i", "j"].map(eager)).toEqual([
+      null,
+      null,
+      "its script uses documentElement",
+      "its script uses window.__hfClaimed =",
+    ]);
+  });
+
+  it("keeps a scene eager when its __hf property or <html> attribute read is shared with other scenes", async () => {
+    // Tai on #5726 (4304376426, 4304376428): the scoped document forwards to the real one, a window alias is window,
+    // and <html>'s attributes are anyone's to write.
+    const scene = (id: string, script: string) =>
+      `<template id="${id}-template"><div data-composition-id="${id}" id="r-${id}"><p>${id}</p>
+  <script>${script}</script></div></template>`;
+    const scripts: Record<string, string> = {
+      k: "document.__hfSharedTone = 'ready';",
+      l: "const page = window; page.__hfReady = 'ready';",
+      m: "document.title = document.documentElement.getAttribute('data-shared-tone');",
+      n: "document.title = String(document.documentElement.hasAttribute('data-shared-tone'));",
+      o: "const s = document.querySelectorAll('[id=\"r-o\"]'); s[0].__hfClaimed = 1;",
+      p: 'JSON.parse(document.documentElement.getAttribute("data-composition-variables") || "[]");',
+    };
+    const ids = Object.keys(scripts);
+    const dir = makeTempProject({
+      "index.html": `<!doctype html><html><head></head><body>
+  <div data-composition-id="main" data-width="1920" data-height="1080" data-duration="60">
+${ids.map((id, i) => `    <div data-composition-id="${id}" data-composition-src="compositions/${id}.html" data-start="${20 + i * 5}" data-duration="5"></div>`).join("\n")}
+  </div></body></html>`,
+      ...Object.fromEntries(ids.map((id) => [`compositions/${id}.html`, scene(id, scripts[id]!)])),
+    });
+    const doc = parseHTML(await bundleToSingleHtml(dir, { sceneParts: true })).document;
+    const eager = (id: string) =>
+      doc.querySelector(`div[data-hf-scene="${id}"]`)?.getAttribute("data-hf-scene-eager") ?? null;
+    expect(ids.map((id) => [id, eager(id) !== null])).toEqual([
+      ["k", true],
+      ["l", true],
+      ["m", true],
+      ["n", true],
+      ["o", false],
+      ["p", false],
+    ]);
+  });
+
+  it("keeps the scheduling the runtime tests stamp (heldScenes.test.ts COMPILED)", async () => {
+    const compiled = async (scenes: Array<[string, number, string]>) => {
+      const dir = makeTempProject({
+        "index.html": `<!doctype html><html><head></head><body>
+  <div data-composition-id="main" data-width="1920" data-height="1080" data-duration="60">
+${scenes.map(([id, start]) => `    <div data-composition-id="${id}" data-composition-src="compositions/${id}.html" data-start="${start}" data-duration="5"></div>`).join("\n")}
+  </div></body></html>`,
+        ...Object.fromEntries(
+          scenes.map(([id, , script]) => [
+            `compositions/${id}.html`,
+            `<template id="${id}-template"><div data-composition-id="${id}"><p>${id}</p>
+  <script>${script}</script></div></template>`,
+          ]),
+        ),
+      });
+      const doc = parseHTML(await bundleToSingleHtml(dir, { sceneParts: true })).document;
+      return Object.fromEntries(
+        scenes.map(([id]) => {
+          const host = doc.querySelector(`div[data-hf-scene="${id}"]`);
+          const attrs = [...(host?.attributes ?? [])]
+            .filter(
+              (attr) =>
+                attr.name.startsWith("data-hf-scene-") && attr.name !== "data-hf-scene-no-swap",
+            )
+            .map((attr) => ` ${attr.name}="${attr.value}"`)
+            .sort();
+          return [id, attrs.join("")];
+        }),
+      );
+    };
+    expect(
+      await compiled([
+        ["c", 40, 'window.__timelines["c"] = gsap.timeline({ paused: true });'],
+        [
+          "b",
+          30,
+          'if (window.__timelines["c"]) window.__timelines["b"] = gsap.timeline({ paused: true });',
+        ],
+        ["a", 0, 'document.title = window.__timelines["b"] ? "ready" : "missing";'],
+      ]),
+    ).toEqual({
+      c: ' data-hf-scene-eager="b reads it"',
+      b: ' data-hf-scene-eager="its script names c"',
+      a: ' data-hf-scene-after-boot="" data-hf-scene-eager="its script names b"',
+    });
+    expect(
+      await compiled([
+        ["w", 30, 'window.tone = "warm";'],
+        ["r", 0, "document.title = String(window.tone);"],
+      ]),
+    ).toEqual({ w: ' data-hf-scene-eager="its script uses window.tone ="', r: "" });
   });
 
   it("marks a scene whose own script leaves work running as not swappable, and only that scene", async () => {
