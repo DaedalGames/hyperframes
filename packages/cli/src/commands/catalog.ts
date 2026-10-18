@@ -40,9 +40,7 @@ import {
   localVectorNames,
 } from "../registry/localSemantic.js";
 
-function onDeviceSetupCommand(query: string): string {
-  return `hyperframes catalog --query ${JSON.stringify(query)} --on-device`;
-}
+const ON_DEVICE_SETUP_COMMAND = "hyperframes catalog --on-device";
 
 /**
  * Get the offline tier ready, and report every reason it could not be.
@@ -61,7 +59,6 @@ async function prepareOnDeviceTier(opts: {
   canPrompt: boolean;
   /** Only an explicit --on-device installs the runtime; a plain search never waits on it. */
   installRuntime: boolean;
-  query: string;
   registry: string;
   registryNames: ReadonlySet<string>;
   status: LocalModelStatus;
@@ -126,7 +123,7 @@ async function prepareOnDeviceTier(opts: {
 
   if (!opts.installRuntime && !hasLocalRuntime()) {
     warn(
-      `on-device search is off until its runtime is installed: run \`${onDeviceSetupCommand(opts.query)}\` once.`,
+      `on-device search is off until its runtime is installed: run \`${ON_DEVICE_SETUP_COMMAND}\` once.`,
     );
     return warnings;
   }
@@ -214,7 +211,7 @@ export default defineCommand({
       // prompt that fires on a TTY, which leaves every agent and CI run unable
       // to opt in at all.
       description:
-        "Use on-device meaning search; pass --yes to approve a first non-interactive download",
+        "Use on-device meaning search, or set it up when given without a query; pass --yes to approve a first non-interactive download",
     },
   },
   // one flag-parsing entry point feeding three output paths (json, interactive, table); splitting those is its own change
@@ -260,7 +257,8 @@ export default defineCommand({
     // Collected rather than only printed, so --json can carry the same reasons
     // the terminal shows. A machine that asked for a tier deserves to be told
     // it did not run.
-    const searchContext = query ? { status: localModelStatus() } : null;
+    const searchContext =
+      query || args["on-device"] === true ? { status: localModelStatus() } : null;
     const routineUpdate =
       searchContext?.status.status === "unavailable" ||
       (searchContext?.status.status === "ready" &&
@@ -275,7 +273,6 @@ export default defineCommand({
         artifactRevision,
         canPrompt: isAttendedTerminal() && !json,
         installRuntime: args["on-device"] === true,
-        query,
         registry: config.registry,
         registryNames,
         status: searchContext.status,
@@ -284,9 +281,10 @@ export default defineCommand({
       // the state owner again rather than carrying the pre-download snapshot.
       effectiveStatus = localModelStatus();
     }
-    const searched = effectiveStatus
-      ? await applySearch(tagged, query, registryNames, effectiveStatus)
-      : null;
+    const searched =
+      query && effectiveStatus
+        ? await applySearch(tagged, query, registryNames, effectiveStatus)
+        : null;
     if (searched) warnings.push(...searched.warnings);
     const matching = searched ? searched.items : tagged;
 
@@ -373,7 +371,7 @@ export default defineCommand({
           }
         }
       }
-      if (query) await offerLocalModel(query, 0, json, config.registry, artifactRevision);
+      if (query) await offerLocalModel(0, json, config.registry, artifactRevision);
       // A query with no searchable words is bad input, not an empty shelf, so it
       // exits non-zero like an invalid --type does. An agent that only checks the
       // exit code would otherwise read "searched successfully, catalog has
@@ -449,7 +447,7 @@ export default defineCommand({
         if (warnings.length === 0) {
           const hint = localModelHint(json, effectiveStatus);
           if (hint) console.error(hint);
-          await offerLocalModel(query, matching.length, json, config.registry, artifactRevision);
+          await offerLocalModel(matching.length, json, config.registry, artifactRevision);
         }
       }
       if (query) {
@@ -740,7 +738,6 @@ function localModelHint(json: boolean, status: LocalModelStatus | undefined): st
  * matching returned before deciding whether 33 MB is worth it.
  */
 async function offerLocalModel(
-  query: string,
   matchCount: number,
   json: boolean,
   registryBaseUrl: string,
@@ -773,7 +770,7 @@ async function offerLocalModel(
   console.log(
     c.dim(
       vectors
-        ? `  Run \`${onDeviceSetupCommand(query)}\` once to download the model and rank by meaning.`
+        ? `  Run \`${ON_DEVICE_SETUP_COMMAND}\` once to download the model and rank by meaning.`
         : "  Could not fetch the catalog vectors; offline ranking stays off until they are available.",
     ),
   );

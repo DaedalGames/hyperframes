@@ -1,5 +1,6 @@
 // fallow-ignore-file code-duplication
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { runCommand, type CommandDef } from "citty";
 
 import type { RegistryItem } from "@hyperframes/core";
 import { catalogRow, countUnindexed, pickByName, searchMissCommand } from "./catalog.js";
@@ -738,10 +739,16 @@ describe("the on-device download offer", () => {
   });
 
   // Runs the exact command a guidance line names, so an instruction that cannot set anything up fails here.
-  const runAdvertised = (text: string) => {
-    const named = /`hyperframes catalog --query ("(?:[^"\\]|\\.)*") --on-device`/.exec(text);
+  const runAdvertised = async (text: string) => {
+    const named = /`hyperframes catalog ([^`]*)`/.exec(text);
     expect(named).not.toBeNull();
-    return runEnvelope({ query: JSON.parse(named![1]!) as string, "on-device": true });
+    const command = (await import("./catalog.js")).default as CommandDef;
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await runCommand(command, { rawArgs: [...named![1]!.split(" "), "--json"] });
+    } finally {
+      log.mockRestore();
+    }
   };
 
   it("after a first-time yes, names the one command that sets the tier up", async () => {
@@ -749,10 +756,8 @@ describe("the on-device download offer", () => {
     state.confirmAnswer = true;
     state.runtimeOnDisk = false;
 
-    const first = await asATerminal(() => runForExit({ query: 'count "up"' }));
-    expect(first.err).toContain(
-      'Run `hyperframes catalog --query "count \\"up\\"" --on-device` once',
-    );
+    const first = await asATerminal(() => runForExit({ query: "count up" }));
+    expect(first.err).toContain("Run `hyperframes catalog --on-device` once");
 
     // Consent saved, no model, no runtime: what the plain re-run actually meets.
     state.consentRecorded = [];
@@ -910,7 +915,7 @@ describe("the on-device download offer", () => {
     expect(envelope.tier).toBe("words");
     expect(envelope.shown).toBeGreaterThan(0);
     expect(envelope.warnings).toEqual([
-      'on-device search is off until its runtime is installed: run `hyperframes catalog --query "count up" --on-device` once.',
+      "on-device search is off until its runtime is installed: run `hyperframes catalog --on-device` once.",
     ]);
 
     await runAdvertised(envelope.warnings![0]!);
