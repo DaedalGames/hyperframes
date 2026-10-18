@@ -1822,7 +1822,6 @@ export interface InjectDeterministicFontFacesOptions {
   stylesheetBaseDir?: string;
 }
 
-/** Local file a `<link rel="stylesheet">` loads, or null for remote, disabled or missing ones. */
 function localStylesheetPath(link: Element, baseDir: string): string | null {
   const href = (link.getAttribute("href") ?? "").split(/[?#]/)[0] ?? "";
   if (!href || link.hasAttribute("disabled") || /^([a-z][a-z\d+.-]*:|\/\/)/i.test(href))
@@ -1831,7 +1830,6 @@ function localStylesheetPath(link: Element, baseDir: string): string | null {
   return existsSync(path) ? path : null;
 }
 
-/** The document with its local stylesheets added as `<style>` blocks, read only to find font families. */
 function withLinkedStylesheets(html: string, baseDir: string | undefined): string {
   if (!baseDir || !/<link\b[^>]*stylesheet/i.test(html)) return html;
   const { document } = parseHTML(html);
@@ -2028,6 +2026,7 @@ export async function injectDeterministicFontFaces(
   const fetchImpl = options.fetchImpl ?? fetch;
   const allowSystemFontCapture = options.allowSystemFontCapture !== false;
   const retryPolicy = resolveFontFetchRetryPolicy(options.fontFetchRetryPolicy);
+  const styledHtml = withLinkedStylesheets(html, options.stylesheetBaseDir);
   const fetchOptions: InternalFontFetchOptions = {
     log: options.logger ?? STDERR_LOGGER,
     failClosedFontFetch,
@@ -2036,11 +2035,10 @@ export async function injectDeterministicFontFaces(
     abortSignal: options.abortSignal,
     retryPolicy,
     retryDeadlineMs: Date.now() + retryPolicy.maxElapsedMs,
-    authoredStylesheets: authoredGoogleFontStylesheets(html),
+    authoredStylesheets: authoredGoogleFontStylesheets(styledHtml),
     diag,
   };
 
-  const styledHtml = withLinkedStylesheets(html, options.stylesheetBaseDir);
   const existingFaces = extractExistingFontFaces(styledHtml);
   const requestedFamilies = extractRequestedFontFamilies(styledHtml);
   const pendingFamilies = new Map<string, ResolvedFamily>();
