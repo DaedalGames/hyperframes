@@ -369,7 +369,18 @@ function throwImmutableObjectConflict(uri: string): never {
   throw error;
 }
 
-function isS3NotFound(error: unknown): boolean {
+export async function s3ObjectExists(client: S3Client, uri: string): Promise<boolean> {
+  const { bucket, key } = parseS3Uri(uri);
+  try {
+    await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+    return true;
+  } catch (error) {
+    if (isS3NotFound(error)) return false;
+    throw error;
+  }
+}
+
+export function isS3NotFound(error: unknown): boolean {
   if (!isRecord(error)) return false;
   const metadata = isRecord(error.$metadata) ? error.$metadata : undefined;
   return (

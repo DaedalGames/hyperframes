@@ -101,18 +101,18 @@ export async function renderToLambda(opts: RenderToLambdaOptions): Promise<Rende
   });
   const outputS3Uri = formatS3Uri({ bucket: opts.bucketName, key: outputKey });
 
-  if (opts.siteHandle) {
-    const s3 = opts.s3 ?? new S3Client({ region: opts.region });
-    await ensureSiteStored(opts.siteHandle, s3, opts.projectDir);
-  }
-  const site =
-    opts.siteHandle ??
-    (await deploySite({
-      projectDir: opts.projectDir as string,
-      bucketName: opts.bucketName,
-      region: opts.region,
-      s3: opts.s3,
-    }));
+  const site = opts.siteHandle
+    ? await ensureSiteStored(
+        opts.siteHandle,
+        opts.s3 ?? new S3Client({ region: opts.region }),
+        opts.projectDir,
+      )
+    : await deploySite({
+        projectDir: opts.projectDir as string,
+        bucketName: opts.bucketName,
+        region: opts.region,
+        s3: opts.s3,
+      });
 
   const input = {
     ProjectS3Uri: site.projectS3Uri,

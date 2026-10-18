@@ -20,9 +20,11 @@ import { hashProjectDir, listSiteFiles } from "@hyperframes/producer/distributed
 import {
   downloadS3ObjectToFile,
   ensureContentStoreObject,
+  isS3NotFound,
   mapConcurrent,
   parseS3Uri,
   putContentStoreFile,
+  s3ObjectExists,
   sha256File,
   uploadContentAddressedFileToS3,
 } from "../s3Transport.js";
@@ -31,6 +33,7 @@ import {
   parseSiteManifest,
   serializeSiteManifest,
   siteManifestUri,
+  siteTarballUri,
   type SiteFile,
 } from "../siteManifest.js";
 
@@ -74,18 +77,26 @@ export function siteHandleFromId(bucketName: string, siteId: string): SiteHandle
   return { siteId, bucketName, projectS3Uri, bytes: 0, uploadedAt: "", uploaded: false };
 }
 
-/** Before a render reuses `site`, re-store any file the content store expired, from `projectDir`. */
+/**
+ * Before a render reuses `site`, re-store any file the content store expired, from `projectDir`.
+ * Returns the handle to render: a site uploaded before `files.json` resolves to its tarball.
+ */
 export async function ensureSiteStored(
   site: SiteHandle,
   s3: S3Client,
   projectDir?: string,
-): Promise<void> {
-  if (!isSiteManifestUri(site.projectS3Uri)) return;
+): Promise<SiteHandle> {
+  if (!isSiteManifestUri(site.projectS3Uri)) return site;
   const { bucket } = parseS3Uri(site.projectS3Uri);
   const workdir = mkdtempSync(join(tmpdir(), "hf-site-check-"));
   try {
     const manifestPath = join(workdir, "files.json");
-    await downloadS3ObjectToFile(s3, site.projectS3Uri, manifestPath);
+    try {
+      await downloadS3ObjectToFile(s3, site.projectS3Uri, manifestPath);
+    } catch (error) {
+      if (!isS3NotFound(error)) throw error;
+      return await tarballSite(site, s3, bucket);
+    }
     const files = parseSiteManifest(readFileSync(manifestPath, "utf-8"));
     const missing: string[] = [];
     await mapConcurrent(files, 16, async ({ path, sha256, sizeBytes }) => {
@@ -106,9 +117,21 @@ export async function ensureSiteStored(
       error.name = "SITE_FILES_MISSING";
       throw error;
     }
+    return site;
   } finally {
     rmSync(workdir, { recursive: true, force: true });
   }
+}
+
+async function tarballSite(site: SiteHandle, s3: S3Client, bucket: string): Promise<SiteHandle> {
+  const projectS3Uri = siteTarballUri(bucket, site.siteId);
+  if (await s3ObjectExists(s3, projectS3Uri)) return { ...site, projectS3Uri };
+  const error = new Error(
+    `[deploySite] SITE_NOT_FOUND: site ${site.siteId} has neither ${site.projectS3Uri} nor ` +
+      `${projectS3Uri}. Run \`hyperframes lambda sites create\` again and use the new site id.`,
+  );
+  error.name = "SITE_NOT_FOUND";
+  throw error;
 }
 
 /** Upload `projectDir`'s files to the content store and write the site manifest. */

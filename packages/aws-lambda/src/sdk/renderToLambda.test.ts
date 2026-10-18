@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { SFNClient } from "@aws-sdk/client-sfn";
 import type { SerializableDistributedRenderConfig } from "../events.js";
 import { asS3Client, FakeS3 } from "./__fixtures__/fakeS3.js";
-import { deploySite, type SiteHandle } from "./deploySite.js";
+import { deploySite, type SiteHandle, siteHandleFromId } from "./deploySite.js";
 import { renderToLambda } from "./renderToLambda.js";
 import { InvalidConfigError } from "./validateConfig.js";
 
@@ -161,6 +161,39 @@ describe("renderToLambda", () => {
     expect(handle.projectS3Uri).toBe(prebuilt.projectS3Uri);
     // No HEAD/PUT means s3.existing stayed empty.
     expect(s3.existing.size).toBe(0);
+  });
+
+  describe("with a site id from before files.json", () => {
+    const renderSite = (s3: FakeS3, sfn: FakeSFN, siteId: string) =>
+      renderToLambda({
+        siteHandle: siteHandleFromId("test-bucket", siteId),
+        bucketName: "test-bucket",
+        stateMachineArn: "arn:aws:states:us-east-1:1234:stateMachine:hf",
+        config: baseConfig,
+        sfn: asSFNClient(sfn),
+        s3: asS3Client(s3),
+      });
+
+    it("renders its project.tar.gz", async () => {
+      const s3 = new FakeS3();
+      const sfn = new FakeSFN();
+      s3.existing.add("test-bucket/sites/oldsite/project.tar.gz");
+      const handle = await renderSite(s3, sfn, "oldsite");
+      expect(handle.projectS3Uri).toBe("s3://test-bucket/sites/oldsite/project.tar.gz");
+      expect(sfn.starts[0]?.input).toMatchObject({ ProjectS3Uri: handle.projectS3Uri });
+    });
+
+    it("names both keys and the fix when neither exists, before starting", async () => {
+      const s3 = new FakeS3();
+      const sfn = new FakeSFN();
+      await expect(renderSite(s3, sfn, "gone")).rejects.toMatchObject({
+        name: "SITE_NOT_FOUND",
+        message: expect.stringMatching(
+          /sites\/gone\/files\.json.*sites\/gone\/project\.tar\.gz.*sites create/,
+        ),
+      });
+      expect(sfn.starts).toHaveLength(0);
+    });
   });
 
   describe("with a site whose files expired from the content store", () => {

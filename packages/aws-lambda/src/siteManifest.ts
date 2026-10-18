@@ -30,6 +30,11 @@ export function siteManifestUri(bucket: string, siteId: string): string {
   return formatS3Uri({ bucket, key: `sites/${siteId}/${SITE_MANIFEST_NAME}` });
 }
 
+/** Sites uploaded before `files.json` are one tarball; the plan step still reads them. */
+export function siteTarballUri(bucket: string, siteId: string): string {
+  return formatS3Uri({ bucket, key: `sites/${siteId}/project.tar.gz` });
+}
+
 export function isSiteManifestUri(uri: string): boolean {
   return uri.endsWith(`/${SITE_MANIFEST_NAME}`);
 }

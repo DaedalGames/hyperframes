@@ -37,9 +37,10 @@ export class FakeS3 {
         this.ops.push({ kind: "head", bucket: input.Bucket, key: input.Key });
         return this.head(id);
       },
-      GetObjectCommand: async () => ({
-        Body: Readable.from([this.bodies.get(id) ?? Buffer.alloc(0)]),
-      }),
+      GetObjectCommand: async () => {
+        if (!this.existing.has(id)) throw notFound("NoSuchKey");
+        return { Body: Readable.from([this.bodies.get(id) ?? Buffer.alloc(0)]) };
+      },
       PutObjectCommand: async () => {
         this.ops.push({ kind: "put", bucket: input.Bucket, key: input.Key });
         this.existing.add(id);
@@ -57,14 +58,12 @@ export class FakeS3 {
     if (this.existing.has(id)) {
       return { ContentLength: this.bodies.get(id)?.length, Metadata: this.metadata.get(id) };
     }
-    const err = new Error("Not Found") as Error & {
-      $metadata: { httpStatusCode: number };
-      name: string;
-    };
-    err.name = "NotFound";
-    err.$metadata = { httpStatusCode: 404 };
-    throw err;
+    throw notFound("NotFound");
   }
+}
+
+function notFound(name: string): Error {
+  return Object.assign(new Error(name), { name, $metadata: { httpStatusCode: 404 } });
 }
 
 /** Convenience cast so `deploySite({ s3: makeFakeS3() })` reads cleanly. */
