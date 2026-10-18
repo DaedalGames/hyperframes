@@ -66,6 +66,8 @@ import {
   type CompositionMetadataJson,
   freezePlan,
   type LockedRenderConfig,
+  type PlanFileDigests,
+  prehashPlanFiles,
 } from "../render/stages/freezePlan.js";
 import {
   canonicalJsonStringify,
@@ -299,6 +301,14 @@ export interface BuildLocalExecutionPlanOptions {
    * chunks write those frames into their own work directory.
    */
   readonly deferVideoExtraction?: boolean;
+  /** Shared with the publisher so each plan file is hashed once. */
+  readonly digests?: PlanFileDigests;
+  /** Runs while the audio mixes, once `compiled/` and the video trees are final. */
+  readonly whileAudioMixes?: () => Promise<void>;
+}
+
+export function logPlanStage(log: ProducerLogger, stage: string, startedAt: number): void {
+  log.info("[plan] stage", { stage, ms: Date.now() - startedAt });
 }
 
 /**
@@ -1064,6 +1074,7 @@ export async function buildLocalExecutionPlan(
   // overwrites the entry HTML afterwards. `dereference: true` resolves
   // symlinks so the planDir survives S3 / Lambda /tmp round-trips.
   mkdirSync(compiledDir, { recursive: true });
+  let stageStarted = Date.now();
   cpSync(projectDir, compiledDir, {
     recursive: true,
     dereference: true,
@@ -1077,6 +1088,7 @@ export async function buildLocalExecutionPlan(
       return firstSegment === undefined || !PLAN_PROJECT_DIR_SKIP_SEGMENTS.has(firstSegment);
     },
   });
+  logPlanStage(log, "copy", stageStarted);
 
   // The compiled directory lives at `<planDir>/compiled/` in the final
   // layout. The stages write under `<planDir>/.plan-work/compiled/`; we
@@ -1095,6 +1107,7 @@ export async function buildLocalExecutionPlan(
   const needsAlpha = outputNeedsAlpha(config.format);
 
   // ── Compile ──
+  stageStarted = Date.now();
   const compileResult = await runCompileStage({
     projectDir,
     workDir,
@@ -1114,6 +1127,7 @@ export async function buildLocalExecutionPlan(
     allowSystemFontCapture: false,
     variables: config.variables,
   });
+  logPlanStage(log, "compile", stageStarted);
   let compiled = compileResult.compiled;
   const composition = compileResult.composition;
   const { deviceScaleFactor } = compileResult;
@@ -1143,6 +1157,7 @@ export async function buildLocalExecutionPlan(
   // ── Probe ──
   // Browser probe runs only when needed. For statically-resolvable durations
   // this is a near-zero pass.
+  stageStarted = Date.now();
   const probeResult = await runProbeStage({
     projectDir,
     workDir,
@@ -1160,6 +1175,7 @@ export async function buildLocalExecutionPlan(
     deviceScaleFactor,
     subTimelineWaitMemo: {},
   });
+  logPlanStage(log, "probe", stageStarted);
   compiled = probeResult.compiled;
   job.duration = probeResult.duration;
   job.totalFrames = probeResult.totalFrames;
@@ -1212,6 +1228,7 @@ export async function buildLocalExecutionPlan(
   // ── Extract videos ──
   // `materializeSymlinks: true` recursively copies frames so the planDir is
   // self-contained (symlinks don't survive S3/GCS round-trips).
+  stageStarted = Date.now();
   const extractResult = await runExtractVideosStage({
     projectDir,
     compiledDir,
@@ -1223,6 +1240,7 @@ export async function buildLocalExecutionPlan(
     materializeSymlinks: true,
     deferRangeExtraction: options.deferVideoExtraction,
   });
+  logPlanStage(log, "extract", stageStarted);
   if (extractResult.failureToEnforce) throw extractResult.failureToEnforce;
   if (extractResult.extractionResult) {
     // Distributed chunks cannot safely fall back to native remote decoding:
@@ -1236,23 +1254,6 @@ export async function buildLocalExecutionPlan(
   // video's outputDir, but in `plan()` those directories ARE the source
   // material the renames below move into `planDir/video-frames/`.
 
-  // ── Audio ──
-  const audioResult = await runAudioStage({
-    projectDir,
-    workDir,
-    compiledDir,
-    duration: job.duration,
-    ffmpegProcessTimeout: cfg.ffmpegProcessTimeout,
-    audioGain: cfg.audioGain,
-    audios: composition.audios,
-    masterFxChain: composition.masterFxChain,
-    abortSignal,
-    assertNotAborted,
-  });
-  if (audioResult.audioError) {
-    applyDistributedAudioWarningPolicy(job, audioResult.audioError, audioResult.audioFailures, log);
-  }
-
   // Promote staged artifacts from the temp work tree into the final planDir
   // shape. `workDir` is `<planDir>/.plan-work/` — always the same filesystem
   // as `planDir`, so `renameSync` succeeds without copying. Video frames
@@ -1262,7 +1263,8 @@ export async function buildLocalExecutionPlan(
   const stagedVideoFrames = join(compiledDir, "__hyperframes_video_frames");
   const videoFramesDst = join(planDir, "video-frames");
   if (existsSync(videoFramesDst)) rmSync(videoFramesDst, { recursive: true, force: true });
-  rmSync(join(planDir, "video-sources"), { recursive: true, force: true });
+  const videoSourcesDir = join(planDir, "video-sources");
+  rmSync(videoSourcesDir, { recursive: true, force: true });
   if (existsSync(stagedVideoFrames)) {
     renameSync(stagedVideoFrames, videoFramesDst);
   } else {
@@ -1305,6 +1307,43 @@ export async function buildLocalExecutionPlan(
     JSON.stringify(planVideosJson, null, 2),
     "utf-8",
   );
+
+  // ── Audio ──
+  // Only the assembler reads the mix, so hashing and publishing the final
+  // compiled and video trees run beside it instead of after it.
+  const digests: PlanFileDigests = options.digests ?? new Map();
+  stageStarted = Date.now();
+  const [audioOutcome, overlapOutcome] = await Promise.allSettled([
+    runAudioStage({
+      projectDir,
+      workDir,
+      compiledDir: finalCompiledDir,
+      duration: probeResult.duration,
+      ffmpegProcessTimeout: cfg.ffmpegProcessTimeout,
+      audioGain: cfg.audioGain,
+      audios: composition.audios,
+      masterFxChain: composition.masterFxChain,
+      abortSignal,
+      assertNotAborted,
+    }).finally(() => logPlanStage(log, "audio", stageStarted)),
+    (async () => {
+      for (const dir of [finalCompiledDir, videoFramesDst, videoSourcesDir]) {
+        await prehashPlanFiles(dir, digests);
+      }
+      logPlanStage(log, "prehash", stageStarted);
+      if (options.whileAudioMixes) {
+        const prepublishStarted = Date.now();
+        await options.whileAudioMixes();
+        logPlanStage(log, "prepublish", prepublishStarted);
+      }
+    })(),
+  ]);
+  if (audioOutcome.status === "rejected") throw audioOutcome.reason;
+  if (overlapOutcome.status === "rejected") throw overlapOutcome.reason;
+  const audioResult = audioOutcome.value;
+  if (audioResult.audioError) {
+    applyDistributedAudioWarningPolicy(job, audioResult.audioError, audioResult.audioFailures, log);
+  }
 
   const planAudioPath = join(planDir, PLAN_AUDIO_RELATIVE_PATH);
   if (audioResult.hasAudio && existsSync(audioResult.audioOutputPath)) {
@@ -1382,6 +1421,7 @@ export async function buildLocalExecutionPlan(
     log,
   });
 
+  stageStarted = Date.now();
   const freezeResult = await freezePlan({
     planDir,
     composition: compositionJson,
@@ -1393,7 +1433,9 @@ export async function buildLocalExecutionPlan(
     durationSeconds: job.duration ?? 0,
     totalFrames,
     hasAudio: audioResult.hasAudio,
+    digests,
   });
+  logPlanStage(log, "freeze", stageStarted);
   const planHash = freezeResult.planHash;
 
   // 2 GB hard cap so the planDir fits inside Lambda's 10 GB /tmp budget
