@@ -1543,8 +1543,9 @@ export async function plan(
   projectDir: string,
   config: DistributedRenderConfig,
   planDir: string,
+  options: Pick<BuildLocalExecutionPlanOptions, "chunksCarryAudio"> = {},
 ): Promise<PlanResult> {
-  const executionPlan = await buildLocalExecutionPlan(projectDir, config, planDir);
+  const executionPlan = await buildLocalExecutionPlan(projectDir, config, planDir, options);
   return {
     planDir: executionPlan.executionPlanDir,
     planProtocol: PLAN_PROTOCOL_V1,

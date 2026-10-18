@@ -367,7 +367,10 @@ async function handlePlan(event: PlanEvent, deps?: HandlerDeps): Promise<PlanLam
     await downloadS3ObjectToFile(s3, event.ProjectS3Uri, projectArchive);
     await untarDirectory(projectArchive, projectDir);
 
-    const result: PlanResult = await primitive(projectDir, config, planDir);
+    // Same chunk layout as v2, so both protocols produce the same chunks and output.
+    const result: PlanResult = await primitive(projectDir, config, planDir, {
+      chunksCarryAudio: true,
+    });
 
     // Upload the planDir as a single tarball. Step Functions cannot pass
     // a directory-shaped artifact between states; we serialize and rely on

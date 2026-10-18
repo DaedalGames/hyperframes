@@ -276,6 +276,7 @@ describe("handler dispatch", () => {
     expect(result.PlanHash).toBe("fakehash");
     expect(result.ChunkCount).toBe(4);
     expect(planMock).toHaveBeenCalledTimes(1);
+    expect((planMock.mock.calls[0] as unknown[])[3]).toEqual({ chunksCarryAudio: true });
     expect(renderChunkMock).not.toHaveBeenCalled();
     expect(assembleMock).not.toHaveBeenCalled();
     // Plan should have downloaded the project zip and uploaded the plan tar.
