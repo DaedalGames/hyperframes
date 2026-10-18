@@ -1,0 +1,181 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { AFTER_FONTS_SCRIPT_TYPE } from "../compiler/scriptRuns";
+import { STUDIO_PREVIEW_MARK, STUDIO_PREVIEW_MARK_META } from "../studioPreviewMark";
+import type { RuntimeTimelineLike } from "./types";
+
+function timeline(duration: number, added: Array<[unknown, number | undefined]> = []) {
+  let time = 0;
+  return {
+    play: () => {},
+    pause: () => {},
+    seek: (t?: number) => (t === undefined ? time : (time = t)),
+    totalTime: (t?: number) => (t === undefined ? time : (time = t)),
+    time: () => time,
+    duration: () => duration,
+    add: (child: unknown, at?: number) => void added.push([child, at]),
+    paused: () => true,
+    timeScale: () => {},
+    set: () => {},
+    getChildren: () => added.map(([child]) => child),
+  } as unknown as RuntimeTimelineLike;
+}
+
+// jsdom runs scripts in its own global: each reports through the shared document, and the test
+// registers the timeline it would have made.
+const sceneScript = (id: string) =>
+  `<script type="${AFTER_FONTS_SCRIPT_TYPE}" data-hf-scene="${id}">` +
+  `document.body.dataset.ran = (document.body.dataset.ran || "") + "${id} ";` +
+  `document.dispatchEvent(new CustomEvent("scene-ran", { detail: "${id}" }));</script>`;
+
+const host = (id: string, start: number, attrs = "") =>
+  `<div data-composition-id="${id}" data-hf-scene="${id}" data-start="${start}" data-duration="5"${attrs}><p>${id}</p></div>`;
+
+async function boot(preview: boolean | typeof STUDIO_PREVIEW_MARK.capture) {
+  (globalThis as { CSS?: { escape?: (v: string) => string } }).CSS ??= {};
+  globalThis.CSS.escape ??= (v: string) => v;
+  if (preview)
+    document.head.appendChild(
+      Object.assign(document.createElement("meta"), {
+        name: STUDIO_PREVIEW_MARK_META,
+        content: preview === true ? STUDIO_PREVIEW_MARK.preview : preview,
+      }),
+    );
+  document.body.innerHTML =
+    `<div data-composition-id="main" data-root="true" data-start="0" data-duration="60" data-width="1920" data-height="1080">` +
+    host("near", 0) +
+    host("far", 30) +
+    host("tied", 40, ' data-hf-scene-eager="its script uses documentElement"') +
+    `</div>` +
+    ["near", "far", "tied"].map(sceneScript).join("");
+  const added: Array<[unknown, number | undefined]> = [];
+  window.__timelines = { main: timeline(60, added) };
+  document.addEventListener("scene-ran", (event) => {
+    const id = (event as CustomEvent<string>).detail;
+    window.__timelines![id] = timeline(5);
+  });
+  vi.resetModules();
+  await import("./entry");
+  await vi.waitFor(() => expect(window.__player).toBeDefined());
+  return added;
+}
+
+const ran = () => document.body.dataset.ran ?? "";
+
+describe("scene scripts held until the playhead nears", () => {
+  afterEach(() => {
+    window.__hfRuntimeTeardown?.();
+    document.head.innerHTML = "";
+    document.body.innerHTML = "";
+    delete document.body.dataset.ran;
+    delete document.body.dataset.saw;
+    window.__timelines = {};
+    delete window.__player;
+    delete (window as { __hyperframeRuntimeBootstrapped?: boolean })
+      .__hyperframeRuntimeBootstrapped;
+  });
+
+  it("runs a far scene at boot when the compiler kept it eager for a near scene that reads it", async () => {
+    (globalThis as { CSS?: { escape?: (v: string) => string } }).CSS ??= {};
+    globalThis.CSS.escape ??= (v: string) => v;
+    document.head.appendChild(
+      Object.assign(document.createElement("meta"), { name: STUDIO_PREVIEW_MARK_META }),
+    );
+    document.body.innerHTML =
+      `<div data-composition-id="main" data-root="true" data-start="0" data-duration="60" data-width="1920" data-height="1080">` +
+      host("b", 30, ' data-hf-scene-eager="a reads it"') +
+      host("a", 0, ' data-hf-scene-eager="its script names b"') +
+      `</div>` +
+      sceneScript("b") +
+      `<script type="${AFTER_FONTS_SCRIPT_TYPE}" data-hf-scene="a">` +
+      `document.body.dataset.saw = String((document.body.dataset.ran || "").includes("b "));</script>`;
+    window.__timelines = { main: timeline(60) };
+    vi.resetModules();
+    await import("./entry");
+    await vi.waitFor(() => expect(window.__player).toBeDefined());
+    expect(document.body.dataset.saw).toBe("true");
+  });
+
+  it("runs a far scene's scripts once a seek comes within the lead, and nests it at its start", async () => {
+    const added = await boot(true);
+    expect(ran()).toBe("near tied ");
+
+    window.__player!.seek(12);
+    await window.__hfWaitForSeekCompletion?.();
+    expect(ran()).toBe("near tied ");
+
+    window.__player!.seek(25);
+    await window.__hfWaitForSeekCompletion?.();
+    expect(ran()).toBe("near tied far ");
+    expect(added).toContainEqual([window.__timelines!.far, 30]);
+
+    window.__player!.seek(31);
+    await window.__hfWaitForSeekCompletion?.();
+    expect(ran()).toBe("near tied far ");
+  });
+
+  it("posts the timeline a far scene's mount changes after the jump's frame paints, not before", async () => {
+    await boot(true);
+    // Boot's own posts settle first.
+    await vi.waitFor(() => expect(window.__renderReady).toBe(true));
+    await new Promise((done) => setTimeout(done, 500));
+    const post = vi.spyOn(window, "postMessage");
+    const timelinePosts = () =>
+      post.mock.calls.filter(([message]) => (message as { type?: string }).type === "timeline")
+        .length;
+    window.__player!.seek(25);
+    await window.__hfWaitForSeekCompletion?.();
+    expect(ran()).toContain("far");
+    expect(timelinePosts()).toBe(0);
+    await vi.waitFor(() => expect(timelinePosts()).toBe(1));
+    // The transport saw the mount too: the one post discharged it.
+    await new Promise((done) => setTimeout(done, 500));
+    expect(timelinePosts()).toBe(1);
+  });
+
+  it("runs a far scene the playback reaches without pausing the clock", async () => {
+    await boot(true);
+    window.__player!.seek(19.5);
+    await window.__hfWaitForSeekCompletion?.();
+    // The runtime's own copy: boot reset the module registry.
+    const { TransportClock } = await import("./clock");
+    const pause = vi.spyOn(TransportClock.prototype, "pause");
+    window.__player!.play();
+    await vi.waitFor(() => expect(ran()).toContain("far"), { timeout: 3000 });
+    await window.__hfWaitForSeekCompletion?.();
+    expect(pause).not.toHaveBeenCalled();
+    expect(window.__player!.isPlaying()).toBe(true);
+    window.__player!.pause();
+  });
+
+  it("runs every scene's scripts at boot outside a preview, as a capture does", async () => {
+    await boot(false);
+    expect(ran()).toBe("near far tied ");
+  });
+
+  it("runs every scene's scripts at boot in a capture build, which defers media but not scenes", async () => {
+    await boot(STUDIO_PREVIEW_MARK.capture);
+    expect(ran()).toBe("near far tied ");
+  });
+
+  it("posts the timeline once after a jump whose scene mount lands while another completion is pending", async () => {
+    await boot(true);
+    await vi.waitFor(() => expect(window.__renderReady).toBe(true));
+    await new Promise((done) => setTimeout(done, 500));
+    // The runtime's own copy: boot reset the module registry.
+    const { registerSeekCompletion } = await import("./adapters/seek-dispatch");
+    let land = () => {};
+    registerSeekCompletion(new Promise<void>((resolve) => (land = resolve)));
+    const post = vi.spyOn(window, "postMessage");
+    const timelinePosts = () =>
+      post.mock.calls.filter(([message]) => (message as { type?: string }).type === "timeline")
+        .length;
+    window.__player!.seek(25);
+    await vi.waitFor(() => expect(ran()).toContain("far"));
+    await new Promise((done) => setTimeout(done, 300));
+    expect(timelinePosts()).toBe(0);
+    land();
+    await vi.waitFor(() => expect(timelinePosts()).toBe(1));
+    await new Promise((done) => setTimeout(done, 500));
+    expect(timelinePosts()).toBe(1);
+  });
+});

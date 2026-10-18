@@ -266,6 +266,18 @@ export function hasMediaSyncStateForTest(el: HTMLMediaElement): boolean {
 export const MEDIA_HARD_SYNC_SECONDS = 0.5;
 export const VIDEO_PRESEEK_SECONDS = 1.5;
 
+export function mediaSourceTimeAt(clip: RuntimeMediaClip, timelineSeconds: number): number {
+  const elapsed = Math.max(0, Math.min(timelineSeconds, clip.end) - (clip.origin ?? clip.start));
+  const target = clip.mediaStart + sourceTimeAt(clip.rate ?? clip.playbackRate, elapsed);
+  if (clip.sourceDuration == null) return target;
+  const loopLength = clip.sourceDuration - clip.mediaStart;
+  if (clip.loop && loopLength > 0 && target >= clip.sourceDuration)
+    return clip.mediaStart + ((target - clip.mediaStart) % loopLength);
+  const holdsLastFrame = !clip.loop && clip.el.tagName === "VIDEO";
+  if (holdsLastFrame) return Math.min(target, clip.sourceDuration);
+  return target;
+}
+
 function prepareUpcomingVideo(
   clip: RuntimeMediaClip,
   time: number,
@@ -286,15 +298,7 @@ function prepareUpcomingVideo(
     ("__HF_EXPORT_RENDER_SEEK_CONFIG" in window && window.__HF_EXPORT_RENDER_SEEK_CONFIG)
   )
     return;
-  let target =
-    clip.mediaStart +
-    sourceTimeAt(clip.rate ?? clip.playbackRate, clip.start - (clip.origin ?? clip.start));
-  if (clip.sourceDuration != null) {
-    const loopLength = clip.sourceDuration - clip.mediaStart;
-    if (clip.loop && loopLength > 0 && target >= clip.sourceDuration)
-      target = clip.mediaStart + ((target - clip.mediaStart) % loopLength);
-    else if (!clip.loop) target = Math.min(target, clip.sourceDuration);
-  }
+  const target = mediaSourceTimeAt(clip, clip.start);
   if (!Number.isFinite(target) || target < 0 || Math.abs(el.currentTime - target) <= 0.001) return;
   try {
     // A trimmed video exposed during its in-point seek has no current frame at the cut.
@@ -400,15 +404,10 @@ export function syncRuntimeMedia(params: {
       !inWindow &&
       (params.timeSeconds >= clip.end || sameInstant(params.timeSeconds, clip.end)) &&
       isClipVisibleAt(params.timeSeconds, clip.start, clip.end, params.getCompositionDuration());
-    let relTime =
-      sourceTimeAt(clipRate, Math.max(0, Math.min(params.timeSeconds, clip.end) - origin)) +
-      clip.mediaStart;
+    const relTime = mediaSourceTimeAt(clip, params.timeSeconds);
     const isHeldVideoTail =
       isTerminalVideo ||
       (isNonLoopVideo && clip.sourceDuration != null && relTime >= clip.sourceDuration && inWindow);
-    if (isHeldVideoTail && clip.sourceDuration != null) {
-      relTime = Math.min(relTime, clip.sourceDuration);
-    }
     const previousRelativeTime = lastRelativeTime.get(el);
     const audioReenteredAfterBackwardSeek =
       el.tagName === "AUDIO" &&
@@ -419,25 +418,16 @@ export function syncRuntimeMedia(params: {
       relTime >= clip.mediaStart &&
       relTime < clip.sourceDuration &&
       (isNonLoopVideo || audioReenteredAfterBackwardSeek);
-    // Ended media can re-enter playable source after a backward timeline seek
-    // without depending on the browser having reset `ended` first. Audio needs
-    // a fresh activation or a measured backward transport seek so ordinary EOF
-    // and non-seek force-sync transitions cannot replay its tail. A non-loop
-    // video additionally remains an active visual through
-    // its authored window, with tail seeks clamped to the final frame.
+    // Ended media can re-enter playable source after a backward timeline seek without the browser
+    // resetting `ended` first. Audio needs a fresh activation or a measured backward seek, so
+    // ordinary EOF and non-seek force-sync transitions cannot replay its tail; a non-loop video
+    // stays an active visual through its authored window.
     const isActive =
       (inWindow || isTerminalVideo || startsEarly) &&
       relTime >= 0 &&
       (!el.ended || clip.loop || isHeldVideoTail || canSeekEndedMediaBackward);
     if (isActive) {
       lastRelativeTime.set(el, relTime);
-      // Loop wrapping: when media reaches end, restart from mediaStart
-      if (clip.loop && clip.sourceDuration != null && clip.sourceDuration > 0) {
-        const loopLength = clip.sourceDuration - clip.mediaStart;
-        if (loopLength > 0 && relTime >= clip.sourceDuration) {
-          relTime = clip.mediaStart + ((relTime - clip.mediaStart) % loopLength);
-        }
-      }
       const userVol = clampVolume(params.userVolume ?? 1);
       const fallbackAuthorVolume = clampAudioGain(clip.volume ?? 1);
       const previousRuntimeVolume = lastRuntimeAppliedVolume.get(el);

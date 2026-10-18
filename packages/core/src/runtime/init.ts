@@ -18,6 +18,7 @@ import {
   RUNTIME_STAMPED_ATTR,
   STUDIO_PREVIEW_LAZY_ATTR,
   STUDIO_PREVIEW_UPCOMING_ATTR,
+  defersMedia,
 } from "../studioPreviewMark";
 import { initRuntimeAnalytics, emitAnalyticsEvent } from "./analytics";
 import { injectCompositionCssVariables } from "./getVariables";
@@ -44,14 +45,18 @@ import {
 } from "./adapters/video-texture-compat";
 import {
   forceDispatchSeekEvent,
+  hasPendingSeekCompletion,
   registerSeekCompletion,
+  seekCompletionsSettled,
   waitForSeekCompletion,
 } from "./adapters/seek-dispatch";
 import { sourceTimeAt } from "../speedRamp";
 import { createWaapiAdapter } from "./adapters/waapi";
 import {
+  HOLD_CAP_MS,
   MEDIA_SYNC_TOLERANCE_SECONDS,
   isUnplayable,
+  mediaSourceTimeAt,
   readElementPlaybackRate,
   readElementPlaybackStart,
   readElementRateSpec,
@@ -98,6 +103,7 @@ import { createRuntimeStartTimeResolver } from "./startResolver";
 import { createClipTree } from "./clipTree";
 import { loadCompositions } from "./compositionLoader";
 import { runScriptsAfterFonts } from "./afterFonts";
+import { takeHeldScenesNear } from "./heldScenes";
 import {
   applyCaptionOverrides,
   applyFetchedCaptionOverrides,
@@ -2794,6 +2800,7 @@ export function initSandboxRuntimeModular(): void {
   };
 
   const hiddenImagesSkipped = skipsHiddenImages();
+  const mediaDeferred = defersMedia(document);
   const LOOKAHEAD_SECONDS = 2;
   const RELEASE_LOOKAHEAD_SECONDS = 4;
   // Unskipped while within the window on either side of the playhead, so a step or shuttle back
@@ -2819,7 +2826,7 @@ export function initSandboxRuntimeModular(): void {
   // A clip with no authored length loads as in a render: a reload would drop the duration it is
   // timed by.
   const inPreloadWindow = (el: HTMLMediaElement) =>
-    hiddenImagesSkipped && el.hasAttribute("data-start") && lengthIsAuthored(el);
+    mediaDeferred && el.hasAttribute("data-start") && lengthIsAuthored(el);
 
   // Media on screen or due within the look-ahead loads; the rest stops holding a connection to
   // the origin that also serves Studio's thumbnails.
@@ -3012,8 +3019,11 @@ export function initSandboxRuntimeModular(): void {
       const isRuntimeStamped = isDiscoveryStamped(rawNode);
       if (!isRuntimeStamped) rawNode.style.visibility = isVisibleNow ? "visible" : "hidden";
       rawNode.toggleAttribute(CLIP_HIDDEN_ATTR, !isRuntimeStamped && !isVisibleNow);
-      const upcoming =
-        hiddenImagesSkipped && !isVisibleNow && dueSoon(rawNode, visibleAt, currentTime);
+      const due =
+        (hiddenImagesSkipped || mediaDeferred) &&
+        !isVisibleNow &&
+        dueSoon(rawNode, visibleAt, currentTime);
+      const upcoming = hiddenImagesSkipped && due;
       if (upcoming && !rawNode.hasAttribute(STUDIO_PREVIEW_UPCOMING_ATTR))
         loadPreviewImagesIn(rawNode);
       rawNode.toggleAttribute(STUDIO_PREVIEW_UPCOMING_ATTR, upcoming);
@@ -3021,7 +3031,7 @@ export function initSandboxRuntimeModular(): void {
         preloadNearPlayhead(
           rawNode,
           isVisibleNow,
-          upcoming || mediaStaysDue(rawNode, visibleAt, currentTime),
+          due || mediaStaysDue(rawNode, visibleAt, currentTime),
         );
       if (!isMediaElement(rawNode) && !isImageElement(rawNode)) decidedTimedClip = true;
       if (isVideoElement(rawNode) || isImageElement(rawNode)) {
@@ -3251,6 +3261,12 @@ export function initSandboxRuntimeModular(): void {
   };
   window.__hf.leasePausedMedia = leasePausedMedia;
   window.__hf.releasePausedMedia = releasePausedMedia;
+  // The clips the transport may move now; null while the host drives media itself (slideshow).
+  // A leased clip is not the transport's while paused; during playback it owns everything again.
+  const transportMovableClips = (clips: RuntimeMediaClip[]): RuntimeMediaClip[] | null => {
+    if (state.nativeMediaSyncDisabled) return null;
+    return state.isPlaying ? clips : clips.filter((clip) => !pausedMediaLeases.has(clip.el));
+  };
   window.__hf.setLoopStart = (seconds) => {
     loopStartSeconds = seconds != null && Number.isFinite(seconds) && seconds >= 0 ? seconds : null;
   };
@@ -3362,17 +3378,13 @@ export function initSandboxRuntimeModular(): void {
       if (kf) clip.volumeKeyframes = kf;
     }
 
-    // A leased element is not the transport's to touch while the clock is paused;
-    // during playback the transport owns everything again. Filtered here rather
-    // than out of `mediaClips` so the in-window bookkeeping below still records it
-    // and the pass after its release visits it normally.
-    const syncedClips = state.isPlaying
-      ? mediaClips
-      : mediaClips.filter((clip) => !pausedMediaLeases.has(clip.el));
+    // Filtered here rather than out of `mediaClips` so the in-window bookkeeping
+    // below still records a leased clip and the pass after its release visits it.
+    const syncedClips = transportMovableClips(mediaClips);
 
     const forceSync = state.mediaForceSyncNextTick;
     if (forceSync) state.mediaForceSyncNextTick = false;
-    if (!state.nativeMediaSyncDisabled) {
+    if (syncedClips) {
       syncRuntimeMedia({
         clips: syncedClips,
         timeSeconds: state.currentTime,
@@ -3465,6 +3477,33 @@ export function initSandboxRuntimeModular(): void {
   };
   // Studio re-reads the whole manifest on every post, so playback holds them until it stops.
   let timelinePostHeld = false;
+  // A jump paints its frame first: what its landing and scene mounts owe becomes one post, a task after the next
+  // frame once its completions settle (capped, so one that never settles cannot hold the clip list for good).
+  let jumpLanding = false;
+  let timelinePostQueued = false;
+  const postTimelineAfterPaint = () => {
+    if (timelinePostQueued) return;
+    timelinePostQueued = true;
+    let cap: ReturnType<typeof setTimeout> | undefined;
+    const settled = Promise.race([
+      seekCompletionsSettled(),
+      new Promise<void>((done) => (cap = setTimeout(done, HOLD_CAP_MS))),
+    ]);
+    void settled.then(() => {
+      clearTimeout(cap);
+      window.requestAnimationFrame(() =>
+        setTimeout(() => {
+          timelinePostQueued = false;
+          jumpLanding = false;
+          if (state.tornDown) return;
+          // Discharges what the transport saw meanwhile, as its own post does.
+          lastSeenTimingRevision = readCompositionTimingRevision();
+          postTimeline();
+          compositionChangePending = false;
+        }, 0),
+      );
+    });
+  };
   const postTimeline = () => {
     sanitizeCompositionDurationAttributes();
     applyCompositionSizing();
@@ -3480,6 +3519,9 @@ export function initSandboxRuntimeModular(): void {
     bindRootTimelineIfAvailable();
     timelinePostHeld = clock.isPlaying();
     if (timelinePostHeld) return;
+    if (jumpLanding && !renderCaptureSeekStarted && hasPendingSeekCompletion())
+      return postTimelineAfterPaint();
+    jumpLanding = false;
     const payload = collectRuntimeTimelinePayload({
       canonicalFps: state.canonicalFps,
     });
@@ -3770,6 +3812,36 @@ export function initSandboxRuntimeModular(): void {
   };
   // Swap edited scenes in place from a rebuilt preview document. Refuses before changing anything unless
   // the documents differ only inside existing scenes; a later failure is left to the caller's reload.
+  // Nests the timelines a scene's scripts just made and redraws the current frame with them.
+  const nestRanScenes = (
+    hosts: Element[],
+    { drawnByTick = false, postAfterPaint = false } = {},
+  ) => {
+    childrenBound = false;
+    bindRootTimelineIfAvailable();
+    // Probed before the scene was nested, so the new media found no volume envelope.
+    const movers = passMovers();
+    for (const host of hosts) {
+      for (const el of host.querySelectorAll<HTMLMediaElement>("video, audio")) {
+        volumeKeyframeCache.delete(el);
+        probeAndCacheVolumeKeyframes(el, movers);
+      }
+    }
+    const duration = getSafeTimelineDurationSeconds(state.capturedTimeline, 0);
+    if (duration > 0) clock.setDuration(duration);
+    // Adapters drive only the elements they found at discover time; the new scene's are new.
+    runAdapters("discover", state.currentTime);
+    // The rebind above skips these when the root timeline object did not change.
+    applyPositionEdits(document);
+    // Redraw the current frame as a seek does; a playing film cut to end at or before it stops there, as at its end.
+    const cutShort = clock.isPlaying() && duration > 0 && state.currentTime >= duration;
+    // Playing, the next tick draws the frame; a seek would pause and restart the clock and media.
+    if (!(drawnByTick && clock.isPlaying() && !cutShort))
+      transport.seek(cutShort ? duration : state.currentTime, { keepPlaying: !cutShort });
+    syncTimedElementVisibility(state.currentTime);
+    if (postAfterPaint) postTimelineAfterPaint();
+    else postTimeline();
+  };
   const swapScenes = async (html: string, signal?: AbortSignal): Promise<void> => {
     const generation = sceneSwapGeneration;
     const next = new DOMParser().parseFromString(html, "text/html");
@@ -3961,27 +4033,25 @@ export function initSandboxRuntimeModular(): void {
     initVfx(document.body, state.canonicalFps);
     applyFetchedCaptionOverrides(captionOverrides, captionHosts, rewindCaptionTimelines);
     releaseDetachedMedia();
-    childrenBound = false;
-    bindRootTimelineIfAvailable();
-    // Probed before the scene was nested, so the new media found no volume envelope.
-    const swapMovers = passMovers();
-    for (const host of swappedHosts) {
-      for (const el of host.querySelectorAll<HTMLMediaElement>("video, audio")) {
-        volumeKeyframeCache.delete(el);
-        probeAndCacheVolumeKeyframes(el, swapMovers);
-      }
-    }
-    const duration = getSafeTimelineDurationSeconds(state.capturedTimeline, 0);
-    if (duration > 0) clock.setDuration(duration);
-    // Adapters drive only the elements they found at discover time; the new scene's are new.
-    runAdapters("discover", state.currentTime);
-    // The rebind above skips these when the root timeline object did not change.
-    applyPositionEdits(document);
-    // Redraw the current frame as a seek does; a playing film cut to end at or before it stops there, as at its end.
-    const cutShort = clock.isPlaying() && duration > 0 && state.currentTime >= duration;
-    transport.seek(cutShort ? duration : state.currentTime, { keepPlaying: !cutShort });
-    syncTimedElementVisibility(state.currentTime);
-    postTimeline();
+    nestRanScenes(swappedHosts);
+  };
+
+  // Scripts held at boot run once the playhead nears their scene, one batch after another.
+  let sceneMounts: Promise<void> = Promise.resolve();
+  const mountHeldScenesNear = (t: number) => {
+    const due = takeHeldScenesNear(t);
+    if (due.length === 0) return;
+    const mounted = sceneMounts.then(async () => {
+      await runScriptsAfterFonts(due.flatMap((scene) => scene.scripts));
+      if (state.tornDown) return;
+      const hosts = due.map((scene) => scene.host);
+      for (const host of hosts) applyVariableBindings(document, host);
+      bindMediaMetadataListeners();
+      initVfx(document.body, state.canonicalFps);
+      nestRanScenes(hosts, { drawnByTick: true, postAfterPaint: true });
+    });
+    sceneMounts = mounted.catch(() => undefined);
+    registerSeekCompletion(mounted);
   };
   // Only a preview served with a scene manifest can swap; elsewhere the caller reloads directly.
   if (readSceneParts(document)) {
@@ -4023,16 +4093,6 @@ export function initSandboxRuntimeModular(): void {
     if (state.capturedTimeline && typeof state.capturedTimeline.timeScale === "function") {
       state.capturedTimeline.timeScale(state.playbackRate);
     }
-    const mediaEls = document.querySelectorAll("video, audio");
-    for (const el of mediaEls) {
-      if (!isMediaElement(el)) continue;
-      try {
-        el.playbackRate = state.playbackRate;
-      } catch (err) {
-        // ignore unsupported values
-        swallow("runtime.init.site10", err);
-      }
-    }
   };
 
   // A paused seek that would reveal undecoded images holds the previous picture until they decode.
@@ -4045,6 +4105,7 @@ export function initSandboxRuntimeModular(): void {
     held?.apply();
   };
   const applySeek = (quantized: number, options?: { keepPlaying?: boolean }) => {
+    mountHeldScenesNear(quantized);
     webAudio.stopAll();
     clock.detachAudioSource();
     const wasPlaying = clock.isPlaying();
@@ -4053,15 +4114,18 @@ export function initSandboxRuntimeModular(): void {
     state.currentTime = clock.now();
     state.isPlaying = false;
     state.mediaForceSyncNextTick = true;
+    const keepPlaying = options?.keepPlaying && wasPlaying;
+    jumpLanding = !keepPlaying;
+    // Decoding starts before the page renders, so the two overlap.
+    if (!keepPlaying) syncMediaForCurrentState();
     const tl = state.capturedTimeline;
     pauseTimelineIfPossible(tl);
     const pageAnimations = seekTimelineAndAdapters(state.currentTime);
     runAdapters("pause", 0, pageAnimations);
-    if (options?.keepPlaying && wasPlaying) {
+    if (keepPlaying) {
       transport.play();
       return;
     }
-    syncMediaForCurrentState();
     colorGrading.redraw();
     paintVfx(state.currentTime);
     postState(true);
@@ -5009,7 +5073,12 @@ export function initSandboxRuntimeModular(): void {
           postTimeline();
         }
       }
-      if (changeDrivenService || pausedCounterDue(TIMELINE_POST_INTERVAL_FRAMES)) {
+      // A queued after-paint post carries whatever changed meanwhile; posting here would run before the paint.
+      const postOwedHere = !timelinePostQueued;
+      if (
+        postOwedHere &&
+        (changeDrivenService || pausedCounterDue(TIMELINE_POST_INTERVAL_FRAMES))
+      ) {
         // The manifest is what carries a composition change to its consumers,
         // so posting it is what discharges the pending flag — whichever path
         // got here. Clearing it when the change is merely SEEN would drop it
@@ -5022,7 +5091,7 @@ export function initSandboxRuntimeModular(): void {
         // change happens to wake the loop again.
         postTimeline();
         compositionChangePending = false;
-      } else if (stoppedPlaying) {
+      } else if (postOwedHere && stoppedPlaying) {
         postTimelineIfManifestChanged();
       }
       if (changeDrivenService || pausedCounterDue(MEDIA_BIND_INTERVAL_FRAMES)) {
@@ -5043,6 +5112,7 @@ export function initSandboxRuntimeModular(): void {
 
       const t = clock.now();
       state.currentTime = t;
+      if (playing) mountHeldScenesNear(t);
       // During a paused Studio manual-edit drag, the draft writer owns the
       // gestured element's transform (e.g. gsap.set for x/y). Re-seeking the
       // timeline every frame re-applies the animated value and clobbers the
@@ -5110,23 +5180,17 @@ export function initSandboxRuntimeModular(): void {
   };
 
   const hardSyncAllMedia = (timeSeconds: number) => {
-    const mediaEls = document.querySelectorAll("video, audio");
-    for (const el of mediaEls) {
-      if (!isMediaElement(el)) continue;
-      if (!el.isConnected) continue;
-      if (!el.hasAttribute("data-start")) continue;
-      const start = resolveAbsoluteMediaStartSeconds(el);
-      if (!Number.isFinite(start)) continue;
-      const kept = playedMediaWindow(el, start);
-      if (!isInClipWindow(timeSeconds, kept.start, kept.end)) continue;
-      const mediaStart = readElementPlaybackStart(el);
-      const relTime = timeSeconds - start + mediaStart;
-      if (relTime >= 0) {
-        try {
-          el.currentTime = relTime;
-        } catch {
-          // ignore seek restrictions
-        }
+    // Same clips and source time as the media sync that follows, so it has nothing left to seek.
+    const clips = withTimingResolver(() => buildRuntimeMediaCache().mediaClips);
+    for (const clip of transportMovableClips(clips) ?? []) {
+      if (!clip.el.isConnected || !isInClipWindow(timeSeconds, clip.start, clip.end)) continue;
+      const target = mediaSourceTimeAt(clip, timeSeconds);
+      // A seek flushes the decoder even when it lands where the video already is.
+      if (Math.abs(clip.el.currentTime - target) <= 0.001) continue;
+      try {
+        clip.el.currentTime = target;
+      } catch {
+        // ignore seek restrictions
       }
     }
   };
@@ -5387,6 +5451,7 @@ export function initSandboxRuntimeModular(): void {
       refreshTransportClockSource();
       const t = clock.now();
       state.currentTime = t;
+      mountHeldScenesNear(t);
       if (t !== lastTransportSeekTime || state.capturedTimeline !== lastTransportSeekTimeline) {
         seekTimelineAndAdapters(t);
       }
