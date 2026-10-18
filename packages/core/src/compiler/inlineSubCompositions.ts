@@ -339,6 +339,8 @@ export interface InlineSubCompositionsResult {
   moduleScripts: string[];
   /** With `tagScenes`: each scene's host and the literals its scripts use; see `keepScenesReadAtBootEager`. */
   sceneReads: SceneReads;
+  /** Authored scene scripts whose selectors may reach other scenes. */
+  outsideScripts: string[];
 }
 
 export interface SceneReads {
@@ -413,6 +415,7 @@ export function inlineSubCompositions(
 
   const sceneHosts = new Map<string, Element>();
   const sceneLiterals = new Map<string, Set<string>>();
+  const outsideScripts: string[] = [];
   const registryNames = new Map<string, Set<string>>();
   const readEveryScene = new Set<string>();
   const queue = hosts.map((element) => ({
@@ -591,6 +594,7 @@ export function inlineSubCompositions(
         () => unknownCode ?? (externalSrc ? null : sceneScriptEagerReason(authored)),
       );
       if (scene && !externalSrc && type !== "importmap") {
+        if (REACHES_OUTSIDE_RE.test(authored)) outsideScripts.push(authored);
         const { names, everyScene } = registryReads(authored);
         const literals = [...authored.matchAll(STRING_LITERAL_RE)].map((m) => m[2] ?? "");
         sceneLiterals.set(scene, new Set([...(sceneLiterals.get(scene) ?? []), ...literals]));
@@ -807,6 +811,7 @@ export function inlineSubCompositions(
     importMaps,
     moduleScripts,
     sceneReads: { hosts: sceneHosts, literals: sceneLiterals, registryNames, readEveryScene },
+    outsideScripts,
   };
 }
 

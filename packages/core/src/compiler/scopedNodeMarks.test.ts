@@ -88,6 +88,16 @@ describe("sharedHfMark", () => {
     );
   });
 
+  it.each(["arguments[0] = window.document;", "[].fill.call(arguments, window.document);"])(
+    "shares a mark when the wrapper's document can be rebound through %s",
+    (rebind) => {
+      expect(
+        sharedHfMark(`${rebind} const a = document.querySelectorAll(".x"); a[0].__hfReady = 1;`)
+          ?.text,
+      ).toBe("__hfReady");
+    },
+  );
+
   it("shares a mark when the script can run code it does not show, through eval", () => {
     const query = 'const a = document.querySelectorAll(".x");';
     const hidden = [

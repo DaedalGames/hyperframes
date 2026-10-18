@@ -160,15 +160,16 @@ const rebindsDocument = ([node, parent]: Visit, parents: Parents) =>
 const trustsDocument = (visits: Visit[], bindings: Map<string, AstNode[]>, parents: Parents) =>
   !bindings.has("document") && !visits.some((visit) => rebindsDocument(visit, parents));
 
-/** Direct `eval` runs code this parse never sees, in the list's own scope; any `eval` name voids the proof. */
-const namesEval = ([node, parent]: Visit) =>
-  isIdentifier(node, "eval") && !isPropertyName(node, parent);
+/** `eval` hides writes; `arguments` can rebind the wrapper's document. Neither permits a scoped-list proof. */
+const namesDynamicScope = ([node, parent]: Visit) =>
+  (isIdentifier(node, "eval") || isIdentifier(node, "arguments")) && !isPropertyName(node, parent);
 
 /** Names bound once, to the scoped `document.querySelectorAll(...)`, and only ever indexed or measured. */
 function scopedLists(visits: Visit[]): Set<string> {
   const { bindings, declared } = bindingsByName(visits);
   const parents: Parents = new Map(visits);
-  if (!trustsDocument(visits, bindings, parents) || visits.some(namesEval)) return new Set();
+  if (!trustsDocument(visits, bindings, parents) || visits.some(namesDynamicScope))
+    return new Set();
   const indexes = provenIndexes(visits, bindings, parents);
   const lists = new Set([...bindings].filter(([, b]) => isSoleScopedQuery(b)).map(([n]) => n));
   for (const [node, parent] of visits) {

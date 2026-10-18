@@ -1158,7 +1158,7 @@ async function bundleProject(projectDir: string, options?: BundleOptions): Promi
       );
     },
   });
-  refuseScenesReachedByRootScripts(document, rootScripts);
+  refuseScenesReachedByRootScripts(document, [...rootScripts, ...subCompResult.outsideScripts]);
   keepScenesReadAtBootEager(subCompResult.sceneReads, rootScripts);
   const styleRuns: PartRun<CompositionStyle>[] = [];
   subCompResult.styles.forEach((style, i) =>

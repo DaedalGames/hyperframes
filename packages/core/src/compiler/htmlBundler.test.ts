@@ -3753,6 +3753,37 @@ ${scenes.map(([id, start]) => `    <div data-composition-id="${id}" data-composi
       "compositions/b.html": `<template id="b-template"><div data-composition-id="b"><p>B</p></div></template>`,
       ...extra,
     });
+  it.each([
+    [
+      "text read",
+      'document.querySelector(".title").textContent = "Hello";',
+      'document.querySelector(".out").textContent = document.body.querySelector(".title").textContent;',
+    ],
+    [
+      "scoped node claim",
+      'const nodes = document.querySelectorAll(".claim"); for (let i = 0; i < nodes.length; i++) { if (!nodes[i].__hfReady) { nodes[i].__hfReady = true; nodes[i].textContent = "first"; } }',
+      'const node = [...document.body.querySelectorAll(".claim")].find((node) => !node.__hfReady); if (node) { node.__hfReady = true; node.textContent = "second"; }',
+    ],
+  ])("keeps providers at boot for an eager scene's cross-root %s", async (_, writer, reader) => {
+    const dir = rootProject("", {
+      "index.html": `<!doctype html><html><body><div data-composition-id="main" data-width="1920" data-height="1080" data-duration="40">
+        <div data-composition-id="a" data-composition-src="compositions/a.html" data-start="30" data-duration="5"></div>
+        <div data-composition-id="b" data-composition-src="compositions/b.html" data-start="0" data-duration="5"></div>
+      </div></body></html>`,
+      "compositions/a.html": `<template><div data-composition-id="a"><span class="title claim"></span><script>${writer}</script></div></template>`,
+      "compositions/b.html": `<template><div data-composition-id="b"><span class="out claim"></span><script>${reader}</script></div></template>`,
+    });
+    try {
+      const document = parseHTML(await bundleToSingleHtml(dir, { sceneParts: true })).document;
+      const eager = (id: string) =>
+        document.querySelector(`div[data-hf-scene="${id}"]`)?.hasAttribute("data-hf-scene-eager");
+      expect(eager("b")).toBe(true);
+      expect(eager("a")).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   const swapMarks = async (dir: string) => {
     const doc = parseHTML(await bundleToSingleHtml(dir, { sceneParts: true })).document;
     return ["a", "b"].map((id) =>
