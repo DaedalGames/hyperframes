@@ -450,6 +450,36 @@ describe("core runtime browser contract", () => {
     30_000,
   );
 
+  it("shows only the bound title when the parser adds text after an inert script inside it", async () => {
+    const file = join(mkdtempSync(join(tmpdir(), "hf-inert-title-")), "index.html");
+    writeFileSync(
+      file,
+      `<!doctype html>
+      <html data-composition-variables='[{"id":"title","type":"string","label":"Title","default":"Bound"}]'>
+      <head><script>${readFileSync(RUNTIME_PATH, "utf8")}</script></head>
+      <body>
+        <div data-composition-id="root" data-start="0" data-duration="1" data-width="320" data-height="180">
+          <h1 id="title" data-var-text="title">Fallback<script type="application/json">{}</script> suffix</h1>
+        </div>
+      </body></html>`,
+    );
+    const inertPage = await browser.newPage();
+    try {
+      await inertPage.goto(pathToFileURL(file).href);
+      await inertPage.waitForFunction(() => window.__playerReady);
+      const shown = await inertPage.evaluate(() =>
+        [...document.getElementById("title")!.childNodes]
+          .filter((node) => node.nodeType === Node.TEXT_NODE)
+          .map((node) => node.nodeValue)
+          .join(""),
+      );
+      expect(shown).toBe("Bound");
+    } finally {
+      await inertPage.close();
+      rmSync(dirname(file), { recursive: true, force: true });
+    }
+  }, 30_000);
+
   it("renders a later clip's authored lazy image as it is: laid out at setup, fetched before any seek", async () => {
     // A chunked render starts a worker straight at a later clip, so its image must already be loaded.
     const assets = "https://assets.test/";

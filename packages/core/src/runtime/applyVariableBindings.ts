@@ -101,20 +101,19 @@ function valuesForElement(el: Element, cache: ScopeValuesCache): Record<string, 
  * clips, animation-target spans). Mirrors the SDK's setOwnText: write the
  * first direct text node, clear the others; append when none exists.
  */
-function setOwnTextPreservingChildren(el: Element, text: string): void {
+/** Returns the text node now holding `text`, if any. */
+function setOwnTextPreservingChildren(el: Element, text: string): Node | null {
   if (el.childElementCount === 0) {
     el.textContent = text;
-    return;
+    return el.firstChild;
   }
-  let written = false;
+  let written: Node | null = null;
   for (const node of Array.from(el.childNodes)) {
     if (node.nodeType !== Node.TEXT_NODE) continue;
     node.nodeValue = written ? "" : text;
-    written = true;
+    written ??= node;
   }
-  if (!written) {
-    el.insertBefore(el.ownerDocument.createTextNode(text), el.firstChild);
-  }
+  return written ?? el.insertBefore(el.ownerDocument.createTextNode(text), el.firstChild);
 }
 
 /**
@@ -189,7 +188,7 @@ export function applyVariableBindings(doc: Document, within?: Element): void {
   for (const el of all("[data-var-text]")) bindText(el, cache);
 }
 
-const boundText = new WeakMap<Element, string>();
+const boundText = new WeakMap<Element, { text: string; node: Node | null }>();
 
 /** The runtime emptied `el` (a composition host remount), so its bound text must be written again. */
 export function forgetBoundText(el: Element): void {
@@ -202,10 +201,14 @@ function bindText(el: Element, cache: ScopeValuesCache): void {
   const value = valuesForElement(el, cache)[id];
   if (!isScalar(value)) return;
   const text = String(value);
-  // A composition script may have split this text into word spans since it was bound.
-  if (boundText.get(el) === text) return;
-  boundText.set(el, text);
-  setOwnTextPreservingChildren(el, text);
+  const prior = boundText.get(el);
+  const scriptOwnsText =
+    prior?.text === text &&
+    prior.node !== null &&
+    !(prior.node.parentNode === el && prior.node.nodeValue === text);
+  // A composition script split the text it was given into word spans; writing it again would show it twice.
+  if (scriptOwnsText) return;
+  boundText.set(el, { text, node: setOwnTextPreservingChildren(el, text) });
 }
 
 /** Binds text as the page parses, so composition scripts that split it see the variable's value. */
