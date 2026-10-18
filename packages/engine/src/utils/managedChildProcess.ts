@@ -30,6 +30,7 @@ export interface ManagedChildProcessOptions {
 
 const DEFAULT_TERMINATION_GRACE_MS = 2_000;
 const DEFAULT_STDERR_MAX_BYTES = 64 * 1024;
+const RAW_STDERR_SLACK_FACTOR = 2;
 
 /** Owns cancellation, escalation, stderr and reaping for one child process. */
 export class ManagedChildProcess {
@@ -39,7 +40,7 @@ export class ManagedChildProcess {
   private resolveOutcome!: (outcome: ManagedChildProcessOutcome) => void;
   private requestedReason: Exclude<ManagedProcessTerminationReason, "exit" | "spawn_error"> | null =
     null;
-  private stderrTail = "";
+  private rawStderrTail = "";
   private readonly stderrDecoder = new StringDecoder("utf8");
   private spawned = false;
   private settled = false;
@@ -86,12 +87,20 @@ export class ManagedChildProcess {
 
   private readonly onStderr = (data: Buffer | string): void => {
     const chunk = Buffer.isBuffer(data) ? data : Buffer.from(data);
-    const maxBytes = this.options.stderrMaxBytes ?? DEFAULT_STDERR_MAX_BYTES;
-    let tail = redactUrlQueryStrings(this.stderrTail + this.stderrDecoder.write(chunk));
-    if (Buffer.byteLength(tail) > maxBytes) tail = Buffer.from(tail).subarray(-maxBytes).toString();
-    this.stderrTail = tail;
+    this.rawStderrTail = lastBytes(
+      this.rawStderrTail + this.stderrDecoder.write(chunk),
+      RAW_STDERR_SLACK_FACTOR * this.maxBytes,
+    );
     this.options.onStderr?.(chunk.toString());
   };
+
+  private get maxBytes(): number {
+    return this.options.stderrMaxBytes ?? DEFAULT_STDERR_MAX_BYTES;
+  }
+
+  private redactedStderrTail(): string {
+    return lastBytes(redactUrlQueryStrings(this.rawStderrTail), this.maxBytes);
+  }
 
   private readonly onSpawn = (): void => {
     this.spawned = true;
@@ -102,7 +111,7 @@ export class ManagedChildProcess {
       reason: this.requestedReason ?? "exit",
       exitCode,
       signal,
-      stderr: this.stderrTail,
+      stderr: this.redactedStderrTail(),
       durationMs: this.now() - this.startedAtMs,
     });
   };
@@ -113,7 +122,7 @@ export class ManagedChildProcess {
       reason: "spawn_error",
       exitCode: null,
       signal: null,
-      stderr: this.stderrTail.length > 0 ? this.stderrTail : error.message,
+      stderr: this.rawStderrTail.length > 0 ? this.redactedStderrTail() : error.message,
       durationMs: this.now() - this.startedAtMs,
       error,
     });
@@ -185,4 +194,10 @@ export class ManagedChildProcess {
     this.inactivityTimer = null;
     this.escalationTimer = null;
   }
+}
+
+function lastBytes(text: string, maxBytes: number): string {
+  return Buffer.byteLength(text) > maxBytes
+    ? Buffer.from(text).subarray(-maxBytes).toString()
+    : text;
 }

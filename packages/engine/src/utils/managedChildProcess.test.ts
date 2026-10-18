@@ -48,8 +48,26 @@ describe("ManagedChildProcess", () => {
     child.emit("close", 1, null);
 
     const { stderr } = await managed.wait();
-    expect(stderr).toContain("/v.mp4?… -t 0.5");
-    for (const leaked of ["secret", "AKID", "nature="]) expect(stderr).not.toContain(leaked);
+    expect(stderr).toContain("X-Amz-Credential=… -t 0.5");
+    for (const leaked of ["secret", "AKID"]) expect(stderr).not.toContain(leaked);
+  });
+
+  it.each([
+    ["inside the signature value", 66, 64],
+    ["right after the query mark", 48, 64],
+    ["after a cut severed the URL's head", 66, 30],
+  ])("keeps no part of a signature split across chunks %s", async (_where, at, maxBytes) => {
+    const child = childProcess();
+    const managed = new ManagedChildProcess(child, { stderrMaxBytes: maxBytes });
+    const line =
+      "Error opening https://b.s3.amazonaws.com/v.mp4?X-Amz-Signature=abcdef1234 -t 0.5\n";
+    child.stderr.emit("data", Buffer.from(line.slice(0, at)));
+    child.stderr.emit("data", Buffer.from(line.slice(at)));
+    child.emit("close", 1, null);
+
+    const { stderr } = await managed.wait();
+    expect(stderr).toContain(" -t 0.5");
+    for (const leaked of ["abc", "def1234", "1234"]) expect(stderr).not.toContain(leaked);
   });
 
   it("escalates abort from SIGTERM to SIGKILL and resolves only after close", async () => {
