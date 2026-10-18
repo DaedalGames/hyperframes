@@ -16,8 +16,7 @@ export const REACHED_BY_ROOT_REASON = "a script outside the scene selects";
 
 export const READ_BY_SCENE_REASON = "reads it";
 
-/** On an eager scene's host: nothing needs its scripts before boot ends, so a preview runs them right after. Absent,
- * an eager scene runs at boot; the eager attribute's reason is only ever a diagnostic. */
+/** Opts a dependency-free eager scene into after-boot execution; absence keeps it at boot. */
 export const SCENE_AFTER_BOOT_ATTR = "data-hf-scene-after-boot";
 
 /** Hashes of one preview document: everything outside the scene parts, and each scene's parts. */
