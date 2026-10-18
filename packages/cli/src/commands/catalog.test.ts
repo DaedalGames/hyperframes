@@ -737,13 +737,22 @@ describe("the on-device download offer", () => {
     expect(err).toContain("declined, but could not save the answer in settings");
   });
 
+  // Runs the exact command a guidance line names, so an instruction that cannot set anything up fails here.
+  const runAdvertised = (text: string) => {
+    const named = /`hyperframes catalog --query ("(?:[^"\\]|\\.)*") --on-device`/.exec(text);
+    expect(named).not.toBeNull();
+    return runEnvelope({ query: JSON.parse(named![1]!) as string, "on-device": true });
+  };
+
   it("after a first-time yes, names the one command that sets the tier up", async () => {
     state.modelStatus = "not-asked";
     state.confirmAnswer = true;
     state.runtimeOnDisk = false;
 
-    const first = await asATerminal(() => runForExit({ query: "count up" }));
-    expect(first.err).toContain("Run `hyperframes catalog --on-device` once");
+    const first = await asATerminal(() => runForExit({ query: 'count "up"' }));
+    expect(first.err).toContain(
+      'Run `hyperframes catalog --query "count \\"up\\"" --on-device` once',
+    );
 
     // Consent saved, no model, no runtime: what the plain re-run actually meets.
     state.consentRecorded = [];
@@ -751,7 +760,7 @@ describe("the on-device download offer", () => {
     const rerun = await runEnvelope({ query: "count up" });
     expect([state.runtimeInstalls, state.downloads, rerun.tier]).toEqual([0, 0, "words"]);
 
-    await runEnvelope({ query: "count up", "on-device": true });
+    await runAdvertised(first.err);
     expect([state.runtimeInstalls, state.downloads]).toEqual([1, 1]);
   });
 
@@ -901,8 +910,11 @@ describe("the on-device download offer", () => {
     expect(envelope.tier).toBe("words");
     expect(envelope.shown).toBeGreaterThan(0);
     expect(envelope.warnings).toEqual([
-      "on-device search is off until its runtime is installed: run `hyperframes catalog --on-device` once.",
+      'on-device search is off until its runtime is installed: run `hyperframes catalog --query "count up" --on-device` once.',
     ]);
+
+    await runAdvertised(envelope.warnings![0]!);
+    expect(state.runtimeInstalls).toBe(1);
   });
 
   it("installs nothing when a person's yes cannot be saved", async () => {

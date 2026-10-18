@@ -40,6 +40,10 @@ import {
   localVectorNames,
 } from "../registry/localSemantic.js";
 
+function onDeviceSetupCommand(query: string): string {
+  return `hyperframes catalog --query ${JSON.stringify(query)} --on-device`;
+}
+
 /**
  * Get the offline tier ready, and report every reason it could not be.
  *
@@ -57,6 +61,7 @@ async function prepareOnDeviceTier(opts: {
   canPrompt: boolean;
   /** Only an explicit --on-device installs the runtime; a plain search never waits on it. */
   installRuntime: boolean;
+  query: string;
   registry: string;
   registryNames: ReadonlySet<string>;
   status: LocalModelStatus;
@@ -121,7 +126,7 @@ async function prepareOnDeviceTier(opts: {
 
   if (!opts.installRuntime && !hasLocalRuntime()) {
     warn(
-      "on-device search is off until its runtime is installed: run `hyperframes catalog --on-device` once.",
+      `on-device search is off until its runtime is installed: run \`${onDeviceSetupCommand(opts.query)}\` once.`,
     );
     return warnings;
   }
@@ -270,6 +275,7 @@ export default defineCommand({
         artifactRevision,
         canPrompt: isAttendedTerminal() && !json,
         installRuntime: args["on-device"] === true,
+        query,
         registry: config.registry,
         registryNames,
         status: searchContext.status,
@@ -367,7 +373,7 @@ export default defineCommand({
           }
         }
       }
-      if (query) await offerLocalModel(0, json, config.registry, artifactRevision);
+      if (query) await offerLocalModel(query, 0, json, config.registry, artifactRevision);
       // A query with no searchable words is bad input, not an empty shelf, so it
       // exits non-zero like an invalid --type does. An agent that only checks the
       // exit code would otherwise read "searched successfully, catalog has
@@ -443,7 +449,7 @@ export default defineCommand({
         if (warnings.length === 0) {
           const hint = localModelHint(json, effectiveStatus);
           if (hint) console.error(hint);
-          await offerLocalModel(matching.length, json, config.registry, artifactRevision);
+          await offerLocalModel(query, matching.length, json, config.registry, artifactRevision);
         }
       }
       if (query) {
@@ -734,6 +740,7 @@ function localModelHint(json: boolean, status: LocalModelStatus | undefined): st
  * matching returned before deciding whether 33 MB is worth it.
  */
 async function offerLocalModel(
+  query: string,
   matchCount: number,
   json: boolean,
   registryBaseUrl: string,
@@ -766,7 +773,7 @@ async function offerLocalModel(
   console.log(
     c.dim(
       vectors
-        ? "  Run `hyperframes catalog --on-device` once to download the model and rank by meaning."
+        ? `  Run \`${onDeviceSetupCommand(query)}\` once to download the model and rank by meaning.`
         : "  Could not fetch the catalog vectors; offline ranking stays off until they are available.",
     ),
   );
