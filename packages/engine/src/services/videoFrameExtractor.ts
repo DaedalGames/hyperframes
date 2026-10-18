@@ -45,6 +45,7 @@ import {
   type VideoMetadata,
 } from "../utils/ffprobe.js";
 import { inputAlphaOpaqueWarning, probeInputAlphaPlane } from "../utils/alphaPlaneProbe.js";
+import { redactUrlQueriesInError, urlInputArgs } from "../utils/urlInput.js";
 import {
   analyzeCompositionHdr,
   isHdrColorSpace as isHdrColorSpaceUtil,
@@ -816,7 +817,9 @@ export function parseImageElements(html: string): ImageElement[] {
 
 /** The first shown frame's colour tags; see {@link firstFrameColourArgs}. */
 async function readFirstFrameColour(videoPath: string, signal?: AbortSignal) {
-  const result = await runFfmpeg(firstFrameColourArgs(videoPath), { signal });
+  const result = await runFfmpeg([...urlInputArgs(videoPath), ...firstFrameColourArgs(videoPath)], {
+    signal,
+  });
   return parseFirstFrameColour(result.stderr);
 }
 
@@ -928,6 +931,16 @@ async function runSegmentedExtraction(job: SegmentedExtraction): Promise<RunFfmp
 }
 
 export async function extractVideoFramesRange(
+  ...args: Parameters<typeof extractVideoFramesRangeUnredacted>
+): Promise<ExtractedFrames> {
+  try {
+    return await extractVideoFramesRangeUnredacted(...args);
+  } catch (error) {
+    throw redactUrlQueriesInError(error);
+  }
+}
+
+async function extractVideoFramesRangeUnredacted(
   videoPath: string,
   videoId: string,
   startTime: number,
@@ -987,7 +1000,7 @@ export async function extractVideoFramesRange(
     throw new Error("frameRanges extraction needs a constant-frame-rate source");
   }
 
-  const args: string[] = [];
+  const args: string[] = urlInputArgs(videoPath);
   if (decodeWithVideoToolbox) {
     args.push("-hwaccel", "videotoolbox");
   }

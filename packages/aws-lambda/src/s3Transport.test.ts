@@ -10,10 +10,12 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CONTENT_STORE_REFRESH_AFTER_DAYS, contentStoreUri } from "./contentStore.js";
+import { HeadObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import {
   downloadS3ObjectToFileVerified,
   formatS3Uri,
   parseS3Uri,
+  presignVerifiedS3GetUrl,
   sha256File,
   tarDirectory,
   untarDirectory,
@@ -209,6 +211,54 @@ describe("content-addressed v2 artifacts", () => {
     ).rejects.toMatchObject({ name: "PLAN_ARTIFACT_DIGEST_MISMATCH" });
     const { existsSync } = await import("node:fs");
     expect(existsSync(destination)).toBe(false);
+  });
+});
+
+describe("presignVerifiedS3GetUrl", () => {
+  const digest = "ab".repeat(32);
+  const uri = `s3://bucket/v2/artifacts/sha256/ab/${digest}`;
+  function clientHolding(head: { ChecksumSHA256?: string; ContentLength: number }): S3Client {
+    const client = new S3Client({
+      region: "us-east-2",
+      credentials: { accessKeyId: "AKIDTEST", secretAccessKey: "test-secret" },
+    });
+    client.send = (async (command: unknown) => {
+      expect(command).toBeInstanceOf(HeadObjectCommand);
+      expect((command as HeadObjectCommand).input.ChecksumMode).toBe("ENABLED");
+      return head;
+    }) as S3Client["send"];
+    return client;
+  }
+
+  it.each([
+    { uri, key: `/v2/artifacts/sha256/ab/${digest}` },
+    { uri: contentStoreUri("bucket", digest), key: `/cas/sha256/ab/${digest}` },
+  ])("signs an attested legacy or shared-content source at $key", async (source) => {
+    const checksum = Buffer.from(digest, "hex").toString("base64");
+    const url = new URL(
+      await presignVerifiedS3GetUrl(
+        clientHolding({ ChecksumSHA256: checksum, ContentLength: 42 }),
+        source.uri,
+        digest,
+        42,
+        600,
+      ),
+    );
+    expect(url.pathname).toBe(source.key);
+    expect(url.searchParams.get("X-Amz-Expires")).toBe("600");
+  });
+
+  it("refuses an object whose stored checksum is not the pinned digest", async () => {
+    const other = Buffer.from("cd".repeat(32), "hex").toString("base64");
+    await expect(
+      presignVerifiedS3GetUrl(
+        clientHolding({ ChecksumSHA256: other, ContentLength: 42 }),
+        uri,
+        digest,
+        42,
+        600,
+      ),
+    ).rejects.toMatchObject({ name: "PLAN_ARTIFACT_DIGEST_MISMATCH" });
   });
 });
 

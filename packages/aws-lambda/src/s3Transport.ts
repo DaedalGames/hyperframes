@@ -105,6 +105,35 @@ export async function downloadS3ObjectToFileVerified(
 }
 
 /**
+ * Pre-sign a GET for a plan-v2 artifact, after S3 attests the object's stored
+ * SHA-256 and size are the ones the manifest pins.
+ */
+export async function presignVerifiedS3GetUrl(
+  client: S3Client,
+  uri: string,
+  expectedSha256: string,
+  expectedSize: number,
+  expiresInSeconds: number,
+): Promise<string> {
+  assertSha256(expectedSha256);
+  const { bucket, key } = parseS3Uri(uri);
+  const head = await client.send(
+    new HeadObjectCommand({ Bucket: bucket, Key: key, ChecksumMode: "ENABLED" }),
+  );
+  const expectedChecksum = Buffer.from(expectedSha256, "hex").toString("base64");
+  if (head.ChecksumSHA256 !== expectedChecksum || head.ContentLength !== expectedSize) {
+    const error = new Error(
+      `[s3Transport] PLAN_ARTIFACT_DIGEST_MISMATCH: ${uri} expected ${expectedSha256} (${expectedSize} bytes), S3 holds checksum ${String(head.ChecksumSHA256)} (${String(head.ContentLength)} bytes)`,
+    );
+    error.name = "PLAN_ARTIFACT_DIGEST_MISMATCH";
+    throw error;
+  }
+  return getSignedUrl(client, new GetObjectCommand({ Bucket: bucket, Key: key }), {
+    expiresIn: expiresInSeconds,
+  });
+}
+
+/**
  * Upload a local file's contents to an S3 URI using a streaming
  * `PutObjectCommand`. PutObject's 5 GB cap comfortably exceeds the
  * distributed pipeline's 2 GB planDir limit and the typical
