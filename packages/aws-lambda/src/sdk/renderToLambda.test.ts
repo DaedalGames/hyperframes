@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SFNClient } from "@aws-sdk/client-sfn";
@@ -376,6 +376,19 @@ describe("renderToLambda", () => {
       }),
     ).rejects.toThrow(InvalidConfigError);
     expect(sfn.starts).toHaveLength(0);
+  });
+
+  it("has a troubleshooting entry for every error it raises before starting", () => {
+    const docs = readFileSync(
+      new URL("../../../../docs/deploy/aws-lambda.mdx", import.meta.url),
+      "utf8",
+    );
+    for (const name of ["STACK_TOO_OLD", "SITE_FILES_MISSING", "SITE_NOT_FOUND"]) {
+      expect({ name, documented: new RegExp(`^### .*\`${name}\``, "m").test(docs) }).toEqual({
+        name,
+        documented: true,
+      });
+    }
   });
 
   it("propagates a missing executionArn as an error", async () => {
