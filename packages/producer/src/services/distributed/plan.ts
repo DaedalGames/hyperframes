@@ -54,7 +54,7 @@ import {
   type RenderStrictness,
 } from "../renderOrchestrator.js";
 import { closeFileServerSafely } from "../fileServer.js";
-import { padOrTrimAudioToVideoFrameCount } from "../render/audioPadTrim.js";
+import { constrainAacTruePeak } from "../render/audioPadTrim.js";
 import { encoderFailureError } from "../render/encoderInterruption.js";
 import { runAudioStage } from "../render/stages/audioStage.js";
 import { runCompileStage } from "../render/stages/compileStage.js";
@@ -881,32 +881,6 @@ function carriesChunkAudio(
 }
 
 /**
- * Chunks that carry their own audio cut it from the plan track, so the length and true-peak fix
- * the assembler applies to a joined file happens here, once, before any chunk reads it.
- */
-async function fitPlanAudioToFrames(
-  audioPath: string,
-  workDir: string,
-  totalFrames: number,
-  fps: number,
-  run: { signal?: AbortSignal; timeoutMs: number },
-): Promise<void> {
-  const fittedPath = join(workDir, "audio-fitted.m4a");
-  const result = await padOrTrimAudioToVideoFrameCount({
-    videoPath: audioPath,
-    probeVideoFrameInfo: async () => ({ frameCount: totalFrames, fpsNum: fps, fpsDen: 1 }),
-    audioPath,
-    outputPath: fittedPath,
-    signal: run.signal,
-    timeoutMs: run.timeoutMs,
-  });
-  if (!result.success) {
-    throw encoderFailureError("[plan] audio pad/trim failed", result);
-  }
-  renameSync(fittedPath, audioPath);
-}
-
-/**
  * Resolve the encoder + pixel-format + preset triple for a distributed
  * render. Distributed mode is SDR-only: H.264 or H.265 8-bit for mp4,
  * libvpx-vp9 + yuva420p (alpha) for webm, ProRes 4444 for mov, raw RGBA
@@ -1373,13 +1347,17 @@ export async function buildLocalExecutionPlan(
   // Only the assembler reads the mix, so hashing and publishing the final
   // compiled and video trees run beside it instead of after it.
   const digests: PlanFileDigests = options.digests ?? new Map();
+  const chunksCarryAudio = carriesChunkAudio(config, options);
+  // Chunks cut their audio from this track, so it is mixed to the frames' exact length in its one
+  // encode; the assembler pads or trims the track of any other plan.
+  const audioSeconds = chunksCarryAudio ? totalFrames / config.fps : probeResult.duration;
   stageStarted = Date.now();
   const [audioOutcome, overlapOutcome] = await Promise.allSettled([
     runAudioStage({
       projectDir,
       workDir,
       compiledDir: finalCompiledDir,
-      duration: probeResult.duration,
+      duration: audioSeconds,
       ffmpegProcessTimeout: cfg.ffmpegProcessTimeout,
       audioGain: cfg.audioGain,
       audios: composition.audios,
@@ -1410,12 +1388,16 @@ export async function buildLocalExecutionPlan(
   if (audioResult.hasAudio && existsSync(audioResult.audioOutputPath)) {
     renameSync(audioResult.audioOutputPath, planAudioPath);
   }
-  const chunksCarryAudio = carriesChunkAudio(config, options);
   if (chunksCarryAudio && existsSync(planAudioPath)) {
-    await fitPlanAudioToFrames(planAudioPath, workDir, totalFrames, config.fps, {
+    stageStarted = Date.now();
+    const peak = await constrainAacTruePeak({
+      audioPath: planAudioPath,
+      targetDurationSeconds: audioSeconds,
       signal: abortSignal,
       timeoutMs: cfg.ffmpegProcessTimeout,
     });
+    if (!peak.success) throw encoderFailureError("[plan] audio true-peak check failed", peak);
+    logPlanStage(log, "audio-peak", stageStarted);
   }
 
   // ── Locked config ──
