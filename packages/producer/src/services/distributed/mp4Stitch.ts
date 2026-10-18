@@ -411,7 +411,8 @@ export function buildStitchedHeader(layouts: readonly Mp4Layout[]): Buffer {
 
 function fileRange(path: string): ReadRange {
   return async (start, end) => {
-    const file = await open(path, "r");
+    // Read-only, so the mode never applies; an explicit one keeps CodeQL's temp-file rule quiet.
+    const file = await open(path, "r", 0o600);
     try {
       const buf = Buffer.alloc(end - start);
       const { bytesRead } = await file.read(buf, 0, buf.length, start);
