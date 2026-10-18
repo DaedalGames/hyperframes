@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { relative, resolve } from "node:path";
 import {
   HF_COLOR_GRADING_ATTR,
   HF_COLOR_GRADING_HUE_CURVE_KEYS,
@@ -16,9 +16,8 @@ import {
 import {
   cleanAssetUrl,
   isRemoteOrInlineUrl,
-  resolveExistingLocalAsset,
+  resolveAuthoredAssetFile,
 } from "@hyperframes/parsers/asset-resolution";
-import { rewriteAssetPath } from "@hyperframes/parsers/asset-paths";
 import {
   isHTMLElement,
   parseSourceDocument as parseMutableSource,
@@ -48,6 +47,7 @@ export function getMediaTreatmentCapabilityOverview() {
     version: capabilities.version,
     targetTags: capabilities.targetTags,
     colorSpace: capabilities.colorSpace,
+    example: capabilities.example,
     families: [
       family("correction", "Adjust", "Fix exposure, tonal balance, color casts, and saturation."),
       family(
@@ -138,7 +138,7 @@ export function getMediaTreatmentCapabilityDetail(id: string): unknown {
     };
   }
 
-  const adjustment = capabilities.adjustments.find(({ key }) => key === id);
+  const adjustment = capabilities.adjust.find(({ key }) => key === id);
   if (adjustment) {
     return {
       id,
@@ -150,7 +150,7 @@ export function getMediaTreatmentCapabilityDetail(id: string): unknown {
     };
   }
 
-  const finishing = capabilities.finishing.find(({ key }) => key === id);
+  const finishing = capabilities.details.find(({ key }) => key === id);
   if (finishing) {
     return {
       id,
@@ -194,7 +194,8 @@ export function getMediaTreatmentCapabilityDetail(id: string): unknown {
     correction: {
       id,
       description: "Fix exposure, tonal balance, color casts, and saturation.",
-      controls: capabilities.adjustments,
+      controls: capabilities.adjust,
+      apply: { adjust: capabilities.example.adjust },
     },
     wheels: {
       id,
@@ -273,7 +274,8 @@ export function getMediaTreatmentCapabilityDetail(id: string): unknown {
     finishing: {
       id,
       description: "Vignette and deterministic film-grain controls.",
-      controls: capabilities.finishing,
+      controls: capabilities.details,
+      apply: { details: capabilities.example.details },
     },
     palettes: {
       id,
@@ -546,14 +548,10 @@ export function resolveMediaTreatmentSource(
       "Media analysis requires a local project asset; freeze remote media with media-use first",
     );
   }
-  const cleanSource = cleanAssetUrl(sourceUrl);
-  if (!cleanSource) throw new Error("Selected media has no analyzable local src");
-  const projectRelative = cleanSource.startsWith("/")
-    ? cleanSource
-    : rewriteAssetPath(compositionFile, cleanSource, (path) => existsSync(join(projectDir, path)));
-  const asset = resolveExistingLocalAsset(projectDir, projectRelative);
-  if (!asset) throw new Error(`Media file not found: ${source}`);
-  return asset.resolved;
+  if (!cleanAssetUrl(sourceUrl)) throw new Error("Selected media has no analyzable local src");
+  const file = resolveAuthoredAssetFile(projectDir, compositionFile, sourceUrl);
+  if (!file) throw new Error(`Media file not found: ${source}`);
+  return file;
 }
 
 function parseGrading(

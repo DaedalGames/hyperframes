@@ -6,6 +6,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -118,6 +119,19 @@ describe("content-addressed v2 artifacts", () => {
     );
     expect(await uploadContentAddressedFileToS3(s3.asClient(), source, uri, digest)).toBe("reused");
     expect(s3.putCount).toBe(1);
+  });
+
+  it("leaves verifying the local bytes to the S3 checksum instead of hashing them again", async () => {
+    const source = join(scratchRoot, "artifact-changed.bin");
+    writeFileSync(source, "bytes that changed");
+    const digest = createHash("sha256").update("bytes as hashed").digest("hex");
+    const uri = `s3://bucket/v2/artifacts/sha256/${digest.slice(0, 2)}/${digest}`;
+    const s3 = new ContentAddressedFakeS3();
+
+    await expect(
+      uploadContentAddressedFileToS3(s3.asClient(), source, uri, digest),
+    ).rejects.toMatchObject({ name: "BadDigest" });
+    expect(s3.objects.has(uri)).toBe(false);
   });
 
   it("refuses to overwrite an immutable key with conflicting metadata", async () => {
@@ -286,6 +300,7 @@ class ContentAddressedFakeS3 {
         CopySource?: string;
         MetadataDirective?: string;
         ChecksumAlgorithm?: string;
+        ChecksumSHA256?: string;
       };
     };
     const uri = `s3://${value.input.Bucket}/${value.input.Key}`;
@@ -338,6 +353,12 @@ class ContentAddressedFakeS3 {
       const chunks: Buffer[] = [];
       for await (const chunk of value.input.Body ?? []) chunks.push(Buffer.from(chunk));
       const bytes = Buffer.concat(chunks);
+      const checksum = createHash("sha256").update(bytes).digest("base64");
+      if (value.input.ChecksumSHA256 !== undefined && value.input.ChecksumSHA256 !== checksum) {
+        const error = new Error("checksum mismatch");
+        error.name = "BadDigest";
+        throw error;
+      }
       this.objects.set(uri, {
         bytes,
         sha256: value.input.Metadata?.sha256 ?? "",

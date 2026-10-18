@@ -11,7 +11,7 @@ import type {
   DistributedFormat,
   SerializableDistributedRenderConfig,
 } from "@hyperframes/aws-lambda/sdk";
-import type { CanvasResolution } from "@hyperframes/core";
+import type { CanvasResolution, DistributedFps } from "@hyperframes/core";
 import { c } from "../../ui/colors.js";
 import {
   reportVariableIssues,
@@ -32,7 +32,7 @@ export interface RenderArgs {
   stackName: string;
   siteId?: string;
   /** Composition config — fps/width/height/format required, rest optional. */
-  fps: 24 | 25 | 30 | 60;
+  fps: DistributedFps;
   width: number;
   height: number;
   /**
@@ -124,7 +124,11 @@ export async function runRender(args: RenderArgs): Promise<void> {
     }
   }
 
-  const config: SerializableDistributedRenderConfig = buildLambdaRenderConfig(args, variables);
+  const config: SerializableDistributedRenderConfig = buildLambdaRenderConfig(
+    args,
+    variables,
+    stack.reservedConcurrency,
+  );
 
   // --site-id renders a site an earlier `lambda sites create` uploaded.
   const { renderToLambda, siteHandleFromId } = await loadSDK();
@@ -229,6 +233,7 @@ function sleep(ms: number): Promise<void> {
 export function buildLambdaRenderConfig(
   args: RenderArgs,
   variables: Record<string, unknown> | undefined,
+  workerConcurrency?: number,
 ): SerializableDistributedRenderConfig {
   const config: SerializableDistributedRenderConfig = {
     fps: args.fps,
@@ -241,6 +246,7 @@ export function buildLambdaRenderConfig(
     chunkSize: args.chunkSize,
     maxParallelChunks: args.maxParallelChunks,
     targetChunkFrames: args.targetChunkFrames,
+    workerConcurrency,
     runtimeCap: "lambda",
     variables,
   };

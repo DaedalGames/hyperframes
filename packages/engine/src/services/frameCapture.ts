@@ -2217,7 +2217,34 @@ async function decodeAllImages(page: Page): Promise<void> {
   });
 }
 
-async function applyVideoMetadataHints(
+/** Out-of-band videos a poster now sizes, so dropping their media cannot move layout. */
+export function releasableVideoIds(options: CaptureOptions): string[] {
+  const hinted = new Set((options.videoMetadataHints ?? []).map((hint) => hint.id));
+  return (options.skipReadinessVideoIds ?? []).filter((id) => hinted.has(id));
+}
+
+/** FFmpeg supplies these videos' frames, so their own players would only hold decoders and buffers in every worker. */
+export async function releaseInjectedVideoMedia(
+  page: Page,
+  videoIds: readonly string[],
+): Promise<void> {
+  if (videoIds.length === 0) return;
+  await page.evaluate(
+    (ids: string[]) => {
+      for (const id of ids) {
+        const video = window.__hfMediaEl?.(id) ?? document.getElementById(id);
+        if (!(video instanceof HTMLVideoElement)) continue;
+        video.pause();
+        for (const source of video.querySelectorAll("source")) source.remove();
+        video.removeAttribute("src");
+        video.load();
+      }
+    },
+    [...videoIds],
+  );
+}
+
+export async function applyVideoMetadataHints(
   page: Page,
   hints: readonly CaptureVideoMetadataHint[] | undefined,
 ): Promise<void> {
@@ -2225,7 +2252,8 @@ async function applyVideoMetadataHints(
 
   // fallow-ignore-next-line complexity
   await page.evaluate(
-    (metadataHints: CaptureVideoMetadataHint[]) => {
+    async (metadataHints: CaptureVideoMetadataHint[]) => {
+      const posters = new Set<string>();
       for (const hint of metadataHints) {
         if (
           !hint.id ||
@@ -2239,19 +2267,20 @@ async function applyVideoMetadataHints(
 
         const video = (window.__hfMediaEl?.(hint.id) ??
           document.getElementById(hint.id)) as HTMLVideoElement | null;
-        if (!video) continue;
+        if (!video || video.hasAttribute("poster")) continue;
 
-        if (!video.hasAttribute("width")) video.setAttribute("width", String(hint.width));
-        if (!video.hasAttribute("height")) video.setAttribute("height", String(hint.height));
-
-        const computed = window.getComputedStyle(video);
-        if (
-          !video.style.aspectRatio &&
-          (!computed.aspectRatio || computed.aspectRatio === "auto")
-        ) {
-          video.style.aspectRatio = `${hint.width} / ${hint.height}`;
-        }
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${hint.width}" height="${hint.height}"/>`;
+        const intrinsicSizePoster = `data:image/svg+xml,${encodeURIComponent(svg)}`;
+        video.poster = intrinsicSizePoster;
+        posters.add(intrinsicSizePoster);
       }
+      await Promise.all(
+        [...posters].map((src) => {
+          const image = new Image();
+          image.src = src;
+          return image.decode();
+        }),
+      );
     },
     [...hints],
   );
@@ -2503,6 +2532,7 @@ export async function initializeSession(session: CaptureSession): Promise<void> 
     recordSubTimelineWarning(session, pageReadyTimeout);
 
     await applyVideoMetadataHints(page, session.options.videoMetadataHints);
+    await releaseInjectedVideoMedia(page, releasableVideoIds(session.options));
     logInitPhase("applyVideoMetadataHints complete");
 
     // Run independent readiness checks in parallel — videos, images, fonts,
@@ -2659,6 +2689,7 @@ export async function initializeSession(session: CaptureSession): Promise<void> 
     recordSubTimelineWarning(session, pageReadyTimeout);
 
     await applyVideoMetadataHints(page, session.options.videoMetadataHints);
+    await releaseInjectedVideoMedia(page, releasableVideoIds(session.options));
     logInitPhase("applyVideoMetadataHints complete");
 
     // Run independent readiness checks in parallel — videos, images, fonts,
@@ -3453,6 +3484,7 @@ export async function createStaticVerificationPage(session: CaptureSession): Pro
       knownUnregisteredIds: session.subTimelineWaitMemo.unregisteredIds,
     });
     await applyVideoMetadataHints(page, session.options.videoMetadataHints);
+    await releaseInjectedVideoMedia(page, releasableVideoIds(session.options));
 
     const skipVideoIds = session.options.skipReadinessVideoIds ?? [];
     await Promise.all([
