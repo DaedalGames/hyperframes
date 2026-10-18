@@ -854,10 +854,22 @@ describe("extractDeferredVideoFramesForChunk", () => {
     mkdirSync(join(root, "compiled"), { recursive: true });
     copyFileSync(big, join(root, "compiled", "big.mp4"));
     const server = await serveFileByRange(big);
+    const logged: unknown[] = [];
+    const originalInfo = defaultLogger.info;
+    defaultLogger.info = (message, meta) => void logged.push({ message, ...meta });
     try {
       const [local] = await extract(join(root, "big-local"));
       rmSync(join(root, "compiled", "big.mp4"));
-      const [remote] = await extract(join(root, "big-remote"), { "compiled/big.mp4": server.url });
+      const [remote] = await extract(join(root, "big-remote"), {
+        "compiled/big.mp4": `${server.url}?X-Amz-Signature=secret`,
+      });
+      expect(logged).toEqual([
+        {
+          message: "[renderChunk] reading video by URL",
+          path: "compiled/big.mp4",
+          url: server.url,
+        },
+      ]);
       expect([...remote!.framePaths.keys()]).toEqual([...local!.framePaths.keys()]);
       for (const [index, path] of remote!.framePaths) {
         expect(readFileSync(path).equals(readFileSync(local!.framePaths.get(index)!))).toBe(true);
@@ -865,6 +877,7 @@ describe("extractDeferredVideoFramesForChunk", () => {
       // What it sends past the seek is socket buffering (a few MB), not the file.
       expect(server.served.bytes).toBeLessThan(server.size / 3);
     } finally {
+      defaultLogger.info = originalInfo;
       server.close();
     }
   }, 60_000);

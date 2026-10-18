@@ -448,6 +448,11 @@ export async function extractDeferredVideoFramesForChunk(input: {
         `[renderChunk] ${path} is read by URL but no deferred video uses it`,
       );
     }
+    // The query carries the URL's signature; keep it out of logs.
+    defaultLogger.info("[renderChunk] reading video by URL", {
+      path,
+      url: remoteSources[path]!.split("?")[0],
+    });
   }
   if (deferred.length === 0) return [];
   const table = createFrameLookupTable(
