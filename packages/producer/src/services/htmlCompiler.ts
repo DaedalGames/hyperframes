@@ -2085,6 +2085,7 @@ export async function compileForRender(
 
   const coalescedHtml = await injectDeterministicFontFaces(normalizedFontHtml, {
     logger: defaultLogger,
+    stylesheetBaseDir: projectDir,
     failClosedFontFetch: options.failClosedFontFetch === true,
     allowSystemFontCapture: options.allowSystemFontCapture,
     abortSignal: options.abortSignal,

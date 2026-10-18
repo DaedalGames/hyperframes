@@ -1818,6 +1818,33 @@ export interface InjectDeterministicFontFacesOptions {
    * to contain the same fonts as the authoring machine.
    */
   allowSystemFontCapture?: boolean;
+  /** Where relative `<link rel="stylesheet">` hrefs live; their CSS then counts toward the families requested. */
+  stylesheetBaseDir?: string;
+}
+
+/** Local file a `<link rel="stylesheet">` loads, or null for remote, disabled or missing ones. */
+function localStylesheetPath(link: Element, baseDir: string): string | null {
+  const href = (link.getAttribute("href") ?? "").split(/[?#]/)[0] ?? "";
+  if (!href || link.hasAttribute("disabled") || /^([a-z][a-z\d+.-]*:|\/\/)/i.test(href))
+    return null;
+  const path = join(baseDir, href);
+  return existsSync(path) ? path : null;
+}
+
+/** The document with its local stylesheets added as `<style>` blocks, read only to find font families. */
+function withLinkedStylesheets(html: string, baseDir: string | undefined): string {
+  if (!baseDir || !/<link\b[^>]*stylesheet/i.test(html)) return html;
+  const { document } = parseHTML(html);
+  const paths = Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
+    .map((link) => localStylesheetPath(link, baseDir))
+    .filter((path): path is string => path !== null);
+  if (paths.length === 0) return html;
+  for (const path of paths) {
+    const style = document.createElement("style");
+    style.textContent = readFileSync(path, "utf8");
+    (document.head ?? document.documentElement).appendChild(style);
+  }
+  return document.toString();
 }
 
 // Keep the complete CSS request under the broadly supported ~2 KB URL limit.
@@ -2013,8 +2040,9 @@ export async function injectDeterministicFontFaces(
     diag,
   };
 
-  const existingFaces = extractExistingFontFaces(html);
-  const requestedFamilies = extractRequestedFontFamilies(html);
+  const styledHtml = withLinkedStylesheets(html, options.stylesheetBaseDir);
+  const existingFaces = extractExistingFontFaces(styledHtml);
+  const requestedFamilies = extractRequestedFontFamilies(styledHtml);
   const pendingFamilies = new Map<string, ResolvedFamily>();
 
   for (const [normalizedFamily, requested] of requestedFamilies) {
@@ -2031,7 +2059,7 @@ export async function injectDeterministicFontFaces(
   const { css, unresolved } = await buildFontFaceCss(
     pendingFamilies,
     fetchOptions,
-    () => (declaredFamilies ??= collectDeclaredFontFamilies(html)),
+    () => (declaredFamilies ??= collectDeclaredFontFamilies(styledHtml)),
     extractGoogleFontsText(html),
   );
   // An optional family that no source serves, or that stayed unavailable, is tolerated.

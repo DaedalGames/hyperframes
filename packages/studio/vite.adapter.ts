@@ -281,9 +281,9 @@ export function createViteAdapter(
       return html;
     },
 
-    async transformPreviewHtml({ html }) {
+    async transformPreviewHtml({ html, project }) {
       const fonts = await import("../core/src/fonts/deterministicFonts.js");
-      return fonts.injectDeterministicFontFaces(html);
+      return fonts.injectDeterministicFontFaces(html, { stylesheetBaseDir: project.dir });
     },
 
     getProjectSignature(projectDir: string): string {

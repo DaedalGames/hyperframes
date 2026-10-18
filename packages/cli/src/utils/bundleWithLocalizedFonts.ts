@@ -19,14 +19,14 @@ export async function bundleWithLocalizedFonts(
   projectDir: string,
   // Injectable for tests. Production callers omit it and get the producer
   // font-localization pass (see localizeWithProducer).
-  localizeFonts: (html: string) => Promise<string> = localizeWithProducer,
+  localizeFonts: (html: string, projectDir: string) => Promise<string> = localizeWithProducer,
 ): Promise<string> {
   const { bundleToSingleHtml } = await import("@hyperframes/core/compiler");
   const html = await bundleToSingleHtml(projectDir);
-  return localizeFonts(html);
+  return localizeFonts(html, projectDir);
 }
 
-type FontInjector = (html: string) => Promise<string>;
+type FontInjector = (html: string, options: { stylesheetBaseDir: string }) => Promise<string>;
 
 /**
  * Load the render pipeline's `injectDeterministicFontFaces` through the CLI's
@@ -75,13 +75,14 @@ export function __resetFontLocalizationWarningsForTests(): void {
  */
 export async function localizeWithProducer(
   html: string,
+  projectDir: string,
   loadInjector: () => Promise<FontInjector | null> = loadFontInjector,
   warn: (message: string) => void = (m) => console.warn(`   ${c.warn("⚠")} ${m}`),
 ): Promise<string> {
   const inject = await loadInjector();
   if (!inject) return html;
   try {
-    return await inject(html);
+    return await inject(html, { stylesheetBaseDir: projectDir });
   } catch (err) {
     const message = `Font localization failed; capturing with remote/fallback fonts instead: ${normalizeErrorMessage(err)}`;
     if (!warnedFontLocalizationFailures.has(message)) {

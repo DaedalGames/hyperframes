@@ -549,7 +549,7 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
           }),
         ),
       });
-      return injectDeterministicFontFaces(prepared.html);
+      return injectDeterministicFontFaces(prepared.html, { stylesheetBaseDir: project.dir });
     },
 
     getProjectSignature: projectSignature,
