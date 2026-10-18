@@ -32,7 +32,7 @@ import {
   isScalarVariableValue as isScalar,
   isSafeMediaUrl,
 } from "@hyperframes/parsers/composition";
-import { isHtmlElement } from "./domRealm";
+import { isElementNode, isHtmlElement } from "./domRealm";
 import { unproxiedSrc } from "./proxySrc";
 
 // data-var-src only rebinds media `src` on media elements. A user-controlled
@@ -186,10 +186,38 @@ export function applyVariableBindings(doc: Document, within?: Element): void {
     if (url !== null && unproxiedSrc(el) !== url) el.setAttribute("src", url);
   }
 
-  for (const el of all("[data-var-text]")) {
-    const id = el.getAttribute("data-var-text")?.trim();
-    if (!id) continue;
-    const value = valuesForElement(el, cache)[id];
-    if (isScalar(value)) setOwnTextPreservingChildren(el, String(value));
-  }
+  for (const el of all("[data-var-text]")) bindText(el, cache);
+}
+
+const boundText = new WeakMap<Element, string>();
+
+function bindText(el: Element, cache: ScopeValuesCache): void {
+  const id = el.getAttribute("data-var-text")?.trim();
+  if (!id) return;
+  const value = valuesForElement(el, cache)[id];
+  if (!isScalar(value)) return;
+  const text = String(value);
+  // A composition script may have split this text into word spans since it was bound.
+  if (boundText.get(el) === text) return;
+  boundText.set(el, text);
+  setOwnTextPreservingChildren(el, text);
+}
+
+/** Binds text as the page parses, so composition scripts that split it see the variable's value. */
+export function installEarlyTextBindings(): void {
+  if (typeof MutationObserver === "undefined" || typeof document === "undefined") return;
+  const root = document.documentElement;
+  if (!root) return;
+  const scan = (node: Node): void => {
+    if (!isElementNode(node)) return;
+    const cache: ScopeValuesCache = new Map();
+    if (node.matches("[data-var-text]")) bindText(node, cache);
+    for (const el of node.querySelectorAll("[data-var-text]")) bindText(el, cache);
+  };
+  scan(root);
+  const observer = new MutationObserver((mutations) => {
+    for (const mutation of mutations) for (const node of mutation.addedNodes) scan(node);
+  });
+  observer.observe(root, { childList: true, subtree: true });
+  document.addEventListener("DOMContentLoaded", () => observer.disconnect(), { once: true });
 }
