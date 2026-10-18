@@ -159,7 +159,7 @@ export async function renderToLambda(opts: RenderToLambdaOptions): Promise<Rende
   };
 }
 
-/** An older stack's plan step would try to untar a `files.json` site and fail after retries. */
+/** An older stack's plan step would try to untar a site manifest and fail after retries. */
 async function assertStackReadsSites(sfn: SFNClient, stateMachineArn: string): Promise<void> {
   const { definition } = await sfn.send(new DescribeStateMachineCommand({ stateMachineArn }));
   if (definition?.includes(`"${SITE_MANIFEST_INVALID}"`)) return;

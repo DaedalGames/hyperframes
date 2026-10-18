@@ -79,7 +79,7 @@ export function siteHandleFromId(bucketName: string, siteId: string): SiteHandle
 
 /**
  * Before a render reuses `site`, re-store any file the content store expired, from `projectDir`.
- * Returns the handle to render: a site uploaded before `files.json` resolves to its tarball.
+ * Returns the handle to render: a site uploaded before site manifests resolves to its tarball.
  */
 export async function ensureSiteStored(
   site: SiteHandle,

@@ -16,7 +16,7 @@ import {
 } from "./s3Transport.js";
 
 const SITE_MANIFEST_NAME = "files.json";
-/** Stacks that read `files.json` sites list this as a terminal plan error; the SDK checks for it. */
+/** Stacks that read site manifests list this as a terminal plan error; the SDK checks for it. */
 export const SITE_MANIFEST_INVALID = "SITE_MANIFEST_INVALID";
 const VIDEO_EXTENSIONS_PLANNED_IN_PLACE = new Set([".mp4", ".mov", ".m4v", ".webm", ".mkv"]);
 const REMOTE_URL_TTL_SECONDS = 3600;
@@ -32,7 +32,7 @@ export function siteManifestUri(bucket: string, siteId: string): string {
   return formatS3Uri({ bucket, key: `sites/${siteId}/${SITE_MANIFEST_NAME}` });
 }
 
-/** Sites uploaded before `files.json` are one tarball; the plan step still reads them. */
+/** Sites uploaded before site manifests are one tarball; the plan step still reads them. */
 export function siteTarballUri(bucket: string, siteId: string): string {
   return formatS3Uri({ bucket, key: `sites/${siteId}/project.tar.gz` });
 }
