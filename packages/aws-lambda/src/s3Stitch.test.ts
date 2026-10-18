@@ -121,15 +121,11 @@ describe("uploadParts", () => {
 
 const hasFfmpeg = spawnSync("ffmpeg", ["-version"]).status === 0;
 
+type Slice = { index: number; startFrame: number; endFrame: number };
+const slices = (edges: readonly number[]): Slice[] =>
+  edges.slice(1).map((endFrame, index) => ({ index, startFrame: edges[index]!, endFrame }));
+
 describe.skipIf(!hasFfmpeg)("stitchMp4InS3 on real chunks", () => {
-  const FPS = { num: 30, den: 1 };
-  // Uneven chunks and a 1-frame tail.
-  const CHUNKS = [
-    { index: 0, startFrame: 0, endFrame: 47 },
-    { index: 1, startFrame: 47, endFrame: 90 },
-    { index: 2, startFrame: 90, endFrame: 91 },
-  ];
-  const TOTAL_FRAMES = 91;
   let root: string;
 
   beforeAll(() => {
@@ -147,10 +143,10 @@ describe.skipIf(!hasFfmpeg)("stitchMp4InS3 on real chunks", () => {
   const ffmpeg = (args: string[]) => run("ffmpeg", ["-nostdin", "-loglevel", "error", ...args]);
 
   /** Closed-GOP chunk shaped like renderChunk's: IDR at frame 0, no B-frames. */
-  function encodeChunk(path: string, slice: (typeof CHUNKS)[number]): void {
+  function encodeChunk(path: string, slice: Slice, rate: number): void {
     const frames = String(slice.endFrame - slice.startFrame);
     ffmpeg(
-      `-f lavfi -i testsrc2=size=160x120:rate=30,trim=start_frame=${slice.startFrame}:end_frame=${slice.endFrame} -c:v libx264 -preset veryfast -g ${frames} -keyint_min ${frames} -sc_threshold 0 -bf 0 -x264-params scenecut=0:open-gop=0:repeat-headers=1 -pix_fmt yuv420p -avoid_negative_ts make_zero -y`
+      `-f lavfi -i testsrc2=size=160x120:rate=${rate},trim=start_frame=${slice.startFrame}:end_frame=${slice.endFrame} -c:v libx264 -preset veryfast -g ${frames} -keyint_min ${frames} -sc_threshold 0 -bf 0 -x264-params scenecut=0:open-gop=0:repeat-headers=1 -pix_fmt yuv420p -avoid_negative_ts make_zero -y`
         .split(" ")
         .concat(path),
     );
@@ -176,96 +172,113 @@ describe.skipIf(!hasFfmpeg)("stitchMp4InS3 on real chunks", () => {
       ]),
     ).streams as { codec_type: string; nb_read_packets: string; duration: string }[];
 
-  it("assembles a faststart mp4 with the frames and audio of today's join", async () => {
-    const audioPath = join(root, "audio.m4a");
-    ffmpeg(
-      `-f lavfi -i aevalsrc=0.4*sin(2*PI*(220+40*t)*t):s=48000:d=${TOTAL_FRAMES / 30} -c:a aac -b:a 192k -y`
-        .split(" ")
-        .concat(audioPath),
-    );
-    const planDir = join(root, "plan");
-    mkdirSync(join(planDir, "meta"), { recursive: true });
-    writeFileSync(
-      join(planDir, "plan.json"),
-      JSON.stringify({
-        planHash: "fake",
-        totalFrames: TOTAL_FRAMES,
-        hasAudio: true,
-        dimensions: { fpsNum: 30, fpsDen: 1, width: 160, height: 120, format: "mp4" },
-      }),
-    );
-    writeFileSync(join(planDir, "meta", "chunks.json"), JSON.stringify(CHUNKS));
-
-    const s3 = new FakeS3(16 * 1024);
-    const videoPaths: string[] = [];
-    const chunkPaths: string[] = [];
-    for (const slice of CHUNKS) {
-      videoPaths.push(join(root, `video-${slice.index}.mp4`));
-      chunkPaths.push(join(root, `chunk-${slice.index}.mp4`));
-      encodeChunk(videoPaths[slice.index]!, slice);
-      await muxChunkWithAudio({
-        videoPath: videoPaths[slice.index]!,
-        audioPath,
-        outputPath: chunkPaths[slice.index]!,
-        chunks: CHUNKS,
-        chunkIndex: slice.index,
-        fps: FPS,
-        timeoutMs: 60_000,
-      });
-      s3.objects.set(
-        `s3://bucket/chunks/${slice.index}.mp4`,
-        readFileSync(chunkPaths[slice.index]!),
+  // Uneven chunks and a 1-frame tail; at 60 fps that tail is shorter than an AAC packet and owns
+  // none, so its chunk has no audio track.
+  it.each([
+    ["30", 30, [0, 47, 90, 91]],
+    ["60", 60, [0, 50, 51]],
+  ] as const)(
+    "assembles a faststart mp4 at %s fps with the frames and audio of today's join",
+    async (name, rate, edges) => {
+      const FPS = { num: rate, den: 1 };
+      const CHUNKS = slices(edges);
+      const TOTAL_FRAMES = edges.at(-1)!;
+      const dir = join(root, name);
+      mkdirSync(dir, { recursive: true });
+      const audioPath = join(dir, "audio.m4a");
+      ffmpeg(
+        `-f lavfi -i aevalsrc=0.4*sin(2*PI*(220+40*t)*t):s=48000:d=${TOTAL_FRAMES / rate} -c:a aac -b:a 192k -y`
+          .split(" ")
+          .concat(audioPath),
       );
-    }
-    const uris = CHUNKS.map((slice) => `s3://bucket/chunks/${slice.index}.mp4`);
-    // A 16 KiB part minimum makes these small chunks take every path S3 takes at 5 MiB.
-    const result = await stitchMp4InS3(s3.asClient(), uris, "s3://bucket/out.mp4", 16 * 1024);
-    const outputPath = join(root, "out.mp4");
-    const output = s3.objects.get("s3://bucket/out.mp4")!;
-    writeFileSync(outputPath, output);
-    expect(result.fileSize).toBe(output.length);
-    const sent = s3.sent.map((c) => c.name);
-    expect(sent).toContain("UploadPartCopyCommand");
-    expect(sent).toContain("UploadPartCommand");
+      const planDir = join(dir, "plan");
+      mkdirSync(join(planDir, "meta"), { recursive: true });
+      writeFileSync(
+        join(planDir, "plan.json"),
+        JSON.stringify({
+          planHash: "fake",
+          totalFrames: TOTAL_FRAMES,
+          hasAudio: true,
+          dimensions: { fpsNum: rate, fpsDen: 1, width: 160, height: 120, format: "mp4" },
+        }),
+      );
+      writeFileSync(join(planDir, "meta", "chunks.json"), JSON.stringify(CHUNKS));
 
-    const check = spawnSync("ffprobe", ["-v", "error", "--", outputPath], { encoding: "utf-8" });
-    expect([check.status, check.stderr]).toEqual([0, ""]);
-    const topLevel: string[] = [];
-    for (let at = 0; at < output.length; ) {
-      topLevel.push(output.toString("latin1", at + 4, at + 8));
-      const size = output.readUInt32BE(at);
-      at += size === 1 ? Number(output.readBigUInt64BE(at + 8)) : size;
-    }
-    expect(topLevel).toEqual(["ftyp", "moov", "mdat"]);
+      const s3 = new FakeS3(16 * 1024);
+      const videoPaths: string[] = [];
+      const chunkPaths: string[] = [];
+      for (const slice of CHUNKS) {
+        videoPaths.push(join(dir, `video-${slice.index}.mp4`));
+        chunkPaths.push(join(dir, `chunk-${slice.index}.mp4`));
+        encodeChunk(videoPaths[slice.index]!, slice, rate);
+        await muxChunkWithAudio({
+          videoPath: videoPaths[slice.index]!,
+          audioPath,
+          outputPath: chunkPaths[slice.index]!,
+          chunks: CHUNKS,
+          chunkIndex: slice.index,
+          fps: FPS,
+          timeoutMs: 60_000,
+        });
+        s3.objects.set(
+          `s3://bucket/chunks/${slice.index}.mp4`,
+          readFileSync(chunkPaths[slice.index]!),
+        );
+      }
+      // The 60 fps tail owns no AAC packet, so its chunk carries video alone.
+      const tailAudio = probe(chunkPaths.at(-1)!).some((s) => s.codec_type === "audio");
+      expect(tailAudio).toBe(rate === 30);
+      const uris = CHUNKS.map((slice) => `s3://bucket/chunks/${slice.index}.mp4`);
+      // A 16 KiB part minimum makes these small chunks take every path S3 takes at 5 MiB.
+      const result = await stitchMp4InS3(s3.asClient(), uris, "s3://bucket/out.mp4", 16 * 1024);
+      const outputPath = join(dir, "out.mp4");
+      const output = s3.objects.get("s3://bucket/out.mp4")!;
+      writeFileSync(outputPath, output);
+      expect(result.fileSize).toBe(output.length);
+      const sent = s3.sent.map((c) => c.name);
+      expect(sent).toContain("UploadPartCopyCommand");
+      expect(sent).toContain("UploadPartCommand");
 
-    // The same chunks joined on disk give the same bytes.
-    writeFileSync(
-      join(planDir, "meta", "encoder.json"),
-      JSON.stringify({ chunksCarryAudio: true }),
-    );
-    const localPath = join(root, "local.mp4");
-    await assemble(planDir, chunkPaths, null, localPath);
-    expect(readFileSync(localPath).equals(output)).toBe(true);
+      const check = spawnSync("ffprobe", ["-v", "error", "--", outputPath], { encoding: "utf-8" });
+      expect([check.status, check.stderr]).toEqual([0, ""]);
+      const topLevel: string[] = [];
+      for (let at = 0; at < output.length; ) {
+        topLevel.push(output.toString("latin1", at + 4, at + 8));
+        const size = output.readUInt32BE(at);
+        at += size === 1 ? Number(output.readBigUInt64BE(at + 8)) : size;
+      }
+      expect(topLevel).toEqual(["ftyp", "moov", "mdat"]);
 
-    // Today's join: the video-only chunks plus the plan audio.
-    writeFileSync(join(planDir, "meta", "encoder.json"), "{}");
-    const referencePath = join(root, "reference.mp4");
-    await assemble(planDir, videoPaths, audioPath, referencePath);
-    expect(frames(outputPath)).toEqual(frames(referencePath));
-    expect(pcm(outputPath) === pcm(referencePath)).toBe(true);
+      // The same chunks joined on disk give the same bytes.
+      writeFileSync(
+        join(planDir, "meta", "encoder.json"),
+        JSON.stringify({ chunksCarryAudio: true }),
+      );
+      const localPath = join(dir, "local.mp4");
+      await assemble(planDir, chunkPaths, null, localPath);
+      expect(readFileSync(localPath).equals(output)).toBe(true);
 
-    const [video, sound] = probe(outputPath);
-    const audioPackets = probe(audioPath)[0]!.nb_read_packets;
-    expect([video!.nb_read_packets, sound!.nb_read_packets]).toEqual([
-      String(TOTAL_FRAMES),
-      audioPackets,
-    ]);
-    // Same lengths as today's mux: the edit lists trim only the AAC priming (both round
-    // through the 1000-tick movie timescale).
-    const reference = probe(referencePath);
-    expect([video!.duration, sound!.duration]).toEqual([
-      reference[0]!.duration,
-      reference[1]!.duration,
-    ]);
-  }, 60_000);
+      // Today's join: the video-only chunks plus the plan audio.
+      writeFileSync(join(planDir, "meta", "encoder.json"), "{}");
+      const referencePath = join(dir, "reference.mp4");
+      await assemble(planDir, videoPaths, audioPath, referencePath);
+      expect(frames(outputPath)).toEqual(frames(referencePath));
+      expect(pcm(outputPath) === pcm(referencePath)).toBe(true);
+
+      const [video, sound] = probe(outputPath);
+      const audioPackets = probe(audioPath)[0]!.nb_read_packets;
+      expect([video!.nb_read_packets, sound!.nb_read_packets]).toEqual([
+        String(TOTAL_FRAMES),
+        audioPackets,
+      ]);
+      // Same lengths as today's mux: the edit lists trim only the AAC priming (both round
+      // through the 1000-tick movie timescale).
+      const reference = probe(referencePath);
+      expect([video!.duration, sound!.duration]).toEqual([
+        reference[0]!.duration,
+        reference[1]!.duration,
+      ]);
+    },
+    60_000,
+  );
 });
