@@ -24,6 +24,7 @@ import {
   rewriteInlineStyleAssetUrls,
   type AssetExists,
 } from "./rewriteSubCompPaths";
+import { sharedHfMark } from "./scopedNodeMarks";
 import { warnUnknownEnumValues } from "../runtime/getVariables";
 import {
   scopeCssToComposition,
@@ -72,16 +73,17 @@ function sceneScriptSwapRefusal(script: string): string | null {
 }
 
 // What ties a scene script to boot order: reaching outside its root, or leaving state on window for others. Two
-// reads stay inside: an `__hf` mark on an indexed node its scoped `document` found (`a[i].__hfClaimed`), and the
-// compiler's own `data-composition-variables` off `<html>`, which no script writes. Any other `__hf` receiver
-// (`document`, a window alias) and any other `<html>` attribute is shared with every scene.
+// reads stay inside: an `__hf` mark on a node its scoped `document` found (sharedHfMark), and the compiler's own
+// `data-composition-variables` off `<html>`, which no script writes. Any other `<html>` attribute is shared.
 const REACHES_OUTSIDE_RE =
-  /\bgetElementsBy\w+\b|\bdocumentElement\b(?!\s*\.\s*(?:get|has)Attribute\s*\(\s*(["'])data-composition-variables\1\s*\))|(?<!\]\s*\.\s*)\b__hf[A-Z]\w*\b|document\s*\.\s*(head|body)\b|querySelector(All)?\(\s*["'](head|body)["']|defineProperty\s*\(\s*(window|globalThis|self|document)\b|\b(window|globalThis|self)\s*(\.\s*(?!__timelines\b)[A-Za-z_$][\w$]*|\[[^\]]*\])\s*=(?!=)/;
+  /\bgetElementsBy\w+\b|\bdocumentElement\b(?!\s*\.\s*(?:get|has)Attribute\s*\(\s*(["'])data-composition-variables\1\s*\))|document\s*\.\s*(head|body)\b|querySelector(All)?\(\s*["'](head|body)["']|defineProperty\s*\(\s*(window|globalThis|self|document)\b|\b(window|globalThis|self)\s*(\.\s*(?!__timelines\b)[A-Za-z_$][\w$]*|\[[^\]]*\])\s*=(?!=)/;
 
 /** Why an authored scene script must run at boot rather than when the playhead nears, or null. */
 function sceneScriptEagerReason(script: string): string | null {
   const match = REACHES_OUTSIDE_RE.exec(script);
-  return match ? `its script uses ${match[0].trim()}` : null;
+  const mark = sharedHfMark(script);
+  const first = mark && (!match || mark.index < match.index) ? mark.text : match?.[0];
+  return first ? `its script uses ${first.trim()}` : null;
 }
 
 // A quoted string in a script, in any of the three quote styles.

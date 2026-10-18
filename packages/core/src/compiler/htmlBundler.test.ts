@@ -3574,11 +3574,22 @@ ${["g", "h", "i", "j"].map((id, i) => `    <div data-composition-id="${id}" data
       n: "document.title = String(document.documentElement.hasAttribute('data-shared-tone'));",
       o: "const s = document.querySelectorAll('[id=\"r-o\"]'); s[0].__hfClaimed = 1;",
       p: 'JSON.parse(document.documentElement.getAttribute("data-composition-variables") || "[]");',
+      // HF5719 private review: an indexed receiver is only scoped when the index is into a scoped query's result.
+      q: "const refs = [window]; refs[0].__hfReady = 'ready';",
+      r: "const refs = [document]; refs[0].__hfReady = 'ready';",
+      s: "let s = document.querySelectorAll('[id=\"r-s\"]'); s = [window]; s[0].__hfReady = 'ready';",
+      t: "const a = document.querySelectorAll('[id=\"r-t\"]'); (function (a) { a[0].__hfReady = 'ready'; })([window]);",
+      u: "/* const a = document.querySelectorAll('.x'); */ var a = [window]; a[0].__hfReady = 'ready';",
+      v: "const a = document.querySelectorAll('[id=\"r-v\"]'); const b = a; b[0].__hfReady = 'ready';",
+      w: "const document = { querySelectorAll: () => [window] }; const a = document.querySelectorAll('.x'); a[0].__hfReady = 'ready';",
+      x: "((document) => { const a = document.querySelectorAll('.x'); a[0].__hfReady = 'ready'; })({ querySelectorAll: () => [window] });",
+      y: "const a = document.querySelectorAll('[id=\"r-y\"]'); a[0] = window; a[0].__hfReady = 'ready';",
+      z: "const a = document.querySelectorAll('[id=\"r-z\"]'); [a[0]] = [window]; a[0].__hfReady = 'ready';",
     };
     const ids = Object.keys(scripts);
     const dir = makeTempProject({
       "index.html": `<!doctype html><html><head></head><body>
-  <div data-composition-id="main" data-width="1920" data-height="1080" data-duration="60">
+  <div data-composition-id="main" data-width="1920" data-height="1080" data-duration="90">
 ${ids.map((id, i) => `    <div data-composition-id="${id}" data-composition-src="compositions/${id}.html" data-start="${20 + i * 5}" data-duration="5"></div>`).join("\n")}
   </div></body></html>`,
       ...Object.fromEntries(ids.map((id) => [`compositions/${id}.html`, scene(id, scripts[id]!)])),
@@ -3593,6 +3604,16 @@ ${ids.map((id, i) => `    <div data-composition-id="${id}" data-composition-src=
       ["n", true],
       ["o", false],
       ["p", false],
+      ["q", true],
+      ["r", true],
+      ["s", true],
+      ["t", true],
+      ["u", true],
+      ["v", true],
+      ["w", true],
+      ["x", true],
+      ["y", true],
+      ["z", true],
     ]);
   });
 
@@ -3647,6 +3668,15 @@ ${scenes.map(([id, start]) => `    <div data-composition-id="${id}" data-composi
         ["r", 0, "document.title = String(window.tone);"],
       ]),
     ).toEqual({ w: ' data-hf-scene-eager="its script uses window.tone ="', r: "" });
+    expect(
+      await compiled([
+        ["iw", 50, "const refs = [window]; refs[0].__hfReady = 'ready';"],
+        ["ir", 0, "document.title = String(window.__hfReady || 'unset');"],
+      ]),
+    ).toEqual({
+      iw: ' data-hf-scene-eager="its script uses __hfReady"',
+      ir: ' data-hf-scene-eager="its script uses __hfReady"',
+    });
   });
 
   it("marks a scene whose own script leaves work running as not swappable, and only that scene", async () => {

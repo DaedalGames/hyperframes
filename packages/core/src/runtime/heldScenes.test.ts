@@ -93,6 +93,8 @@ const COMPILED = {
   a: ' data-hf-scene-after-boot="" data-hf-scene-eager="its script names b"',
   w: ' data-hf-scene-eager="its script uses window.tone ="',
   r: "",
+  iw: ' data-hf-scene-eager="its script uses __hfReady"',
+  ir: ' data-hf-scene-eager="its script uses __hfReady"',
 };
 
 /** Boots a preview whose hosts carry `hosts` (id, start, attributes) and whose scene scripts are `scripts`, in order. */
@@ -271,6 +273,18 @@ describe("scene scripts held until the playhead nears", () => {
     );
     expect(document.body.dataset.saw).toBe("true");
   });
+  it("boots a far scene that marks an indexed window before a near scene that reads the mark", async () => {
+    await bootScenes(
+      [
+        ["iw", 50, COMPILED.iw],
+        ["ir", 0, COMPILED.ir],
+      ],
+      sceneRuns("iw", "const refs = [window]; refs[0].__hfReady = 'ready';") +
+        sceneRuns("ir", "document.body.dataset.saw = String(window.__hfReady || 'unset');"),
+    );
+    expect(document.body.dataset.saw).toBe("ready");
+  });
+
   it("holds a far scene when the root composition has no data-start of its own, as authored roots usually don't", async () => {
     (globalThis as { CSS?: { escape?: (v: string) => string } }).CSS ??= {};
     globalThis.CSS.escape ??= (v: string) => v;
