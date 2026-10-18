@@ -31,6 +31,7 @@ import {
   CONTENT_STORE_REFRESH_AFTER_DAYS,
   CONTENT_STORE_RETENTION_DAYS,
 } from "../contentStore.js";
+import { SITE_MANIFEST_INVALID } from "../siteManifest.js";
 import { HyperframesRenderStack } from "./HyperframesRenderStack.js";
 
 // CDK synth + Template.fromStack is slow on cold start in CI (~5-8s on
@@ -89,6 +90,7 @@ const EXPECTED_NON_RETRYABLE_ERRORS = new Set([
   "PLAN_ARTIFACT_DIGEST_MISMATCH",
   "FORMAT_NOT_SUPPORTED_IN_DISTRIBUTED",
   "ChromeBinaryUnavailableError",
+  "SITE_MANIFEST_INVALID",
 ]);
 
 function doSynth(): {
@@ -212,6 +214,16 @@ describe("HyperframesRenderStack — snapshot", () => {
       collectNonRetryableErrors(state, errors);
       expect(errors.has("PLAN_V2_INTEGRITY_UNRECOVERABLE")).toBe(true);
       expect(errors.has("PlanV2IntegrityError")).toBe(true);
+    }
+  });
+
+  it("lists the error the SDK checks for before rendering in every SAM and CDK plan task", () => {
+    for (const definition of [SYNTHED.definition, readSamDefinition()]) {
+      for (const plan of [getV1TaskStates(definition).Plan, getV2TaskStates(definition).PlanV2]) {
+        const errors = new Set<string>();
+        collectNonRetryableErrors(plan, errors);
+        expect(errors.has(SITE_MANIFEST_INVALID)).toBe(true);
+      }
     }
   });
 

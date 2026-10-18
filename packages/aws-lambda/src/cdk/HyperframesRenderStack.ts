@@ -219,6 +219,7 @@ export class HyperframesRenderStack extends Construct {
       "PLAN_ARTIFACT_DIGEST_MISMATCH",
       "FORMAT_NOT_SUPPORTED_IN_DISTRIBUTED",
       "ChromeBinaryUnavailableError",
+      "SITE_MANIFEST_INVALID",
     ];
     const NON_RETRYABLE_CHUNK = [
       "FFMPEG_VERSION_MISMATCH",

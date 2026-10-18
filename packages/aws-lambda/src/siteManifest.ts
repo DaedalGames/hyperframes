@@ -16,6 +16,8 @@ import {
 } from "./s3Transport.js";
 
 const SITE_MANIFEST_NAME = "files.json";
+/** Stacks that read `files.json` sites list this as a terminal plan error; the SDK checks for it. */
+export const SITE_MANIFEST_INVALID = "SITE_MANIFEST_INVALID";
 const VIDEO_EXTENSIONS_PLANNED_IN_PLACE = new Set([".mp4", ".mov", ".m4v", ".webm", ".mkv"]);
 const REMOTE_URL_TTL_SECONDS = 3600;
 
@@ -98,7 +100,7 @@ function isSafeRelativePath(path: string): boolean {
 }
 
 function siteManifestError(detail: string): Error {
-  const error = new Error(`[siteManifest] SITE_MANIFEST_INVALID: ${detail}`);
-  error.name = "SITE_MANIFEST_INVALID";
+  const error = new Error(`[siteManifest] ${SITE_MANIFEST_INVALID}: ${detail}`);
+  error.name = SITE_MANIFEST_INVALID;
   return error;
 }

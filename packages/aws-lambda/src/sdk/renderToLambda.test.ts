@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SFNClient } from "@aws-sdk/client-sfn";
 import type { SerializableDistributedRenderConfig } from "../events.js";
+import { SITE_MANIFEST_INVALID } from "../siteManifest.js";
 import { asS3Client, FakeS3 } from "./__fixtures__/fakeS3.js";
 import { deploySite, type SiteHandle, siteHandleFromId } from "./deploySite.js";
 import { renderToLambda } from "./renderToLambda.js";
@@ -15,10 +16,16 @@ interface CapturedStart {
   input: unknown;
 }
 
+const CURRENT_DEFINITION = JSON.stringify({
+  States: { PlanV2: { Retry: [{ ErrorEquals: [SITE_MANIFEST_INVALID], MaxAttempts: 0 }] } },
+});
+
 class FakeSFN {
   starts: CapturedStart[] = [];
+  definition = CURRENT_DEFINITION;
   async send(command: unknown): Promise<unknown> {
     const cmdName = (command as { constructor: { name: string } }).constructor.name;
+    if (cmdName === "DescribeStateMachineCommand") return { definition: this.definition };
     if (cmdName === "StartExecutionCommand") {
       const input = (command as { input: { stateMachineArn: string; name: string; input: string } })
         .input;
@@ -161,6 +168,27 @@ describe("renderToLambda", () => {
     expect(handle.projectS3Uri).toBe(prebuilt.projectS3Uri);
     // No HEAD/PUT means s3.existing stayed empty.
     expect(s3.existing.size).toBe(0);
+  });
+
+  it("refuses a stack deployed before files.json sites before uploading or starting", async () => {
+    const sfn = new FakeSFN();
+    sfn.definition = JSON.stringify({ States: { PlanV2: { Retry: [] } } });
+    const s3 = new FakeS3();
+    await expect(
+      renderToLambda({
+        projectDir,
+        bucketName: "test-bucket",
+        stateMachineArn: "arn:aws:states:us-east-1:1234:stateMachine:hf",
+        config: baseConfig,
+        sfn: asSFNClient(sfn),
+        s3: asS3Client(s3),
+      }),
+    ).rejects.toMatchObject({
+      name: "STACK_TOO_OLD",
+      message: expect.stringContaining("hyperframes lambda deploy"),
+    });
+    expect(s3.ops).toHaveLength(0);
+    expect(sfn.starts).toHaveLength(0);
   });
 
   describe("with a site id from before files.json", () => {
@@ -353,7 +381,7 @@ describe("renderToLambda", () => {
   it("propagates a missing executionArn as an error", async () => {
     const sfn = {
       async send(_cmd: unknown): Promise<unknown> {
-        return { executionArn: undefined };
+        return { executionArn: undefined, definition: CURRENT_DEFINITION };
       },
     };
     const s3 = new FakeS3();

@@ -275,6 +275,7 @@ Resources:
                   - NotMediaPayloadError
                   - PLAN_ARTIFACT_DIGEST_MISMATCH
                   - FORMAT_NOT_SUPPORTED_IN_DISTRIBUTED
+                  - SITE_MANIFEST_INVALID
                 MaxAttempts: 0
               - ErrorEquals: [States.ALL]
                 IntervalSeconds: 2
@@ -323,6 +324,7 @@ Resources:
                   - PLAN_ARTIFACT_DIGEST_MISMATCH
                   - FORMAT_NOT_SUPPORTED_IN_DISTRIBUTED
                   - ChromeBinaryUnavailableError
+                  - SITE_MANIFEST_INVALID
                 MaxAttempts: 0
               - ErrorEquals: [States.ALL]
                 IntervalSeconds: 2
