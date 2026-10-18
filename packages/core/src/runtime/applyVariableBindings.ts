@@ -191,6 +191,11 @@ export function applyVariableBindings(doc: Document, within?: Element): void {
 
 const boundText = new WeakMap<Element, string>();
 
+/** The runtime emptied `el` (a composition host remount), so its bound text must be written again. */
+export function forgetBoundText(el: Element): void {
+  boundText.delete(el);
+}
+
 function bindText(el: Element, cache: ScopeValuesCache): void {
   const id = el.getAttribute("data-var-text")?.trim();
   if (!id) return;
