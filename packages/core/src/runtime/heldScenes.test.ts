@@ -27,10 +27,33 @@ const sceneScript = (id: string) =>
   `document.body.dataset.ran = (document.body.dataset.ran || "") + "${id} ";` +
   `document.dispatchEvent(new CustomEvent("scene-ran", { detail: "${id}" }));</script>`;
 
-const host = (id: string, start: number, attrs = "") =>
-  `<div data-composition-id="${id}" data-hf-scene="${id}" data-start="${start}" data-duration="5"${attrs}><p>${id}</p></div>`;
+const host = (id: string, start: number, attrs = "", font = "serif") =>
+  `<div data-composition-id="${id}" data-hf-scene="${id}" data-start="${start}" data-duration="5"${attrs}><p style="font-family: ${font}">${id}</p></div>`;
 
-async function boot(preview: boolean) {
+// A face per family, each loading until the test settles it.
+function serveFonts(...families: string[]) {
+  const settle: Record<string, () => void> = {};
+  const faces = families.map((family) => {
+    const face = { family, status: "loading" as FontFaceLoadStatus, loaded: Promise.resolve() };
+    face.loaded = new Promise<void>((done) => {
+      settle[family] = () => {
+        face.status = "loaded";
+        done();
+      };
+    });
+    return face;
+  });
+  Object.defineProperty(document, "fonts", {
+    configurable: true,
+    value: {
+      ready: Promise.all(faces.map((face) => face.loaded)),
+      [Symbol.iterator]: () => faces[Symbol.iterator](),
+    },
+  });
+  return settle;
+}
+
+async function boot(preview: boolean, fonts = { near: "serif", tied: "serif" }) {
   (globalThis as { CSS?: { escape?: (v: string) => string } }).CSS ??= {};
   globalThis.CSS.escape ??= (v: string) => v;
   if (preview)
@@ -39,11 +62,17 @@ async function boot(preview: boolean) {
     );
   document.body.innerHTML =
     `<div data-composition-id="main" data-root="true" data-start="0" data-duration="60" data-width="1920" data-height="1080">` +
-    host("near", 0) +
+    host("near", 0, "", fonts.near) +
     host("far", 30) +
-    host("tied", 40, ' data-hf-scene-eager="its script uses documentElement"') +
+    host(
+      "tied",
+      40,
+      ' data-hf-scene-eager="its script names near" data-hf-scene-after-boot=""',
+      fonts.tied,
+    ) +
+    host("reached", 50, ' data-hf-scene-eager="a script outside the scene selects .x"') +
     `</div>` +
-    ["near", "far", "tied"].map(sceneScript).join("");
+    ["near", "far", "tied", "reached"].map(sceneScript).join("");
   const added: Array<[unknown, number | undefined]> = [];
   window.__timelines = { main: timeline(60, added) };
   document.addEventListener("scene-ran", (event) => {
@@ -56,6 +85,38 @@ async function boot(preview: boolean) {
   return added;
 }
 
+/** What the compiler stamps on the chain and writer/reader projects below; htmlBundler.test.ts pins these exact
+ * attributes ("keeps the scheduling the runtime tests stamp"). */
+const COMPILED = {
+  c: ' data-hf-scene-eager="b reads it"',
+  b: ' data-hf-scene-eager="its script names c"',
+  a: ' data-hf-scene-after-boot="" data-hf-scene-eager="its script names b"',
+  w: ' data-hf-scene-eager="its script uses window.tone ="',
+  r: "",
+};
+
+/** Boots a preview whose hosts carry `hosts` (id, start, attributes) and whose scene scripts are `scripts`, in order. */
+async function bootScenes(hosts: Array<[string, number, string]>, scripts: string) {
+  (globalThis as { CSS?: { escape?: (v: string) => string } }).CSS ??= {};
+  globalThis.CSS.escape ??= (v: string) => v;
+  document.head.appendChild(
+    Object.assign(document.createElement("meta"), { name: STUDIO_PREVIEW_MARK_META }),
+  );
+  document.body.innerHTML =
+    `<div data-composition-id="main" data-root="true" data-start="0" data-duration="60" data-width="1920" data-height="1080">` +
+    hosts.map(([id, start, attrs]) => host(id, start, attrs)).join("") +
+    `</div>` +
+    scripts;
+  window.__timelines = { main: timeline(60) };
+  vi.resetModules();
+  await import("./entry");
+  await vi.waitFor(() => expect(window.__player).toBeDefined());
+  await window.__hfWaitForSeekCompletion?.();
+}
+
+const sceneRuns = (id: string, body: string) =>
+  `<script type="${AFTER_FONTS_SCRIPT_TYPE}" data-hf-scene="${id}">${body}</script>`;
+
 const ran = () => document.body.dataset.ran ?? "";
 
 describe("scene scripts held until the playhead nears", () => {
@@ -67,6 +128,7 @@ describe("scene scripts held until the playhead nears", () => {
     delete document.body.dataset.saw;
     window.__timelines = {};
     delete window.__player;
+    delete (document as { fonts?: unknown }).fonts;
     delete (window as { __hyperframeRuntimeBootstrapped?: boolean })
       .__hyperframeRuntimeBootstrapped;
   });
@@ -94,20 +156,21 @@ describe("scene scripts held until the playhead nears", () => {
 
   it("runs a far scene's scripts once a seek comes within the lead, and nests it at its start", async () => {
     const added = await boot(true);
-    expect(ran()).toBe("near tied ");
+    await window.__hfWaitForSeekCompletion?.();
+    expect(ran()).toBe("near reached tied ");
 
     window.__player!.seek(12);
     await window.__hfWaitForSeekCompletion?.();
-    expect(ran()).toBe("near tied ");
+    expect(ran()).toBe("near reached tied ");
 
     window.__player!.seek(25);
     await window.__hfWaitForSeekCompletion?.();
-    expect(ran()).toBe("near tied far ");
+    expect(ran()).toBe("near reached tied far ");
     expect(added).toContainEqual([window.__timelines!.far, 30]);
 
     window.__player!.seek(31);
     await window.__hfWaitForSeekCompletion?.();
-    expect(ran()).toBe("near tied far ");
+    expect(ran()).toBe("near reached tied far ");
   });
 
   it.each([0, 10])(
@@ -163,6 +226,71 @@ describe("scene scripts held until the playhead nears", () => {
 
   it("runs every scene's scripts at boot outside a preview, as a capture does", async () => {
     await boot(false);
-    expect(ran()).toBe("near far tied ");
+    expect(ran()).toBe("near far tied reached ");
+  });
+
+  it("boots once the fonts of the near scenes load; a far eager scene runs once every font has", async () => {
+    const settle = serveFonts("Near", "Far");
+    settle.Near!();
+    await boot(true, { near: '"Near", serif', tied: "Far" });
+    expect(ran()).toBe("near reached ");
+
+    settle.Far!();
+    await vi.waitFor(() => expect(ran()).toBe("near reached tied "));
+  });
+  it("boots a compiler-kept chain in its order, whatever reason first made its middle scene eager", async () => {
+    // Hosts c, b, a: a (near) reads b, b reads c (Tai on #5722, 4304295876).
+    await bootScenes(
+      [
+        ["c", 40, COMPILED.c],
+        ["b", 30, COMPILED.b],
+        ["a", 0, COMPILED.a],
+      ],
+      sceneScript("c") +
+        sceneScript("b") +
+        sceneRuns(
+          "a",
+          `document.body.dataset.saw = String((document.body.dataset.ran || "").includes("b "));`,
+        ),
+    );
+    expect(ran()).toBe("c b ");
+    expect(document.body.dataset.saw).toBe("true");
+  });
+
+  it("boots a far scene that writes a global before a near scene that reads it, as the page orders them", async () => {
+    await bootScenes(
+      [
+        ["w", 30, COMPILED.w],
+        ["r", 0, COMPILED.r],
+      ],
+      sceneScript("w") +
+        sceneRuns(
+          "r",
+          `document.body.dataset.saw = String((document.body.dataset.ran || "").includes("w "));`,
+        ),
+    );
+    expect(document.body.dataset.saw).toBe("true");
+  });
+  it("holds a far scene when the root composition has no data-start of its own, as authored roots usually don't", async () => {
+    (globalThis as { CSS?: { escape?: (v: string) => string } }).CSS ??= {};
+    globalThis.CSS.escape ??= (v: string) => v;
+    document.head.appendChild(
+      Object.assign(document.createElement("meta"), { name: STUDIO_PREVIEW_MARK_META }),
+    );
+    document.body.innerHTML =
+      `<div data-composition-id="main" data-root="true" data-duration="60" data-width="1920" data-height="1080">` +
+      host("near", 0) +
+      host("far", 30) +
+      `</div>` +
+      ["near", "far"].map(sceneScript).join("");
+    window.__timelines = { main: timeline(60) };
+    vi.resetModules();
+    await import("./entry");
+    await vi.waitFor(() => expect(window.__player).toBeDefined());
+    await window.__hfWaitForSeekCompletion?.();
+    expect(ran()).toBe("near ");
+    window.__player!.seek(25);
+    await window.__hfWaitForSeekCompletion?.();
+    expect(ran()).toBe("near far ");
   });
 });

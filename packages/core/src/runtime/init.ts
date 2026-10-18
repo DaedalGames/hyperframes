@@ -4281,6 +4281,7 @@ export function initSandboxRuntimeModular(): void {
     forceDispatchSeekEvent(t);
   };
   window.__hfWaitForSeekCompletion = waitForSeekCompletion;
+  mountHeldScenesNear(state.currentTime);
   runtimeCleanupCallbacks.push(() => {
     if (window.__hfWaitForSeekCompletion === waitForSeekCompletion) {
       delete window.__hfWaitForSeekCompletion;
