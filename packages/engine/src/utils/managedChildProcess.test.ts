@@ -34,6 +34,24 @@ describe("ManagedChildProcess", () => {
     });
   });
 
+  it("keeps no part of a signed URL's query when the tail cut lands inside it", async () => {
+    const child = childProcess();
+    const managed = new ManagedChildProcess(child, { stderrMaxBytes: 40 });
+    child.stderr.emit(
+      "data",
+      Buffer.from("Error opening https://b.s3.amazonaws.com/v.mp4?X-Amz-Sig"),
+    );
+    child.stderr.emit(
+      "data",
+      Buffer.from("nature=supersecret&X-Amz-Credential=AKIDEXAMPLE -t 0.5"),
+    );
+    child.emit("close", 1, null);
+
+    const { stderr } = await managed.wait();
+    expect(stderr).toContain("/v.mp4?… -t 0.5");
+    for (const leaked of ["secret", "AKID", "nature="]) expect(stderr).not.toContain(leaked);
+  });
+
   it("escalates abort from SIGTERM to SIGKILL and resolves only after close", async () => {
     vi.useFakeTimers();
     const child = childProcess();

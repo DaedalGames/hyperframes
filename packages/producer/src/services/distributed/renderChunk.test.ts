@@ -884,11 +884,16 @@ describe("extractDeferredVideoFramesForChunk", () => {
 
   it("never surfaces a signed URL's query when ffmpeg fails", async () => {
     synthBig();
-    // ffmpeg echoes its arguments, the signed URL among them, the way a real read failure does.
+    // Echoes its arguments (long enough that the diagnostic's tail cut can land inside the URL),
+    // then ends on the URL the way a real read failure does.
     const failingFfmpeg = join(root, "failing-ffmpeg");
-    writeFileSync(failingFfmpeg, '#!/bin/sh\necho "cannot read: $*" >&2\nexit 1\n', {
-      mode: 0o755,
-    });
+    writeFileSync(
+      failingFfmpeg,
+      '#!/bin/sh\necho "cannot read: $*" >&2\n' +
+        'for a in "$@"; do case $a in http*) echo "$a: Server returned 403 Forbidden" >&2;; esac; done\n' +
+        "exit 1\n",
+      { mode: 0o755 },
+    );
     const server = await serveFileByRange(big);
     const originalFfmpeg = process.env.HYPERFRAMES_FFMPEG_PATH;
     process.env.HYPERFRAMES_FFMPEG_PATH = failingFfmpeg;
