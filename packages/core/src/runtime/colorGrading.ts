@@ -2475,7 +2475,6 @@ function resolveTarget(
   }
 }
 
-/** Pixel size of the source's own pixels (a canvas's drawing buffer, never its CSS box). */
 function readSourceSize(source: TexImageSource): { width: number; height: number } | null {
   const [width, height] = isVideoElement(source)
     ? [source.videoWidth, source.videoHeight]
@@ -3475,7 +3474,6 @@ function addListener(
 }
 
 function redrawsOnTransportTick(element: ColorGradingMediaElement): boolean {
-  // A canvas fires no media event when it repaints, so the transport tick is its frame clock.
   if (isCanvasElement(element)) return true;
   if (isVideoElement(element) && !element.paused && !element.ended) return false;
   return ANIMATED_GRADING_PROPERTIES.some(
