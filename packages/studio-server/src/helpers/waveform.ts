@@ -15,7 +15,7 @@ import { probeMediaMetadata } from "./mediaMetadata.js";
 
 const SAMPLE_RATE = 4000;
 const PEAK_COUNT = 4000;
-const WAVEFORM_CACHE_VERSION = "v2";
+const WAVEFORM_CACHE_VERSION = "v3";
 
 /**
  * Cache filename for one asset's peaks, keyed on its content as well as its name.

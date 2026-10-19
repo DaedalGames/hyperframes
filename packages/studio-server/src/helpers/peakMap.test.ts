@@ -67,7 +67,7 @@ describe("buildPeakMapCacheKey", () => {
     expect(a).toBe(buildPeakMapCacheKey("a/talk.mp4", { size: 10, mtimeMs: 1 }));
     expect(a).not.toBe(buildPeakMapCacheKey("a/talk.mp4", { size: 11, mtimeMs: 1 }));
     expect(a).not.toBe(buildPeakMapCacheKey("a/talk.mp4", { size: 10, mtimeMs: 2 }));
-    expect(a).toMatch(/^peaks-v2_a_talk\.mp4_10-1\.json$/);
+    expect(a).toMatch(/^peaks-v3_a_talk\.mp4_10-1\.json$/);
   });
 });
 
