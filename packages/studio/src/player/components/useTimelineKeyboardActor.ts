@@ -170,18 +170,15 @@ export function useTimelineKeyboardActor({
     return counts;
   }, [logicalRows]);
 
-  // A press's focus moves the roving target but never scrolls: zoomed in, pressing a clip whose start is off-screen
-  // scrolled the view to that start mid-drag, so the drop landed far from the pointer.
-  const pressed = useRef(false);
+  const pressedThisTask = useRef(false);
   const onPointerDownCapture = useCallback(() => {
-    pressed.current = true;
-    // The press's own focus lands in this task; a focus after it came another way.
-    setTimeout(() => (pressed.current = false));
+    pressedThisTask.current = true;
+    setTimeout(() => (pressedThisTask.current = false));
   }, []);
   const onFocus = useCallback(
     (event: FocusEvent<HTMLElement>) => {
-      const reveal = !pressed.current;
-      pressed.current = false;
+      const reveal = !pressedThisTask.current;
+      pressedThisTask.current = false;
       const id = timelineKeyboardEventTarget(event.target, event.currentTarget)?.dataset
         .timelineFocusId;
       if (id && id !== focusedTargetId) usePlayerStore.getState().requestTimelineFocus(id, reveal);

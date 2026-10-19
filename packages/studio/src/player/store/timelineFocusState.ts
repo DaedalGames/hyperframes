@@ -3,7 +3,6 @@ export interface TimelineFocusRequest {
   projectId: string | null;
   sessionEpoch: number;
   nonce: number;
-  /** Scroll the target into view; false for a focus a pointer press gave, where the person already sees it. */
   reveal: boolean;
 }
 
