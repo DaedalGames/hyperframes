@@ -23,6 +23,7 @@ import { gotoWhenSent } from "./navigateForCapture.js";
 
 const SHADER_TRANSITIONS_TIMEOUT_MS = 90_000;
 const CAPTURE_SETTLE_MS = 1500;
+const NETWORK_IDLE_MS = 100;
 const PREFERRED_SEEK_TARGET_WAIT_MS = 500;
 const DEFAULT_POST_SEEK_FONT_WAIT_MS = 500;
 
@@ -34,7 +35,6 @@ export const AUDIT_SEEK_OPTIONS = {
   waitForFontsMs: 500,
 } as const;
 
-// The paint-flush sleep only matters to pixels, so only a seek a screenshot follows pays it.
 export const SCREENSHOT_SEEK_OPTIONS = {
   ...AUDIT_SEEK_OPTIONS,
   settleMs: 120,
@@ -193,9 +193,39 @@ async function waitForCompositionSettle(
       console.warn(`   ${c.warn("⚠")} Shader transitions did not finish pre-rendering`);
     });
 
-  await page.evaluate(() => document.fonts.ready).catch(() => {});
-  await new Promise((resolveSettle) => setTimeout(resolveSettle, CAPTURE_SETTLE_MS));
+  await waitForLateSubresources(page);
   return runtimeReady;
+}
+
+async function waitForLateSubresources(page: Page): Promise<void> {
+  let cap: ReturnType<typeof setTimeout> | undefined;
+  const deadline = Date.now() + CAPTURE_SETTLE_MS;
+  const ready = (async () => {
+    await page.waitForFunction(() => document.readyState === "complete", {
+      timeout: CAPTURE_SETTLE_MS,
+    });
+    await page.waitForNetworkIdle({
+      idleTime: NETWORK_IDLE_MS,
+      timeout: Math.max(1, deadline - Date.now()),
+    });
+    await page.evaluate(async () => {
+      await Promise.all(Array.from(document.images, (image) => image.decode().catch(() => {})));
+      await document.fonts.ready;
+    });
+  })();
+  try {
+    await Promise.race([
+      ready,
+      new Promise((resolveCap) => {
+        cap = setTimeout(resolveCap, CAPTURE_SETTLE_MS);
+      }),
+    ]);
+  } catch {
+    await new Promise((resolveCap) => setTimeout(resolveCap, Math.max(0, deadline - Date.now())));
+  } finally {
+    clearTimeout(cap);
+    ready.catch(() => {});
+  }
 }
 
 // tsx/esbuild-style dev transpilers run with keepNames, which rewrites named
@@ -294,7 +324,7 @@ export async function openSettledCompositionPage(
   }
 }
 
-// Serialized into the page (alone, or inside check's overlap grid); the seek-target cascade must stay one function.
+// Serialized into the page; the seek-target cascade must stay one function.
 // fallow-ignore-next-line complexity
 export function seekInPage(
   t: number,

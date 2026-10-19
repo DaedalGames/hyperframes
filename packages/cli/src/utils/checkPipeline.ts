@@ -471,20 +471,27 @@ async function collectGridSamples(
         await driver.collectMotionFrame(time, motion.selectors, motion.livenessScopes),
       );
     }
-    if (contrastSet.has(time)) {
-      const contrastStart = Date.now();
-      // The overview frames are --snapshots-only: without annotations the
-      // driver takes no overview or overlay screenshot at all.
-      const capture = options.snapshots
-        ? await driver.collectContrast(time, annotationBoxesFrom(issuesAtTime))
-        : await driver.collectContrast(time);
-      collected.contrastMs += Date.now() - contrastStart;
-      collected.contrastEntries.push(...capture.entries);
-      if (capture.pngBase64) collected.screenshots.push({ time, pngBase64: capture.pngBase64 });
-    }
+    if (contrastSet.has(time))
+      await collectContrastAt(driver, options, time, issuesAtTime, collected);
   }
   await collectMotionOverlapSamples(driver, grid, collected, options.range);
   return collected;
+}
+
+async function collectContrastAt(
+  driver: CheckAuditDriver,
+  options: CheckOptions,
+  time: number,
+  issuesAtTime: AnchoredLayoutIssue[],
+  collected: GridSamples,
+): Promise<void> {
+  const contrastStart = Date.now();
+  const capture = options.snapshots
+    ? await driver.collectContrast(time, annotationBoxesFrom(issuesAtTime))
+    : await driver.collectContrast(time);
+  collected.contrastMs += Date.now() - contrastStart;
+  collected.contrastEntries.push(...capture.entries);
+  if (capture.pngBase64) collected.screenshots.push({ time, pngBase64: capture.pngBase64 });
 }
 
 // Dense grid catches mid-motion text collisions the sparse layout grid seeks past; text-only overlap collection is cheap enough to afford it.
@@ -559,6 +566,17 @@ function holdProber(driver: CheckAuditDriver, collected: GridSamples, end: numbe
   };
 }
 
+async function denseOverlapTimes(
+  driver: CheckAuditDriver,
+  grid: SampleGrid,
+  range?: [number, number],
+): Promise<number[]> {
+  const offset = range?.[0] ?? 0;
+  const edges = (await driver.getClipEdges()).map((time) => time - offset);
+  const overlapTimes = buildOverlapSampleTimes(range ? range[1] - range[0] : grid.duration, edges);
+  return range ? mergeSampleTimes(overlapTimes.map((time) => time + range[0])) : overlapTimes;
+}
+
 /** Reruns content_overlap on a fine grid, unconditionally rather than gated on fingerprint change, since an animation aliased to the sparse grid collides between identical-fingerprint samples. */
 async function collectMotionOverlapSamples(
   driver: CheckAuditDriver,
@@ -567,12 +585,7 @@ async function collectMotionOverlapSamples(
   range?: [number, number],
 ): Promise<void> {
   const baseTimes = new Set(grid.layoutSamples);
-  const offset = range?.[0] ?? 0;
-  const edges = (await driver.getClipEdges()).map((time) => time - offset);
-  const overlapTimes = buildOverlapSampleTimes(range ? range[1] - range[0] : grid.duration, edges);
-  const shiftedTimes = range
-    ? mergeSampleTimes(overlapTimes.map((time) => time + range[0]))
-    : overlapTimes;
+  const shiftedTimes = await denseOverlapTimes(driver, grid, range);
   const probeHold = holdProber(driver, collected, range ? range[1] : grid.duration);
   const gridIssues = await driver.collectOverlapGrid(shiftedTimes.filter((t) => !baseTimes.has(t)));
   let sample = 0;

@@ -409,14 +409,10 @@ function wireRuntimeListeners(
   currentTime: () => number,
   setTime: (time: number) => void,
 ): void {
+  followSampleTimeMarkers(page, setTime);
   page.on("console", (message) => {
     const type = message.type();
     const text = message.text();
-    // The overlap grid announces each sample in the page, so what it logs keeps that sample's time.
-    if (type === "debug" && text.startsWith(SAMPLE_MARKER)) {
-      setTime(Number(text.slice(SAMPLE_MARKER.length)));
-      return;
-    }
     if (type === "error" && !text.startsWith("Failed to load resource")) {
       const location = message.location();
       pushRuntimeDraft(drafts, {
@@ -587,12 +583,12 @@ function createPageDriver(page: Page, setTime: (time: number) => void): CheckAud
     getCanvas: () =>
       page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })),
     findAmbiguousSelectors: (selectors) => findAmbiguousSelectors(page, selectors),
-    seek: async (time, screenshot) => {
+    seek: async (time, screenshotFollows) => {
       setTime(time);
       await seekCompositionTimeline(
         page,
         time,
-        screenshot ? SCREENSHOT_SEEK_OPTIONS : AUDIT_SEEK_OPTIONS,
+        screenshotFollows ? SCREENSHOT_SEEK_OPTIONS : AUDIT_SEEK_OPTIONS,
       );
     },
     seekGeometry: async (time) => {
@@ -756,14 +752,23 @@ async function collectOverlap(page: Page, time: number): Promise<AnchoredLayoutI
   return anchorLayoutIssues(page, raw.flatMap(parseLayoutIssue));
 }
 
-const SAMPLE_MARKER = "__hfCheckSample ";
+const SAMPLE_TIME_MARKER = "__hfCheckSample ";
+
+function followSampleTimeMarkers(page: Page, setTime: (time: number) => void): void {
+  page.on("console", (message) => {
+    const text = message.text();
+    if (message.type() === "debug" && text.startsWith(SAMPLE_TIME_MARKER)) {
+      setTime(Number(text.slice(SAMPLE_TIME_MARKER.length)));
+    }
+  });
+}
 
 interface OverlapGridSample {
   raw: unknown[];
   anchors: CheckAnchor[];
 }
 
-// Serialized into the page with its helpers; awaits only the seek barrier, so no frame is painted between samples.
+// Never yields to the renderer between samples, so it paints no frame for them.
 async function overlapGridInPage(
   grid: {
     times: number[];
@@ -798,12 +803,11 @@ async function overlapGridInPage(
   return samples;
 }
 
-/** The dense grid's seek + collectOverlap for every time in one page task: a software renderer otherwise paints after each seek. */
 async function collectOverlapGrid(page: Page, times: number[]): Promise<AnchoredLayoutIssue[][]> {
   if (times.length === 0) return [];
   const grid = {
     times,
-    marker: SAMPLE_MARKER,
+    marker: SAMPLE_TIME_MARKER,
     fallback: DENSE_GEOMETRY_SEEK_OPTIONS.fallbackToBridgeAndTimelines,
     skipDraws: DENSE_GEOMETRY_SEEK_OPTIONS.skipWebglDraws,
     videoFrames: DENSE_GEOMETRY_SEEK_OPTIONS.waitForVideoFrames,
@@ -1032,7 +1036,6 @@ async function resolveAnchors(page: Page, requests: AnchorRequest[]): Promise<Ch
   return page.evaluate(anchorsInPage, requests);
 }
 
-// Serialized into the page, alone or inside the overlap grid.
 function anchorsInPage(values: AnchorRequest[]): CheckAnchor[] {
   const root = document.querySelector("[data-composition-id]");
   return values.map((request) => {
@@ -1084,7 +1087,7 @@ async function compositionBbox(page: Page): Promise<CheckBbox> {
 async function collectContrast(
   page: Page,
   time: number,
-  layoutAnnotations?: CheckAnnotationBox[],
+  snapshotAnnotations?: CheckAnnotationBox[],
 ): Promise<ContrastCapture> {
   let prepared: PreparedContrast[] = [];
   try {
@@ -1106,7 +1109,7 @@ async function collectContrast(
     );
     const finished = raw.flatMap(parseFinishedContrast);
     const entries = joinContrastEntries(finished, prepared);
-    if (!layoutAnnotations) return { entries };
+    if (!snapshotAnnotations) return { entries };
     // __contrastAuditFinish restores the text paint hidden by prepare. The
     // measurement screenshot intentionally has glyphs removed so contrast
     // can sample the pixels behind them; never persist that image as visual
@@ -1117,8 +1120,8 @@ async function collectContrast(
     // they're appended to the layout-derived annotations passed in by the
     // pipeline rather than being requested up front.
     const annotations = [
-      ...layoutAnnotations,
-      ...contrastFailureAnnotations(entries, layoutAnnotations.length),
+      ...snapshotAnnotations,
+      ...contrastFailureAnnotations(entries, snapshotAnnotations.length),
     ];
     const pngBase64 = await captureOverviewShot(page, annotations, overviewShot);
     return { entries, pngBase64 };

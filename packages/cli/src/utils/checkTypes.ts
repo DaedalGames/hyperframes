@@ -108,7 +108,6 @@ export interface CheckContrastFinding extends CheckFinding {
 
 export interface ContrastCapture {
   entries: ContrastAuditEntry[];
-  /** The overview frame, only when `collectContrast` was given annotations (--snapshots). */
   pngBase64?: string;
 }
 
@@ -199,8 +198,7 @@ export interface CheckAuditDriver {
   getClipEdges(): Promise<number[]>;
   getCanvas(): Promise<Canvas>;
   findAmbiguousSelectors(selectors: string[]): Promise<AnchoredLayoutIssue[]>;
-  /** `screenshot`: a screenshot of this time follows, so the seek also waits for paint. */
-  seek(time: number, screenshot?: boolean): Promise<void>;
+  seek(time: number, screenshotFollows?: boolean): Promise<void>;
   /** Settle-free seek for the geometry-only dense content_overlap pass; only collectOverlap consumes it, and getBoundingClientRect is valid synchronously after setTime. */
   seekGeometry(time: number): Promise<void>;
   collectLayout(
@@ -210,7 +208,6 @@ export interface CheckAuditDriver {
   ): Promise<AnchoredLayoutIssue[]>;
   /** content_overlap only, for the dense re-sampling grid — catches transient text collisions the sparse grid seeks past. */
   collectOverlap(time: number): Promise<AnchoredLayoutIssue[]>;
-  /** collectOverlap after a settle-free seek to each time, one entry per time, in a single page task. */
   collectOverlapGrid(times: number[]): Promise<AnchoredLayoutIssue[][]>;
   /** Frozen-sweep guard (#U10): an opaque fingerprint of the seeked visual state, from
    * motion-signature.browser.js (shared with motion-sample's liveness). Legacy name kept. */
@@ -233,7 +230,10 @@ export interface CheckAuditDriver {
     livenessScopes: string[],
   ): Promise<MotionFrame>;
   anchorMotionIssues(issues: LayoutIssue[]): Promise<AnchoredLayoutIssue[]>;
-  collectContrast(time: number, annotations?: CheckAnnotationBox[]): Promise<ContrastCapture>;
+  collectContrast(
+    time: number,
+    snapshotAnnotations?: CheckAnnotationBox[],
+  ): Promise<ContrastCapture>;
 }
 
 export interface CheckScreenshot {

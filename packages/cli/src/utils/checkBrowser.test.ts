@@ -7,6 +7,8 @@ import { join } from "node:path";
 import {
   openSettledCompositionPage,
   type OpenSettledCompositionPageOptions,
+  SCREENSHOT_SEEK_OPTIONS,
+  seekCompositionTimeline,
 } from "../capture/captureCompositionFrame.js";
 import { DEFAULT_CHECK_OPTIONS, runAuditGrid } from "./checkPipeline.js";
 import {
@@ -176,15 +178,19 @@ it("carries raw browser geometry through the page driver and pipeline", async ()
 });
 
 it("runs the dense overlap grid in one page task, keeping each sample's time on what it logs", async () => {
-  mountCanvasFixture();
+  mountCanvasFixture(
+    `<section data-composition-file="scenes/copy.html"><p id="copy" data-layout-name="copy">Hi</p></section>`,
+  );
   const page = fakePage();
-  let onConsole: ((message: ReturnType<typeof fakeConsoleMessage>) => void) | undefined;
-  page.on = vi.fn((event: string, handler: typeof onConsole) => {
-    if (event === "console") onConsole = handler;
+  const consoleHandlers: ((message: ReturnType<typeof fakeConsoleMessage>) => void)[] = [];
+  const onConsole = (message: ReturnType<typeof fakeConsoleMessage>) =>
+    consoleHandlers.forEach((handler) => handler(message));
+  page.on = vi.fn((event: string, handler: (typeof consoleHandlers)[number]) => {
+    if (event === "console") consoleHandlers.push(handler);
   });
   // CDP delivers the page's console calls in order; forward jsdom's the same way.
   vi.spyOn(console, "debug").mockImplementation((text: string) => {
-    onConsole?.(fakeConsoleMessage("debug", text));
+    onConsole(fakeConsoleMessage("debug", text));
   });
   let evaluateCalls = 0;
   const evaluate = page.evaluate;
@@ -198,8 +204,19 @@ it("runs the dense overlap grid in one page task, keeping each sample's time on 
     await injectScript(arg);
     Reflect.set(window, "__hyperframesOverlapAudit", ({ time }: { time: number }) => {
       if (time !== 5) denseAudits.push(evaluateCalls);
-      if (time === 2.5) onConsole?.(fakeConsoleMessage("error", "thrown at 2.5"));
-      return [];
+      if (time !== 2.5) return [];
+      onConsole(fakeConsoleMessage("error", "thrown at 2.5"));
+      const rect = { left: 10, top: 20, right: 110, bottom: 60, width: 100, height: 40 };
+      return [
+        {
+          code: "content_overlap",
+          severity: "warning",
+          time,
+          selector: "#copy",
+          message: "x",
+          rect,
+        },
+      ];
     });
   });
   installSessionMock(page);
@@ -215,6 +232,16 @@ it("runs the dense overlap grid in one page task, keeping each sample's time on 
   expect(new Set(denseAudits).size).toBe(1);
   expect(result.runtimeFindings).toContainEqual(
     expect.objectContaining({ code: "console_error", message: "thrown at 2.5", time: 2.5 }),
+  );
+  expect(result.layoutIssues).toContainEqual(
+    expect.objectContaining({
+      code: "content_overlap",
+      selector: "#copy",
+      sourceFile: "scenes/copy.html",
+      dataAttributes: { "data-layout-name": "copy" },
+      bbox: { x: 10, y: 20, width: 100, height: 40 },
+      time: 2.5,
+    }),
   );
 });
 
@@ -393,6 +420,7 @@ it.each([
     );
 
     expect(page.screenshot).toHaveBeenCalledTimes(shots);
+    expect(seekCompositionTimeline).toHaveBeenCalledWith(page, 5, SCREENSHOT_SEEK_OPTIONS);
     expect(result.screenshots.map((shot) => shot.pngBase64)).toEqual(saved);
   },
 );
