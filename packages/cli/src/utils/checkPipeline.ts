@@ -442,6 +442,7 @@ function appendGridSamples(into: GridSamples, from: GridSamples): void {
   into.motionFrames.push(...from.motionFrames);
   into.contrastEntries.push(...from.contrastEntries);
   into.screenshots.push(...from.screenshots);
+  // Summed over pages, so with a helper it can exceed the wall time.
   into.contrastMs += from.contrastMs;
   into.layoutStateSignatures.push(...from.layoutStateSignatures);
   into.rotationSamples.push(...from.rotationSamples);
@@ -497,7 +498,7 @@ async function collectSampleAt(
 }
 
 // Frames are a function of time, so a helper page that is ready takes the next unclaimed sample
-// and the merge keeps the serial order.
+// and the merge keeps the serial order. A helper only adds speed: one that fails hands its samples back.
 async function collectGridSamples(
   driver: CheckAuditDriver,
   options: CheckOptions,
@@ -513,27 +514,40 @@ async function collectGridSamples(
     canvas: geometryEnabled ? await driver.getCanvas() : null,
   };
   const times = mergeSampleTimes(grid.layoutSamples, motion.times);
+  const pending = times.map((_, index) => index);
   const perTime: GridSamples[] = [];
-  let claimed = 0;
-  const work = async (worker: CheckAuditDriver) => {
-    worker.markSamples?.("start");
-    for (let i = claimed++; i < times.length; i = claimed++) {
-      perTime[i] = await collectSampleAt(worker, options, grid, motion, sets, times[i] ?? 0);
+  const work = async (worker: CheckAuditDriver, taken: number[] = []) => {
+    for (let index = pending.shift(); index !== undefined; index = pending.shift()) {
+      taken.push(index);
+      const time = times[index] ?? 0;
+      perTime[index] = await collectSampleAt(worker, options, grid, motion, sets, time);
     }
   };
-  const joined = helpers.then((ready) =>
-    Promise.all(
-      ready.map(async (helper) => {
-        if (claimed >= times.length) return helper;
-        await helper.initialize(options.contrast);
-        await work(helper);
-        return helper;
-      }),
-    ),
-  );
+  const helpWith = async (helper: CheckAuditDriver) => {
+    const taken: number[] = [];
+    try {
+      await helper.initialize(options.contrast);
+      helper.markSamples?.("start");
+      await work(helper, taken);
+      helper.markSamples?.("end");
+    } catch {
+      helper.markSamples?.("drop");
+      for (const index of taken) delete perTime[index];
+      pending.push(...taken);
+    }
+  };
+  let firstPageDone = false;
+  const running: Promise<void>[] = [];
+  void helpers.then((ready) => {
+    for (const helper of ready) if (!firstPageDone) running.push(helpWith(helper));
+  });
+  driver.markSamples?.("start");
   await work(driver);
-  const workers = [driver, ...(await joined)];
-  for (const worker of workers) worker.markSamples?.("end");
+  // A helper still opening is never waited for; one mid-sample may yet hand samples back.
+  firstPageDone = true;
+  await Promise.all(running);
+  await work(driver);
+  driver.markSamples?.("end");
   const collected = emptyGridSamples();
   for (const samples of perTime) appendGridSamples(collected, samples);
   await collectMotionOverlapSamples(driver, grid, collected, options.range);

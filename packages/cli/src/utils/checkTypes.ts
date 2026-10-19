@@ -192,7 +192,8 @@ export type MotionSpecResolution =
 
 export interface CheckAuditDriver {
   initialize(contrast: boolean): Promise<void>;
-  markSamples?(phase: "start" | "end"): void;
+  /** Bounds the runtime messages logged while sampling; "drop" discards them. */
+  markSamples?(phase: "start" | "end" | "drop"): void;
   matchComponents?(components: string[], findings: CheckFinding[]): Promise<boolean[]>;
   getDuration(): Promise<number>;
   /** True when the root composition explicitly declares that it is intentionally timeline-free. */

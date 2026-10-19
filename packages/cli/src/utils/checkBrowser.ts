@@ -227,10 +227,11 @@ export async function runBrowserCheck(
   const clock = createRuntimeClock();
   let failure: { kind: "none" } | { kind: "failed"; error: unknown } = { kind: "none" };
   let chromeBrowser: import("puppeteer-core").Browser | undefined;
-  const helperOpen =
+  const helperSession =
     samplingBrowserCount(options) > 1
-      ? openHelperSession(html, server.url, options, deadline)
+      ? startHelperSession(html, server.url, options, deadline)
       : undefined;
+  const helperOpen = helperSession?.opened;
   const helpers = helperOpen?.then(
     (helper) => [helper.driver],
     () => [],
@@ -274,6 +275,7 @@ export async function runBrowserCheck(
     const sampleLog = sampleWindow(drafts);
     const driver = createPageDriver(page, clock, sampleLog);
     const result = await runGrid(driver, options, motion, helpers);
+    helperSession?.stop();
     const helper = await helperOpen?.catch(() => undefined);
     const merged = helper ? mergeHelperDrafts(sampleLog, helper.sampleLog) : drafts;
     const broken = await abortedImagesStillBroken(page, merged);
@@ -289,8 +291,9 @@ export async function runBrowserCheck(
     failure = { kind: "failed", error };
     throw error;
   } finally {
-    const helper = await helperOpen?.catch(() => undefined);
-    await closeCheckResources([chromeBrowser, helper?.browser], server, failure);
+    helperSession?.stop();
+    await helperOpen?.catch(() => undefined);
+    await closeCheckResources([chromeBrowser, helperSession?.browser()], server, failure);
   }
 }
 
@@ -313,7 +316,8 @@ const SAMPLING_BROWSER_BYTES = 250 * 1024 * 1024;
 export function samplingBrowserCount(
   options: CheckOptions,
   cores = os.availableParallelism(),
-  free = os.freemem(),
+  // freemem() is the host's; availableMemory() also honours a container's memory limit.
+  free = Math.min(os.freemem(), process.availableMemory()),
 ): number {
   if (options.at?.length === 1) return 1;
   return Math.max(1, Math.min(2, cores - 1, Math.floor(free / SAMPLING_BROWSER_BYTES)));
@@ -330,9 +334,35 @@ function sampleWindow(drafts: RuntimeDraft[]): SampleWindow {
 }
 
 interface HelperSession {
-  browser: Browser;
   driver: CheckAuditDriver;
   sampleLog: SampleWindow;
+}
+
+/** Opens the helper Chrome; stop() cancels an open still in flight and closes it, once its pages are unused. */
+function startHelperSession(
+  html: string,
+  url: string,
+  options: CheckOptions,
+  deadline: CheckDeadline | undefined,
+) {
+  const abort = new AbortController();
+  let browser: Browser | undefined;
+  const opened = openHelperSession(html, url, options, deadline, {
+    signal: deadline ? AbortSignal.any([deadline.signal, abort.signal]) : abort.signal,
+    onBrowser: (launched) => {
+      browser = launched;
+      deadline?.ownBrowser(launched);
+    },
+  });
+  return {
+    opened,
+    browser: () => browser,
+    stop: () => {
+      abort.abort();
+      // The close is shared, so the check's cleanup awaits this same close and reports its error.
+      if (browser) void closeManagedBrowser(browser).catch(() => undefined);
+    },
+  };
 }
 
 async function openHelperSession(
@@ -340,6 +370,7 @@ async function openHelperSession(
   url: string,
   options: CheckOptions,
   deadline: CheckDeadline | undefined,
+  owner: { signal: AbortSignal; onBrowser: (browser: Browser) => void },
 ): Promise<HelperSession> {
   const sampleLog = sampleWindow([]);
   const clock = createRuntimeClock();
@@ -348,8 +379,8 @@ async function openHelperSession(
     renderReadyTimeoutMs: options.timeout,
     renderReadyWarningSuffix: "checking the current page state",
     browserGpuMode: options.browserGpuMode ?? resolveCliChromeGpuMode(),
-    signal: deadline?.signal,
-    onBrowser: deadline?.ownBrowser,
+    signal: owner.signal,
+    onBrowser: owner.onBrowser,
     beforeNavigate: async (page) => {
       wireRuntimeListeners(page, sampleLog.drafts, clock);
       await deadline?.preparePage(page);
@@ -357,7 +388,6 @@ async function openHelperSession(
   });
   await waitForPreferredSeekTarget(session.page);
   return {
-    browser: session.browser,
     driver: createPageDriver(session.page, clock, sampleLog),
     sampleLog,
   };
@@ -368,27 +398,19 @@ const draftKey = (draft: RuntimeDraft) => `${draft.code} ${draft.time} ${draft.m
 /**
  * The first page's drafts with the helper's sample-loop drafts merged in by time, as one page seeking every
  * sample would have logged them; the helper's load is the first page's, and what both logged at one time counts once.
+ * The sort is stable and also orders samples the first page redid for a failed helper.
  */
 export function mergeHelperDrafts(primary: SampleWindow, helper: SampleWindow): RuntimeDraft[] {
-  const start = Math.min(primary.start, primary.drafts.length);
-  const end = Math.min(primary.end, primary.drafts.length);
-  const own = primary.drafts.slice(start, end);
+  const window = ({ drafts, start, end }: SampleWindow) =>
+    drafts.slice(Math.min(start, drafts.length), Math.min(end, drafts.length));
+  const own = window(primary);
   const seen = new Set(own.map(draftKey));
-  const extra = helper.drafts
-    .slice(Math.min(helper.start, helper.drafts.length), Math.min(helper.end, helper.drafts.length))
-    .filter((draft) => !seen.has(draftKey(draft)));
-  const merged: RuntimeDraft[] = [];
-  let next = 0;
-  for (const draft of own) {
-    while (next < extra.length && (extra[next]?.time ?? 0) < draft.time)
-      merged.push(extra[next++]!);
-    merged.push(draft);
-  }
+  const extra = window(helper).filter((draft) => !seen.has(draftKey(draft)));
+  const start = Math.min(primary.start, primary.drafts.length);
   return [
     ...primary.drafts.slice(0, start),
-    ...merged,
-    ...extra.slice(next),
-    ...primary.drafts.slice(end),
+    ...[...own, ...extra].sort((a, b) => a.time - b.time),
+    ...primary.drafts.slice(start + own.length),
   ];
 }
 
@@ -695,7 +717,9 @@ function createPageDriver(
   return {
     initialize: (contrast) => injectAuditScripts(page, contrast),
     markSamples: (phase) => {
-      if (sampleLog) sampleLog[phase] = sampleLog.drafts.length;
+      if (!sampleLog) return;
+      if (phase === "drop") sampleLog.start = sampleLog.end = Number.POSITIVE_INFINITY;
+      else sampleLog[phase] = sampleLog.drafts.length;
     },
     matchComponents: (components, findings) =>
       page.evaluate(matchComponentFindings, { components, findings }),

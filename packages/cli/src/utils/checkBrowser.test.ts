@@ -102,6 +102,7 @@ beforeEach(() => {
   vi.spyOn(console, "debug").mockImplementation(() => undefined);
   vi.spyOn(os, "availableParallelism").mockReturnValue(1);
   vi.spyOn(os, "freemem").mockReturnValue(16 * 1024 ** 3);
+  vi.spyOn(process, "availableMemory").mockReturnValue(16 * 1024 ** 3);
 });
 
 afterEach(() => {
@@ -185,9 +186,11 @@ it("carries raw browser geometry through the page driver and pipeline", async ()
 it("splits the samples over a second Chrome and reports what one Chrome reports", async () => {
   mountCanvasFixture(`<p id="copy" data-layout-name="copy">Hi</p>`);
   type Message = ReturnType<typeof fakeConsoleMessage>;
-  const run = async (cores: number) => {
+  const run = async (cores: number, helper: "works" | "crashes" | "never opens" = "works") => {
     vi.mocked(os.availableParallelism).mockReturnValue(cores);
+    let helperSeeks = 0;
     const pages: ReturnType<typeof fakePage>[] = [];
+    const helperPages = new Set<unknown>();
     const handlers = new Map<unknown, ((message: Message) => void)[]>();
     const log = (page: unknown, text: string) =>
       handlers.get(page)?.forEach((handler) => handler(fakeConsoleMessage("error", text)));
@@ -202,6 +205,10 @@ it("splits the samples over a second Chrome and reports what one Chrome reports"
           if (event === "console") handlers.set(page, [...(handlers.get(page) ?? []), handler]);
         });
         const opened = pages.push(page);
+        // Only the first page's open takes prelaunched Chromes.
+        if (!("prelaunched" in options)) helperPages.add(page);
+        if (helperPages.has(page) && helper === "never opens")
+          await new Promise((_, reject) => options.signal?.addEventListener("abort", reject));
         options.onBrowser?.(browser);
         await options.beforeNavigate?.(page);
         log(page, `logged at load on page ${opened}`);
@@ -209,6 +216,10 @@ it("splits the samples over a second Chrome and reports what one Chrome reports"
       },
     );
     vi.mocked(seekCompositionTimeline).mockImplementation(async (page, time) => {
+      if (helperPages.has(page) && helper === "crashes" && ++helperSeeks === 2) {
+        log(page, "renderer crashed");
+        throw new Error("Target closed");
+      }
       log(page, `seeked to ${time}`);
     });
     const result = await runBrowserCheck(
@@ -237,6 +248,16 @@ it("splits the samples over a second Chrome and reports what one Chrome reports"
   expect(loads(split.messages)).toHaveLength(1);
   expect(sampled(split.messages)).toEqual(sampled(serial.messages));
   expect(serial.messages.length).toBeGreaterThan(3);
+
+  const crashed = await run(4, "crashes");
+  expect(crashed.seekingPages).toBe(2);
+  expect(loads(crashed.messages)).toHaveLength(1);
+  expect(sampled(crashed.messages)).toEqual(sampled(serial.messages));
+  const unopened = await run(4, "never opens");
+  expect(unopened.pages).toHaveLength(2);
+  expect(unopened.seekingPages).toBe(1);
+  expect(loads(unopened.messages)).toHaveLength(1);
+  expect(sampled(unopened.messages)).toEqual(sampled(serial.messages));
 });
 
 it("runs the dense overlap grid in one page task, keeping each sample's time on what it logs", async () => {
@@ -908,6 +929,14 @@ describe("samplingBrowserCount", () => {
     expect(samplingBrowserCount(DEFAULT_CHECK_OPTIONS, 8, 400 * 1024 ** 2)).toBe(1);
     expect(samplingBrowserCount({ ...DEFAULT_CHECK_OPTIONS, at: [1] }, 8, 16 * GB)).toBe(1);
   });
+
+  it("counts a container's memory limit, not the host's free memory", () => {
+    vi.mocked(os.freemem).mockReturnValue(100 * GB);
+    vi.mocked(process.availableMemory).mockReturnValue(400 * 1024 ** 2);
+    expect(samplingBrowserCount(DEFAULT_CHECK_OPTIONS, 8)).toBe(1);
+    vi.mocked(process.availableMemory).mockReturnValue(16 * GB);
+    expect(samplingBrowserCount(DEFAULT_CHECK_OPTIONS, 8)).toBe(2);
+  });
 });
 
 describe("mergeHelperDrafts", () => {
@@ -931,6 +960,21 @@ describe("mergeHelperDrafts", () => {
       "at 2",
       "at 3",
       "dense",
+    ]);
+  });
+
+  it("orders samples the first page redid after its own later ones", () => {
+    const primary = {
+      drafts: [draft("load", 0), draft("at 0", 0), draft("at 2", 2), draft("at 1", 1)],
+      start: 1,
+      end: 4,
+    };
+    const dropped = { drafts: [draft("at 1", 1)], start: Infinity, end: Infinity };
+    expect(mergeHelperDrafts(primary, dropped).map((entry) => entry.message)).toEqual([
+      "load",
+      "at 0",
+      "at 1",
+      "at 2",
     ]);
   });
 
