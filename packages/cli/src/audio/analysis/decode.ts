@@ -20,7 +20,10 @@ function requiredBinary(name: "ffmpeg" | "ffprobe"): string {
 }
 
 /** The playable audio stream's format, or `null` when the file has none. */
-export async function probeAudio(file: string): Promise<AudioStreamInfo | null> {
+export async function probeAudio(
+  file: string,
+  options: { signal?: AbortSignal; timeout?: number } = {},
+): Promise<AudioStreamInfo | null> {
   const { stdout } = await run(
     requiredBinary("ffprobe"),
     [
@@ -35,7 +38,7 @@ export async function probeAudio(file: string): Promise<AudioStreamInfo | null> 
       "--",
       file,
     ],
-    { maxBuffer: 8 * 1024 * 1024, windowsHide: true },
+    { maxBuffer: 8 * 1024 * 1024, windowsHide: true, ...options },
   );
   const parsed = JSON.parse(stdout) as {
     streams?: {

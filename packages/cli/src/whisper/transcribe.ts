@@ -342,9 +342,12 @@ async function runFfmpeg(
   }
 }
 
-/** Selects the playable audio track; ffmpeg's own pick when ffprobe gives no answer. */
-async function audioTrackMap(file: string): Promise<string[]> {
-  const stream = await probeAudio(file).catch(() => null);
+/** Selects the playable audio track; ffmpeg's own pick when ffprobe gives no answer in time. */
+async function audioTrackMap(file: string, signal?: AbortSignal): Promise<string[]> {
+  const stream = await probeAudio(file, { signal, timeout: 10_000 }).catch(() => {
+    signal?.throwIfAborted();
+    return null;
+  });
   return stream ? ["-map", `0:a:${stream.track}`] : [];
 }
 
@@ -359,7 +362,7 @@ async function extractAudio(videoPath: string, signal?: AbortSignal): Promise<st
     );
   }
   const wavPath = tempWavPath();
-  const map = await audioTrackMap(videoPath);
+  const map = await audioTrackMap(videoPath, signal);
   await runFfmpeg(
     ffmpegPath,
     ["-i", videoPath, ...map, "-vn", "-ar", "16000", "-ac", "1", "-f", "wav"],
@@ -417,7 +420,7 @@ async function prepareAudio(audioPath: string, signal?: AbortSignal): Promise<st
     throw new Error(`ffmpeg is required to prepare audio. Install: ${getFFmpegInstallHint()}`);
   }
   const wavPath = tempWavPath();
-  const map = await audioTrackMap(audioPath);
+  const map = await audioTrackMap(audioPath, signal);
   await runFfmpeg(
     ffmpegPath,
     ["-i", audioPath, ...map, "-ar", "16000", "-ac", "1", "-f", "wav"],
