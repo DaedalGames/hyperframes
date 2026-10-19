@@ -1841,7 +1841,9 @@ async function embedLocalFontFaces(html: string, projectDir: string): Promise<st
               embeddedPaths.add(localPath);
               continue;
             }
-            dataUri = await toDataUri(font.buffer, ext);
+            // Raw, not woff2: compressing costs seconds per font on a cold cache, and this HTML
+            // is only a render-time artifact.
+            dataUri = await toDataUri(font.buffer, ext, { compress: false });
             dataUriByAbsolutePath.set(absPath, dataUri);
             defaultLogger.info(
               `[Compiler] Embedded local font file: ${localPath} (${(font.buffer.length / 1024).toFixed(0)} KB → data URI)`,
