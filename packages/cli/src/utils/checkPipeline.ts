@@ -424,18 +424,8 @@ async function collectGeometryAt(
   return issues;
 }
 
-async function collectGridSamples(
-  driver: CheckAuditDriver,
-  options: CheckOptions,
-  grid: SampleGrid,
-  motion: MotionPlan,
-): Promise<GridSamples> {
-  const layoutSet = new Set(grid.layoutSamples);
-  const motionSet = new Set(motion.times);
-  const contrastSet = new Set(grid.contrastSamples);
-  const geometryEnabled = grid.captionSamples.length > 0 || grid.frameSamples.length > 0;
-  const canvas = geometryEnabled ? await driver.getCanvas() : null;
-  const collected: GridSamples = {
+function emptyGridSamples(): GridSamples {
+  return {
     layoutIssues: [],
     motionFrames: [],
     contrastEntries: [],
@@ -445,37 +435,107 @@ async function collectGridSamples(
     rotationSamples: [],
     indicatorFrames: [],
   };
-  for (const time of mergeSampleTimes(grid.layoutSamples, motion.times)) {
-    await driver.seek(time, contrastSet.has(time));
-    // Findings collected for THIS sample time, so the overview overlay (below)
-    // only ever annotates a frame with defects that are actually valid at
-    // that render time — never a stale bbox from an earlier/later sample.
-    const issuesAtTime: AnchoredLayoutIssue[] = [];
-    if (layoutSet.has(time)) {
-      const layoutIssues = await driver.collectLayout(time, options.tolerance, options.layout);
-      collected.layoutIssues.push(...layoutIssues);
-      issuesAtTime.push(...layoutIssues);
-      collected.layoutStateSignatures.push({
-        time,
-        signature: await driver.collectLayoutGeometry(),
-        clock: await driver.collectSeekClock(),
-      });
-      collected.rotationSamples.push(...(await driver.collectRotationSample(time)));
-      collected.indicatorFrames.push(await driver.collectOffPivotRotationSample(time));
-    }
-    if (canvas) {
-      const geometryIssues = await collectGeometryAt(driver, options, grid, canvas, time);
-      collected.layoutIssues.push(...geometryIssues);
-      issuesAtTime.push(...geometryIssues);
-    }
-    if (motionSet.has(time)) {
-      collected.motionFrames.push(
-        await driver.collectMotionFrame(time, motion.selectors, motion.livenessScopes),
-      );
-    }
-    if (contrastSet.has(time))
-      await collectContrastAt(driver, options, time, issuesAtTime, collected);
+}
+
+function appendGridSamples(into: GridSamples, from: GridSamples): void {
+  into.layoutIssues.push(...from.layoutIssues);
+  into.motionFrames.push(...from.motionFrames);
+  into.contrastEntries.push(...from.contrastEntries);
+  into.screenshots.push(...from.screenshots);
+  into.contrastMs += from.contrastMs;
+  into.layoutStateSignatures.push(...from.layoutStateSignatures);
+  into.rotationSamples.push(...from.rotationSamples);
+  into.indicatorFrames.push(...from.indicatorFrames);
+}
+
+interface SampleSets {
+  layout: Set<number>;
+  motion: Set<number>;
+  contrast: Set<number>;
+  canvas: Canvas | null;
+}
+
+async function collectSampleAt(
+  driver: CheckAuditDriver,
+  options: CheckOptions,
+  grid: SampleGrid,
+  motion: MotionPlan,
+  sets: SampleSets,
+  time: number,
+): Promise<GridSamples> {
+  const collected = emptyGridSamples();
+  await driver.seek(time, sets.contrast.has(time));
+  // Findings collected for THIS sample time, so the overview overlay (below)
+  // only ever annotates a frame with defects that are actually valid at
+  // that render time — never a stale bbox from an earlier/later sample.
+  const issuesAtTime: AnchoredLayoutIssue[] = [];
+  if (sets.layout.has(time)) {
+    const layoutIssues = await driver.collectLayout(time, options.tolerance, options.layout);
+    collected.layoutIssues.push(...layoutIssues);
+    issuesAtTime.push(...layoutIssues);
+    collected.layoutStateSignatures.push({
+      time,
+      signature: await driver.collectLayoutGeometry(),
+      clock: await driver.collectSeekClock(),
+    });
+    collected.rotationSamples.push(...(await driver.collectRotationSample(time)));
+    collected.indicatorFrames.push(await driver.collectOffPivotRotationSample(time));
   }
+  if (sets.canvas) {
+    const geometryIssues = await collectGeometryAt(driver, options, grid, sets.canvas, time);
+    collected.layoutIssues.push(...geometryIssues);
+    issuesAtTime.push(...geometryIssues);
+  }
+  if (sets.motion.has(time)) {
+    collected.motionFrames.push(
+      await driver.collectMotionFrame(time, motion.selectors, motion.livenessScopes),
+    );
+  }
+  if (sets.contrast.has(time))
+    await collectContrastAt(driver, options, time, issuesAtTime, collected);
+  return collected;
+}
+
+// Frames are a function of time, so a helper page that is ready takes the next unclaimed sample
+// and the merge keeps the serial order.
+async function collectGridSamples(
+  driver: CheckAuditDriver,
+  options: CheckOptions,
+  grid: SampleGrid,
+  motion: MotionPlan,
+  helpers: Promise<CheckAuditDriver[]>,
+): Promise<GridSamples> {
+  const geometryEnabled = grid.captionSamples.length > 0 || grid.frameSamples.length > 0;
+  const sets: SampleSets = {
+    layout: new Set(grid.layoutSamples),
+    motion: new Set(motion.times),
+    contrast: new Set(grid.contrastSamples),
+    canvas: geometryEnabled ? await driver.getCanvas() : null,
+  };
+  const times = mergeSampleTimes(grid.layoutSamples, motion.times);
+  const perTime: GridSamples[] = [];
+  let claimed = 0;
+  const work = async (worker: CheckAuditDriver) => {
+    worker.markSamples?.("start");
+    for (let i = claimed++; i < times.length; i = claimed++) {
+      perTime[i] = await collectSampleAt(worker, options, grid, motion, sets, times[i] ?? 0);
+    }
+  };
+  const joined = helpers.then((ready) =>
+    Promise.all(
+      ready.map(async (helper) => {
+        if (claimed >= times.length) return helper;
+        await helper.initialize(options.contrast);
+        await work(helper);
+        return helper;
+      }),
+    ),
+  );
+  await work(driver);
+  const workers = [driver, ...(await joined)];
+  for (const worker of workers) worker.markSamples?.("end");
+  const collected = emptyGridSamples();
+  for (const samples of perTime) appendGridSamples(collected, samples);
   await collectMotionOverlapSamples(driver, grid, collected, options.range);
   return collected;
 }
@@ -1225,6 +1285,7 @@ export async function runAuditGrid(
   driver: CheckAuditDriver,
   options: CheckOptions,
   motion: MotionSpecResolution,
+  helpers: Promise<CheckAuditDriver[]> = Promise.resolve([]),
 ): Promise<CheckBrowserResult> {
   await driver.initialize(options.contrast);
   const grid = await buildSampleGrid(driver, options);
@@ -1234,7 +1295,7 @@ export async function runAuditGrid(
     grid.duration,
   );
   const seekLoopStart = Date.now();
-  const collected = await collectGridSamples(driver, options, grid, plan);
+  const collected = await collectGridSamples(driver, options, grid, plan, helpers);
   const seekLoopMs = Date.now() - seekLoopStart;
 
   let motionIssues = plan.preflightIssues;

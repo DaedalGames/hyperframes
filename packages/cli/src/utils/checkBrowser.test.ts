@@ -2,7 +2,7 @@
 // fallow-ignore-file code-duplication
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import os, { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   openSettledCompositionPage,
@@ -19,6 +19,8 @@ import {
   dropFailedProxyEchoes,
   runBrowserCheck,
   collectSeekClock,
+  mergeHelperDrafts,
+  samplingBrowserCount,
 } from "./checkBrowser.js";
 import type { ProjectDir } from "./project.js";
 
@@ -94,9 +96,12 @@ const PROJECT: ProjectDir = {
   indexPath: "/project/index.html",
 };
 
-// The overlap grid logs one marker per sample; keep them out of test output.
+// The overlap grid logs one marker per sample; keep them out of test output. One core keeps
+// the browser pass on one page unless a test says otherwise.
 beforeEach(() => {
   vi.spyOn(console, "debug").mockImplementation(() => undefined);
+  vi.spyOn(os, "availableParallelism").mockReturnValue(1);
+  vi.spyOn(os, "freemem").mockReturnValue(16 * 1024 ** 3);
 });
 
 afterEach(() => {
@@ -175,6 +180,63 @@ it("carries raw browser geometry through the page driver and pipeline", async ()
   ]);
   expect(result.timings).toEqual({ launchSettleMs: 60, seekLoopMs: 40, contrastMs: 0 });
   expect(mocks.serverClose).toHaveBeenCalledOnce();
+});
+
+it("splits the samples over a second Chrome and reports what one Chrome reports", async () => {
+  mountCanvasFixture(`<p id="copy" data-layout-name="copy">Hi</p>`);
+  type Message = ReturnType<typeof fakeConsoleMessage>;
+  const run = async (cores: number) => {
+    vi.mocked(os.availableParallelism).mockReturnValue(cores);
+    const pages: ReturnType<typeof fakePage>[] = [];
+    const handlers = new Map<unknown, ((message: Message) => void)[]>();
+    const log = (page: unknown, text: string) =>
+      handlers.get(page)?.forEach((handler) => handler(fakeConsoleMessage("error", text)));
+    const browser = Object.assign(Object.create(null), {
+      close: vi.fn(async () => undefined),
+      process: () => ({ exitCode: 0, signalCode: null }),
+    });
+    vi.mocked(openSettledCompositionPage).mockImplementation(
+      async (_html: string, _url: string, options: OpenSettledCompositionPageOptions) => {
+        const page = fakePage();
+        page.on = vi.fn((event: string, handler: (message: Message) => void) => {
+          if (event === "console") handlers.set(page, [...(handlers.get(page) ?? []), handler]);
+        });
+        const opened = pages.push(page);
+        options.onBrowser?.(browser);
+        await options.beforeNavigate?.(page);
+        log(page, `logged at load on page ${opened}`);
+        return { page, browser, renderReadyTimedOut: false };
+      },
+    );
+    vi.mocked(seekCompositionTimeline).mockImplementation(async (page, time) => {
+      log(page, `seeked to ${time}`);
+    });
+    const result = await runBrowserCheck(
+      PROJECT,
+      { ...DEFAULT_CHECK_OPTIONS, contrast: false },
+      { kind: "none" },
+      runAuditGrid,
+    );
+    const seeks = vi.mocked(seekCompositionTimeline).mock.calls;
+    vi.mocked(seekCompositionTimeline).mockClear();
+    return {
+      pages,
+      seekingPages: new Set(seeks.map(([page]) => page)).size,
+      messages: result.runtimeFindings.map((finding) => `${finding.time} ${finding.message}`),
+    };
+  };
+
+  const serial = await run(1);
+  const split = await run(4);
+  expect(serial.pages).toHaveLength(1);
+  expect(split.pages).toHaveLength(2);
+  expect(split.seekingPages).toBe(2);
+  const loads = (messages: string[]) => messages.filter((line) => line.includes("at load"));
+  const sampled = (messages: string[]) => messages.filter((line) => !line.includes("at load"));
+  expect(loads(serial.messages)).toHaveLength(1);
+  expect(loads(split.messages)).toHaveLength(1);
+  expect(sampled(split.messages)).toEqual(sampled(serial.messages));
+  expect(serial.messages.length).toBeGreaterThan(3);
 });
 
 it("runs the dense overlap grid in one page task, keeping each sample's time on what it logs", async () => {
@@ -833,6 +895,53 @@ describe("keepBrokenImageAborts", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("samplingBrowserCount", () => {
+  const GB = 1024 ** 3;
+  it("uses a second Chrome only with a spare core, 250 MB free each and more than one sample", () => {
+    expect(samplingBrowserCount(DEFAULT_CHECK_OPTIONS, 8, 16 * GB)).toBe(2);
+    expect(samplingBrowserCount(DEFAULT_CHECK_OPTIONS, 3, 1 * GB)).toBe(2);
+    expect(samplingBrowserCount(DEFAULT_CHECK_OPTIONS, 2, 16 * GB)).toBe(1);
+    expect(samplingBrowserCount(DEFAULT_CHECK_OPTIONS, 1, 2 * GB)).toBe(1);
+    expect(samplingBrowserCount(DEFAULT_CHECK_OPTIONS, 8, 400 * 1024 ** 2)).toBe(1);
+    expect(samplingBrowserCount({ ...DEFAULT_CHECK_OPTIONS, at: [1] }, 8, 16 * GB)).toBe(1);
+  });
+});
+
+describe("mergeHelperDrafts", () => {
+  const draft = (message: string, time: number) =>
+    ({ code: "console_error", severity: "error", message, time }) as const;
+  it("orders the helper's sample-loop messages by time and drops its load and same-time repeats", () => {
+    const primary = {
+      drafts: [draft("load", 0), draft("at 0", 0), draft("at 2", 2), draft("dense", 0)],
+      start: 1,
+      end: 3,
+    };
+    const helper = {
+      drafts: [draft("load", 0), draft("at 1", 1), draft("at 2", 2), draft("at 3", 3)],
+      start: 1,
+      end: 4,
+    };
+    expect(mergeHelperDrafts(primary, helper).map((entry) => entry.message)).toEqual([
+      "load",
+      "at 0",
+      "at 1",
+      "at 2",
+      "at 3",
+      "dense",
+    ]);
+  });
+
+  it("adds nothing from a helper that never sampled", () => {
+    const primary = { drafts: [draft("load", 0)], start: 1, end: 1 };
+    const helper = {
+      drafts: [draft("load", 0)],
+      start: Number.POSITIVE_INFINITY,
+      end: Number.POSITIVE_INFINITY,
+    };
+    expect(mergeHelperDrafts(primary, helper)).toEqual(primary.drafts);
   });
 });
 
