@@ -99,9 +99,9 @@ export class ManagedChildProcess {
   }
 
   private redactedStderrTail(): string {
-    // A cut can sever a URL from its scheme; drop that partial token so no fragment of it survives.
-    const start = this.rawStderrTailCut ? this.rawStderrTail.search(/\s/) : 0;
-    const raw = start < 0 ? "" : this.rawStderrTail.slice(start);
+    const raw = this.rawStderrTailCut
+      ? withoutTokenSeveredByCut(this.rawStderrTail)
+      : this.rawStderrTail;
     return lastBytes(redactUrlQueryStrings(raw), this.maxBytes);
   }
 
@@ -203,4 +203,9 @@ function lastBytes(text: string, maxBytes: number): string {
   return Buffer.byteLength(text) > maxBytes
     ? Buffer.from(text).subarray(-maxBytes).toString()
     : text;
+}
+
+function withoutTokenSeveredByCut(text: string): string {
+  const firstSpace = text.search(/\s/);
+  return firstSpace < 0 ? "" : text.slice(firstSpace);
 }
