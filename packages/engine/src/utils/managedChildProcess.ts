@@ -41,6 +41,7 @@ export class ManagedChildProcess {
   private requestedReason: Exclude<ManagedProcessTerminationReason, "exit" | "spawn_error"> | null =
     null;
   private rawStderrTail = "";
+  private rawStderrTailCut = false;
   private readonly stderrDecoder = new StringDecoder("utf8");
   private spawned = false;
   private settled = false;
@@ -87,10 +88,9 @@ export class ManagedChildProcess {
 
   private readonly onStderr = (data: Buffer | string): void => {
     const chunk = Buffer.isBuffer(data) ? data : Buffer.from(data);
-    this.rawStderrTail = lastBytes(
-      this.rawStderrTail + this.stderrDecoder.write(chunk),
-      RAW_STDERR_SLACK_FACTOR * this.maxBytes,
-    );
+    const joined = this.rawStderrTail + this.stderrDecoder.write(chunk);
+    this.rawStderrTail = lastBytes(joined, RAW_STDERR_SLACK_FACTOR * this.maxBytes);
+    if (this.rawStderrTail !== joined) this.rawStderrTailCut = true;
     this.options.onStderr?.(chunk.toString());
   };
 
@@ -99,7 +99,10 @@ export class ManagedChildProcess {
   }
 
   private redactedStderrTail(): string {
-    return lastBytes(redactUrlQueryStrings(this.rawStderrTail), this.maxBytes);
+    // A cut can sever a URL from its scheme; drop that partial token so no fragment of it survives.
+    const start = this.rawStderrTailCut ? this.rawStderrTail.search(/\s/) : 0;
+    const raw = start < 0 ? "" : this.rawStderrTail.slice(start);
+    return lastBytes(redactUrlQueryStrings(raw), this.maxBytes);
   }
 
   private readonly onSpawn = (): void => {

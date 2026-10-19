@@ -70,6 +70,21 @@ describe("ManagedChildProcess", () => {
     for (const leaked of ["abc", "def1234", "1234"]) expect(stderr).not.toContain(leaked);
   });
 
+  it("keeps no signature fragment when the kept tail itself starts inside one", async () => {
+    const child = childProcess();
+    const managed = new ManagedChildProcess(child, { stderrMaxBytes: 16 });
+    const signature = `${"a".repeat(30)}0123456789`;
+    child.stderr.emit(
+      "data",
+      Buffer.from(`x https://b.s3.amazonaws.com/v.mp4?X-Amz-Signature=${signature} -t 0.5\n`),
+    );
+    child.emit("close", 1, null);
+
+    const { stderr } = await managed.wait();
+    expect(stderr).toContain(" -t 0.5");
+    for (const leaked of ["aaa", "6789"]) expect(stderr).not.toContain(leaked);
+  });
+
   it("escalates abort from SIGTERM to SIGKILL and resolves only after close", async () => {
     vi.useFakeTimers();
     const child = childProcess();
