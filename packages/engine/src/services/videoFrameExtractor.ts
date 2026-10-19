@@ -58,7 +58,10 @@ import {
   writeUrlDownloadTelemetry,
 } from "../utils/urlDownloader.js";
 import { runFfmpeg, type RunFfmpegResult } from "../utils/runFfmpeg.js";
-import { isFfmpegFilterAvailable } from "../utils/psnrFilterAvailability.js";
+import {
+  isFfmpegFilterAvailable,
+  isFfmpegHwaccelAvailable,
+} from "../utils/psnrFilterAvailability.js";
 import { DEFAULT_CONFIG, type EngineConfig } from "../config.js";
 import { unwrapTemplate } from "../utils/htmlTemplate.js";
 import {
@@ -988,7 +991,15 @@ export async function extractVideoFramesRange(
   const isHdr = isHdrColorSpaceUtil(metadata.colorSpace);
   const isMacOS = process.platform === "darwin";
   const toneMappedToSdr = options.toneMapHdrToSdr === true && isHdr && (await toneMapsWithZscale());
-  const decodeWithVideoToolbox = isHdr && isMacOS && !toneMappedToSdr;
+  const keepsHdrForChrome = isHdr && isMacOS && !toneMappedToSdr;
+  // The Mac's media engine decodes the same pixels at a fraction of the CPU; ffmpeg falls back
+  // to software for a stream it cannot take.
+  const decodeWithVideoToolbox =
+    keepsHdrForChrome ||
+    (isMacOS &&
+      !metadata.hasAlpha &&
+      !codecMayHaveAlpha(metadata.videoCodec) &&
+      (await isFfmpegHwaccelAvailable("videotoolbox")));
 
   const sampleAtOutputFps = !options.finalFrameOnly;
   if (options.frameRanges && (!sampleAtOutputFps || metadata.isVFR)) {
@@ -1025,7 +1036,7 @@ export async function extractVideoFramesRange(
   }
 
   const vfFilters: string[] = [];
-  if (decodeWithVideoToolbox) {
+  if (keepsHdrForChrome) {
     vfFilters.push("format=nv12");
   }
   const samplingAt = vfFilters.length;
