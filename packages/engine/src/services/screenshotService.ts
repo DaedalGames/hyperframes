@@ -141,6 +141,30 @@ async function sendBeginFrame(
   }
 }
 
+function beginFrameScreenshot(options: CaptureOptions) {
+  const isPng = options.format === "png";
+  return {
+    format: isPng ? "png" : "jpeg",
+    quality: isPng ? undefined : (options.quality ?? 80),
+    optimizeForSpeed: true,
+  } as const;
+}
+
+/**
+ * Displays the page at a tick that captures no frame, keeping the picture as the page's last frame: a capture right
+ * after it reports no damage, and reuses that picture.
+ */
+export async function presentBeginFrame(
+  page: Page,
+  options: CaptureOptions,
+  params: { frameTimeTicks: number; interval: number },
+): Promise<void> {
+  const client = await getCdpSession(page);
+  const screenshot = beginFrameScreenshot(options);
+  const result = await sendBeginFrame(client, { ...params, noDisplayUpdates: false, screenshot });
+  if (result.screenshotData) lastFrameCache.set(page, Buffer.from(result.screenshotData, "base64"));
+}
+
 export async function beginFrameCapture(
   page: Page,
   options: CaptureOptions,
@@ -148,13 +172,7 @@ export async function beginFrameCapture(
   interval: number,
 ): Promise<BeginFrameResult> {
   const client = await getCdpSession(page);
-
-  const isPng = options.format === "png";
-  const screenshot = {
-    format: isPng ? "png" : "jpeg",
-    quality: isPng ? undefined : (options.quality ?? 80),
-    optimizeForSpeed: true,
-  } as const;
+  const screenshot = beginFrameScreenshot(options);
 
   const result = await sendBeginFrame(client, { frameTimeTicks, interval, screenshot });
 

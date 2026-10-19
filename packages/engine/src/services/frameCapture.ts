@@ -64,6 +64,7 @@ import {
   pageContentExceedsCaptureHeight,
   pageScreenshotCapture,
   initTransparentBackground,
+  presentBeginFrame,
   shouldDefaultCaptureBeyondViewport,
 } from "./screenshotService.js";
 import {
@@ -2804,8 +2805,7 @@ export async function initializeSession(session: CaptureSession): Promise<void> 
   // original `-1·interval` that stalled every comp reaching the probe; at
   // `-6·interval` the order stays warmup < commit < probe < capture.
   await ensureRenderFrameSiblings(page);
-  const commitCdp = await getCdpSession(page);
-  await commitCdp.send("HeadlessExperimental.beginFrame", preparedBeginFrameTimeline.commitParams);
+  await presentBeginFrame(page, session.options, preparedBeginFrameTimeline.commitParams);
 
   finalizeSessionInit(session);
 }
@@ -4029,11 +4029,9 @@ async function captureFrameSurface(
     if (!session.beginFrameSeekPresented) {
       // A session's first capture can return the frame composited during init instead of
       // this seek, so display the seek once at a tick between the probe and this capture.
-      const client = await getCdpSession(page);
-      await client.send("HeadlessExperimental.beginFrame", {
+      await presentBeginFrame(page, options, {
         frameTimeTicks: frameTimeTicks - session.beginFrameIntervalMs / 2,
         interval: session.beginFrameIntervalMs,
-        noDisplayUpdates: false,
       });
       session.beginFrameSeekPresented = true;
     }

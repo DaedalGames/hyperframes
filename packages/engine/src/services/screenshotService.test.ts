@@ -14,6 +14,8 @@ import {
   syncVideoFrameVisibility,
   shouldDefaultCaptureBeyondViewport,
   initTransparentBackground,
+  beginFrameCapture,
+  presentBeginFrame,
   DOM_LAYER_MASK_STYLE_ID,
 } from "./screenshotService.js";
 
@@ -135,6 +137,31 @@ describe("pageScreenshotCapture supersample plumbing", () => {
 
     const params = send.mock.calls[0]?.[1] as { clip?: { scale: number } };
     expect(params.clip?.scale).toBe(3);
+  });
+});
+
+// A parallel worker's first capture, right after its painted seek, had no damage and no picture: an empty JPEG.
+describe("a worker's first BeginFrame capture after a painted tick", () => {
+  it("reuses the painted picture when the capture reports no damage", async () => {
+    const painted = Buffer.from("seek at frame 1").toString("base64");
+    const send = vi.fn(async (_method: string, params: { frameTimeTicks: number }) =>
+      params.frameTimeTicks === 999.5
+        ? { hasDamage: true, screenshotData: painted }
+        : { hasDamage: false },
+    );
+    const page = makeFakePageWithCdp(send as never);
+    const options = {
+      width: 1920,
+      height: 1080,
+      fps: { num: 30, den: 1 },
+      format: "jpeg" as const,
+    };
+
+    await presentBeginFrame(page, options, { frameTimeTicks: 999.5, interval: 33 });
+    const frame = await beginFrameCapture(page, options, 1000, 33);
+
+    expect(frame.hasDamage).toBe(false);
+    expect(frame.buffer.toString()).toBe("seek at frame 1");
   });
 });
 
