@@ -1538,7 +1538,23 @@ function authoredDefinesPredicate(document: Document): (id: string) => boolean {
   const authoredCss = [...document.querySelectorAll("style:not([data-hf-composition-variables])")]
     .map((s) => s.textContent || "")
     .join("\n");
-  return (id) => new RegExp(`${cssVariableName(id)}\\s*:`).test(authoredCss);
+  const defined = namesBeforeAColon(authoredCss);
+  return (id) => defined.has(cssVariableName(id));
+}
+
+/** Every `--name` written right before a `:`, including the tail of a longer word (`.a--b:hover`), in one pass. */
+function namesBeforeAColon(css: string): Set<string> {
+  const names = new Set<string>();
+  const word = /[\w-]+/g;
+  const colonNext = /\s*:/y;
+  for (let match = word.exec(css); match; match = word.exec(css)) {
+    colonNext.lastIndex = word.lastIndex;
+    if (!colonNext.test(css)) continue;
+    const text = match[0];
+    for (let at = text.indexOf("--"); at !== -1; at = text.indexOf("--", at + 1))
+      names.add(text.slice(at));
+  }
+  return names;
 }
 
 /**
