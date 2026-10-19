@@ -21,6 +21,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { LambdaClient } from "@aws-sdk/client-lambda";
 import { S3Client } from "@aws-sdk/client-s3";
 import {
   CURRENT_PLAN_PROTOCOL,
@@ -38,7 +39,7 @@ import {
 import { resolveMaxParallelChunks } from "../../producer/src/services/distributed/plan.js";
 import { recomputePlanHashFromPlanDir } from "../../producer/src/services/render/stages/freezePlan.js";
 import type { AssembleEvent, LambdaEvent, PlanEvent, RenderChunkEvent } from "./events.js";
-import { handler, unwrapEvent } from "./handler.js";
+import { handler as handleEvent, unwrapEvent } from "./handler.js";
 import { S3PlanV2ArtifactPublisher } from "./s3PlanV2Publisher.js";
 
 interface FakeS3Op {
@@ -155,6 +156,14 @@ class FakeS3Client {
   }
 }
 
+// Without a configured concurrency, plan asks the account; tests get a refusal and the fallback.
+const accountUnreadable = {
+  send: async () => {
+    throw new Error("unit tests do not read the AWS account");
+  },
+} as unknown as LambdaClient;
+const handler: typeof handleEvent = (event, deps) =>
+  handleEvent(event, { lambda: accountUnreadable, ...deps });
 /** A real client (so it can pre-sign offline) whose requests go to the fake. */
 function presigningClient(fake: FakeS3Client): S3Client {
   const client = new S3Client({
@@ -167,8 +176,14 @@ function presigningClient(fake: FakeS3Client): S3Client {
 
 const tmpDirs: string[] = [];
 
+// The handler's default clients sign with the machine's credentials; a test reaching one fails.
+let realAwsClients: ReturnType<typeof spyOn>[] = [];
 beforeEach(() => {
-  // Each test gets its own tmp root so concurrent test runs don't share state.
+  realAwsClients = [LambdaClient.prototype, S3Client.prototype].map((proto) =>
+    spyOn(proto, "send").mockImplementation(async () => {
+      throw new Error("a unit test reached a real AWS client");
+    }),
+  );
 });
 
 afterEach(() => {
@@ -180,6 +195,11 @@ afterEach(() => {
     }
   }
   tmpDirs.length = 0;
+  const realSends = realAwsClients.flatMap((spy) =>
+    spy.mock.calls.map((call) => (call[0] as object).constructor.name),
+  );
+  for (const spy of realAwsClients) spy.mockRestore();
+  expect(realSends).toEqual([]);
 });
 
 function makeTmpRoot(): string {
