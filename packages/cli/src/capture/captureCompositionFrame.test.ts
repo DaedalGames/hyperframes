@@ -471,6 +471,24 @@ describe("installPageFunctionGuard", () => {
   });
 });
 
+describe("SCREENSHOT_SEEK_OPTIONS", () => {
+  it("waits for image decodes before a screenshot, not for a fixed sleep", async () => {
+    vi.useFakeTimers();
+    const { page, evaluate } = fakeSeekPage();
+    let done = false;
+    void seekCompositionTimeline(page, 2, SCREENSHOT_SEEK_OPTIONS).then(() => {
+      done = true;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(done).toBe(true);
+    expect(evaluate).toHaveBeenLastCalledWith(
+      expect.any(Function),
+      SCREENSHOT_SEEK_OPTIONS.waitForImagesMs,
+    );
+  });
+});
+
 describe("DENSE_GEOMETRY_SEEK_OPTIONS", () => {
   // A 79 s project of 1080p H.264 clips: each of the 600 dense seeks waited ~185 ms for a video frame it never reads,
   // so `check` ran past its deadline. Frame sources and hf-seek work can move the DOM, so those still hold it.
@@ -500,6 +518,7 @@ describe("DENSE_GEOMETRY_SEEK_OPTIONS", () => {
     // AUDIT (the base grid) keeps the frame and font waits; only a screenshot seek adds the paint sleep.
     expect(AUDIT_SEEK_OPTIONS.animationFrameSettle).toBe("double");
     expect("settleMs" in AUDIT_SEEK_OPTIONS).toBe(false);
-    expect(SCREENSHOT_SEEK_OPTIONS.settleMs).toBeGreaterThan(0);
+    expect(SCREENSHOT_SEEK_OPTIONS.waitForImagesMs).toBeGreaterThan(0);
+    expect("settleMs" in SCREENSHOT_SEEK_OPTIONS).toBe(false);
   });
 });

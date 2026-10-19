@@ -37,7 +37,7 @@ export const AUDIT_SEEK_OPTIONS = {
 
 export const SCREENSHOT_SEEK_OPTIONS = {
   ...AUDIT_SEEK_OPTIONS,
-  settleMs: 120,
+  waitForImagesMs: 120,
 } as const;
 
 // Geometry-only seek for the dense content_overlap grid: getBoundingClientRect is valid synchronously after setTime, so drop all post-seek waits (rAF/font/sleep) that would multiply across the dense grid.
@@ -57,6 +57,7 @@ export interface SeekCompositionTimelineOptions {
   animationFrameSettle?: "race" | "double" | "none";
   waitForFontsMs?: number;
   settleMs?: number;
+  waitForImagesMs?: number;
   waitForVideoFrames?: boolean;
   // Box-only reads: software GL spends about a second per frame on draws nothing here looks at.
   skipWebglDraws?: boolean;
@@ -480,6 +481,7 @@ export async function seekCompositionTimeline(
   if (waitForFontsMs > 0) {
     await waitForCompositionFonts(page, waitForFontsMs);
   }
+  if (options.waitForImagesMs) await waitForCompositionImages(page, options.waitForImagesMs);
   if (options.settleMs !== undefined) {
     const settleMs = Math.max(0, options.settleMs);
     await new Promise((resolveSettle) => setTimeout(resolveSettle, settleMs));
@@ -509,6 +511,25 @@ export async function waitForPreferredSeekTarget(
   } catch {
     // Legacy/static pages may only expose raw timelines; keep that fallback available.
   }
+}
+
+async function waitForCompositionImages(
+  page: CompositionEvaluationPage,
+  timeoutMs: number,
+): Promise<void> {
+  await page.evaluate(
+    (ms: number) =>
+      new Promise<void>((resolveWait) => {
+        const deadline = setTimeout(resolveWait, ms);
+        void Promise.all(
+          Array.from(document.images, (image) => image.decode().catch(() => {})),
+        ).then(() => {
+          clearTimeout(deadline);
+          resolveWait();
+        });
+      }),
+    timeoutMs,
+  );
 }
 
 export async function waitForCompositionFonts(
