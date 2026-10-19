@@ -1,4 +1,11 @@
-import { useCallback, useMemo, type FocusEvent, type KeyboardEvent, type RefObject } from "react";
+import {
+  useCallback,
+  useMemo,
+  useRef,
+  type FocusEvent,
+  type KeyboardEvent,
+  type RefObject,
+} from "react";
 import { usePlayerStore, type TimelineElement } from "../store/playerStore";
 import { RULER_H, TRACK_H, type TimelineRowGeometry } from "./timelineLayout";
 import {
@@ -163,11 +170,21 @@ export function useTimelineKeyboardActor({
     return counts;
   }, [logicalRows]);
 
+  // A press's focus moves the roving target but never scrolls: zoomed in, pressing a clip whose start is off-screen
+  // scrolled the view to that start mid-drag, so the drop landed far from the pointer.
+  const pressed = useRef(false);
+  const onPointerDownCapture = useCallback(() => {
+    pressed.current = true;
+    // The press's own focus lands in this task; a focus after it came another way.
+    setTimeout(() => (pressed.current = false));
+  }, []);
   const onFocus = useCallback(
     (event: FocusEvent<HTMLElement>) => {
+      const reveal = !pressed.current;
+      pressed.current = false;
       const id = timelineKeyboardEventTarget(event.target, event.currentTarget)?.dataset
         .timelineFocusId;
-      if (id && id !== focusedTargetId) usePlayerStore.getState().requestTimelineFocus(id);
+      if (id && id !== focusedTargetId) usePlayerStore.getState().requestTimelineFocus(id, reveal);
     },
     // ponytail: This closure must see the current id or coordinator-driven focus bumps the nonce twice.
     [focusedTargetId],
@@ -230,5 +247,5 @@ export function useTimelineKeyboardActor({
     [logicalRowCountByTrack, logicalRows, onDrillDown, onToggleRow, rowGeometry, scrollRef],
   );
 
-  return { rovingTargetId, onFocus, onKeyDown };
+  return { rovingTargetId, onFocus, onKeyDown, onPointerDownCapture };
 }
