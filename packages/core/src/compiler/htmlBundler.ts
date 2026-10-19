@@ -1063,9 +1063,16 @@ async function bundleProject(projectDir: string, options?: BundleOptions): Promi
   const entryHtml = readFileSync(indexPath, "utf-8");
   const mountedShell = readMountedSceneShell(projectDir, entryFile, entryHtml);
   const sourceDir = mountedShell ? projectDir : dirname(indexPath);
+  // Every mount of a sub-composition asks again for each of its url()s; isSafePath realpaths the whole chain.
+  const entryPaths = new Map<string, string | null>();
   const resolveEntryPath = (relativePath: string): string | null => {
-    const resolved = resolve(sourceDir, relativePath);
-    return isSafePath(projectDir, resolved) ? resolved : null;
+    let entry = entryPaths.get(relativePath);
+    if (entry === undefined) {
+      const resolved = resolve(sourceDir, relativePath);
+      entry = isSafePath(projectDir, resolved) ? resolved : null;
+      entryPaths.set(relativePath, entry);
+    }
+    return entry;
   };
 
   const resolveEntryUrl = (url: string): string | null => resolveEntryPath(decodedUrlPath(url));
