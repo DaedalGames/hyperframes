@@ -27,11 +27,16 @@ const PREFERRED_SEEK_TARGET_WAIT_MS = 500;
 const DEFAULT_POST_SEEK_FONT_WAIT_MS = 500;
 
 // The audit-grade seek tuning shared by check and the deprecated inspect/layout:
-// bridge+timeline fallback, ordered double-rAF settle, bounded font wait, sleep.
+// bridge+timeline fallback, ordered double-rAF settle, bounded font wait.
 export const AUDIT_SEEK_OPTIONS = {
   fallbackToBridgeAndTimelines: true,
   animationFrameSettle: "double",
   waitForFontsMs: 500,
+} as const;
+
+// The paint-flush sleep only matters to pixels, so only a seek a screenshot follows pays it.
+export const SCREENSHOT_SEEK_OPTIONS = {
+  ...AUDIT_SEEK_OPTIONS,
   settleMs: 120,
 } as const;
 

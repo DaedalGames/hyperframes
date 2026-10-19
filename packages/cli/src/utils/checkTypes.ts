@@ -108,7 +108,8 @@ export interface CheckContrastFinding extends CheckFinding {
 
 export interface ContrastCapture {
   entries: ContrastAuditEntry[];
-  pngBase64: string;
+  /** The overview frame, only when `collectContrast` was given annotations (--snapshots). */
+  pngBase64?: string;
 }
 
 export interface GeometryCandidateRequest {
@@ -198,7 +199,8 @@ export interface CheckAuditDriver {
   getClipEdges(): Promise<number[]>;
   getCanvas(): Promise<Canvas>;
   findAmbiguousSelectors(selectors: string[]): Promise<AnchoredLayoutIssue[]>;
-  seek(time: number): Promise<void>;
+  /** `screenshot`: a screenshot of this time follows, so the seek also waits for paint. */
+  seek(time: number, screenshot?: boolean): Promise<void>;
   /** Settle-free seek for the geometry-only dense content_overlap pass; only collectOverlap consumes it, and getBoundingClientRect is valid synchronously after setTime. */
   seekGeometry(time: number): Promise<void>;
   collectLayout(

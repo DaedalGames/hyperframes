@@ -1008,6 +1008,16 @@ it("keeps contrast and snapshot sampling on the pre-gate layout grid", async () 
   expect(collectContrast).toHaveBeenCalledWith(5);
 });
 
+it("waits for paint only on the grid seeks a contrast screenshot follows", async () => {
+  const driver = fakeDriver({ getDuration: vi.fn(async () => 10) });
+  await runScenario(driver, { samples: 1, captionZone: { x0: 0, y0: 0.8, x1: 1, y1: 1 } });
+
+  expect(vi.mocked(driver.seek).mock.calls).toEqual([
+    [5, true],
+    [10, false],
+  ]);
+});
+
 function layoutFindingOf(
   code: LayoutIssueCode,
   severity: "error" | "warning" | "info",

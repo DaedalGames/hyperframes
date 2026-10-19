@@ -7,6 +7,7 @@ import type { Browser, Page } from "puppeteer-core";
 import {
   AUDIT_SEEK_OPTIONS,
   DENSE_GEOMETRY_SEEK_OPTIONS,
+  SCREENSHOT_SEEK_OPTIONS,
   DEFAULT_ZOOM_PADDING_PX,
   DEFAULT_ZOOM_SCALE,
   captureRegionCrop,
@@ -311,7 +312,7 @@ export async function captureFindingCrops(
     const snapshotDir = checkSnapshotDirectory(project.dir);
     mkdirSync(snapshotDir, { recursive: true });
     for (const request of requests) {
-      await seekCompositionTimeline(page, request.time, AUDIT_SEEK_OPTIONS);
+      await seekCompositionTimeline(page, request.time, SCREENSHOT_SEEK_OPTIONS);
       const canvas = await page.evaluate(() => ({
         width: window.innerWidth,
         height: window.innerHeight,
@@ -574,9 +575,13 @@ function createPageDriver(page: Page, setTime: (time: number) => void): CheckAud
     getCanvas: () =>
       page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })),
     findAmbiguousSelectors: (selectors) => findAmbiguousSelectors(page, selectors),
-    seek: async (time) => {
+    seek: async (time, screenshot) => {
       setTime(time);
-      await seekCompositionTimeline(page, time, AUDIT_SEEK_OPTIONS);
+      await seekCompositionTimeline(
+        page,
+        time,
+        screenshot ? SCREENSHOT_SEEK_OPTIONS : AUDIT_SEEK_OPTIONS,
+      );
     },
     seekGeometry: async (time) => {
       setTime(time);
@@ -996,7 +1001,7 @@ async function compositionBbox(page: Page): Promise<CheckBbox> {
 async function collectContrast(
   page: Page,
   time: number,
-  layoutAnnotations: CheckAnnotationBox[] = [],
+  layoutAnnotations?: CheckAnnotationBox[],
 ): Promise<ContrastCapture> {
   let prepared: PreparedContrast[] = [];
   try {
@@ -1018,6 +1023,7 @@ async function collectContrast(
     );
     const finished = raw.flatMap(parseFinishedContrast);
     const entries = joinContrastEntries(finished, prepared);
+    if (!layoutAnnotations) return { entries };
     // __contrastAuditFinish restores the text paint hidden by prepare. The
     // measurement screenshot intentionally has glyphs removed so contrast
     // can sample the pixels behind them; never persist that image as visual

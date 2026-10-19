@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AUDIT_SEEK_OPTIONS,
   DENSE_GEOMETRY_SEEK_OPTIONS,
+  SCREENSHOT_SEEK_OPTIONS,
   captureRegionCrop,
   clampCropRegion,
   installPageFunctionGuard,
@@ -496,8 +497,9 @@ describe("DENSE_GEOMETRY_SEEK_OPTIONS", () => {
     expect(DENSE_GEOMETRY_SEEK_OPTIONS.animationFrameSettle).toBe("none");
     expect(DENSE_GEOMETRY_SEEK_OPTIONS.waitForFontsMs).toBe(0);
     expect(DENSE_GEOMETRY_SEEK_OPTIONS.settleMs).toBe(0);
-    // AUDIT (the full-settle path used by the base grid) must still carry the waits.
+    // AUDIT (the base grid) keeps the frame and font waits; only a screenshot seek adds the paint sleep.
     expect(AUDIT_SEEK_OPTIONS.animationFrameSettle).toBe("double");
-    expect(AUDIT_SEEK_OPTIONS.settleMs).toBeGreaterThan(0);
+    expect("settleMs" in AUDIT_SEEK_OPTIONS).toBe(false);
+    expect(SCREENSHOT_SEEK_OPTIONS.settleMs).toBeGreaterThan(0);
   });
 });

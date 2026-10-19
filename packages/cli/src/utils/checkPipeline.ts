@@ -444,7 +444,7 @@ async function collectGridSamples(
     indicatorFrames: [],
   };
   for (const time of mergeSampleTimes(grid.layoutSamples, motion.times)) {
-    await driver.seek(time);
+    await driver.seek(time, contrastSet.has(time));
     // Findings collected for THIS sample time, so the overview overlay (below)
     // only ever annotates a frame with defects that are actually valid at
     // that render time — never a stale bbox from an earlier/later sample.
@@ -473,15 +473,14 @@ async function collectGridSamples(
     }
     if (contrastSet.has(time)) {
       const contrastStart = Date.now();
-      // Annotation is a --snapshots-only nicety — skip building it (and the
-      // driver's extra overlay screenshot) when nothing will use it; the call
-      // shape without --snapshots stays exactly what it was before this existed.
+      // The overview frames are --snapshots-only: without annotations the
+      // driver takes no overview or overlay screenshot at all.
       const capture = options.snapshots
         ? await driver.collectContrast(time, annotationBoxesFrom(issuesAtTime))
         : await driver.collectContrast(time);
       collected.contrastMs += Date.now() - contrastStart;
       collected.contrastEntries.push(...capture.entries);
-      collected.screenshots.push({ time, pngBase64: capture.pngBase64 });
+      if (capture.pngBase64) collected.screenshots.push({ time, pngBase64: capture.pngBase64 });
     }
   }
   await collectMotionOverlapSamples(driver, grid, collected, options.range);
