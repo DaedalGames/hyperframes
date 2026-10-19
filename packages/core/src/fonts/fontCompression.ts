@@ -33,8 +33,7 @@ function rawMimeType(format: string): string {
 type FontCompressionOptions = {
   cacheDir?: string;
   compressImpl?: (input: Buffer) => Promise<Buffer>;
-  /** `false` embeds ttf/otf as-is: no woff2 compression, no cache. */
-  compress?: boolean;
+  compressToWoff2?: boolean;
 };
 
 function defaultCacheDir(): string {
@@ -96,7 +95,7 @@ export async function fontToDataUri(
   if (originalFormat === "woff2") {
     return `data:font/woff2;base64,${input.toString("base64")}`;
   }
-  if (originalFormat === "ttc" || options.compress === false) {
+  if (originalFormat === "ttc" || options.compressToWoff2 === false) {
     return `data:${rawMimeType(originalFormat)};base64,${input.toString("base64")}`;
   }
   try {

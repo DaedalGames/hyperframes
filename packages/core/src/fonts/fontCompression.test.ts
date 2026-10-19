@@ -141,7 +141,7 @@ describe("fontToDataUri", () => {
     const compressImpl = vi.fn(async () => Buffer.from("woff2"));
     try {
       const raw = Buffer.from("font-bytes");
-      const options = { cacheDir, compressImpl, compress: false };
+      const options = { cacheDir, compressImpl, compressToWoff2: false };
       expect(await fontToDataUri(raw, "ttf", options)).toBe(
         `data:font/ttf;base64,${raw.toString("base64")}`,
       );
