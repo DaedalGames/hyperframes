@@ -294,6 +294,110 @@ export async function openSettledCompositionPage(
   }
 }
 
+// Serialized into the page (alone, or inside check's overlap grid); the seek-target cascade must stay one function.
+// fallow-ignore-next-line complexity
+export function seekInPage(
+  t: number,
+  fallbackToBridgeAndTimelines: boolean,
+  exactTime: boolean,
+  skipDraws: boolean,
+): void {
+  const getProperty = (target: unknown, key: string): unknown => {
+    if ((typeof target !== "object" || target === null) && typeof target !== "function") {
+      return undefined;
+    }
+    return Reflect.get(target, key);
+  };
+  const call = (fn: unknown, receiver: unknown, args: unknown[]): boolean => {
+    if (typeof fn !== "function") return false;
+    Reflect.apply(fn, receiver, args);
+    return true;
+  };
+
+  const player = Reflect.get(window, "__player");
+  if (!player && !fallbackToBridgeAndTimelines) return;
+
+  const safe = Math.max(0, Number(t) || 0);
+  const renderSeek = getProperty(player, "renderSeek");
+  const playerSeek = getProperty(player, "seek");
+  const hf = Reflect.get(window, "__hf");
+  const bridgeSeek = getProperty(hf, "seek");
+  const gsap = Reflect.get(window, "gsap");
+  const ticker = getProperty(gsap, "ticker");
+
+  // fallow-ignore-next-line complexity
+  const seekTo = (time: number): void => {
+    // Prefer renderSeek because it also runs the runtime's data-start/data-duration
+    // visibility sync; raw timeline seeks leave off-window clips visible to audits.
+    if (call(renderSeek, player, exactTime ? [time, { exact: true }] : [time])) {
+      // Preferred runtime target handled the seek.
+    } else if (fallbackToBridgeAndTimelines && call(bridgeSeek, hf, [time])) {
+      // Producer bridge handled the seek.
+    } else if (call(playerSeek, player, [time])) {
+      // Legacy player target handled the seek.
+    } else if (fallbackToBridgeAndTimelines) {
+      const timelines = Reflect.get(window, "__timelines");
+      if (typeof timelines === "object" && timelines !== null) {
+        for (const key of Object.keys(timelines)) {
+          const timeline = Reflect.get(timelines, key);
+          call(getProperty(timeline, "pause"), timeline, []);
+          call(getProperty(timeline, "seek"), timeline, [time]);
+        }
+      }
+    }
+    call(getProperty(ticker, "tick"), ticker, []);
+  };
+
+  const gateSlot = Symbol.for("hyperframes.webglDrawGate");
+  let gate = Reflect.get(window, gateSlot) as { skip: boolean; skipped: boolean } | undefined;
+  if (skipDraws && !gate) {
+    const installed = { skip: false, skipped: false };
+    for (const name of ["WebGLRenderingContext", "WebGL2RenderingContext"]) {
+      const proto = getProperty(Reflect.get(window, name), "prototype");
+      if (!proto) continue;
+      for (const method of [
+        "clear",
+        "drawArrays",
+        "drawElements",
+        "drawArraysInstanced",
+        "drawElementsInstanced",
+        "drawRangeElements",
+        "blitFramebuffer",
+      ]) {
+        const draw = getProperty(proto, method);
+        if (typeof draw !== "function") continue;
+        Reflect.set(proto, method, function (this: unknown, ...args: unknown[]) {
+          if (!installed.skip) return Reflect.apply(draw, this, args);
+          installed.skipped = true;
+          return undefined;
+        });
+      }
+    }
+    Reflect.set(window, gateSlot, installed);
+    gate = installed;
+  }
+  const seekWithoutDraws = (time: number): void => {
+    if (!gate) return seekTo(time);
+    gate.skip = true;
+    try {
+      seekTo(time);
+    } finally {
+      gate.skip = false;
+    }
+  };
+
+  if (skipDraws) {
+    seekWithoutDraws(safe);
+    return;
+  }
+  // A skipped draw left the canvas stale and a same-time seek redraws nothing: step off first.
+  if (gate?.skipped) {
+    seekWithoutDraws(safe >= 0.001 ? safe - 0.001 : safe + 0.001);
+    gate.skipped = false;
+  }
+  seekTo(safe);
+}
+
 export async function seekCompositionTimeline(
   page: CompositionSeekPage,
   timeSeconds: number,
@@ -304,104 +408,7 @@ export async function seekCompositionTimeline(
   }
 
   await page.evaluate(
-    // Serialized into the page; the seek-target cascade must stay one function.
-    // fallow-ignore-next-line complexity
-    (t: number, fallbackToBridgeAndTimelines: boolean, exactTime: boolean, skipDraws: boolean) => {
-      const getProperty = (target: unknown, key: string): unknown => {
-        if ((typeof target !== "object" || target === null) && typeof target !== "function") {
-          return undefined;
-        }
-        return Reflect.get(target, key);
-      };
-      const call = (fn: unknown, receiver: unknown, args: unknown[]): boolean => {
-        if (typeof fn !== "function") return false;
-        Reflect.apply(fn, receiver, args);
-        return true;
-      };
-
-      const player = Reflect.get(window, "__player");
-      if (!player && !fallbackToBridgeAndTimelines) return;
-
-      const safe = Math.max(0, Number(t) || 0);
-      const renderSeek = getProperty(player, "renderSeek");
-      const playerSeek = getProperty(player, "seek");
-      const hf = Reflect.get(window, "__hf");
-      const bridgeSeek = getProperty(hf, "seek");
-      const gsap = Reflect.get(window, "gsap");
-      const ticker = getProperty(gsap, "ticker");
-
-      // fallow-ignore-next-line complexity
-      const seekTo = (time: number): void => {
-        // Prefer renderSeek because it also runs the runtime's data-start/data-duration
-        // visibility sync; raw timeline seeks leave off-window clips visible to audits.
-        if (call(renderSeek, player, exactTime ? [time, { exact: true }] : [time])) {
-          // Preferred runtime target handled the seek.
-        } else if (fallbackToBridgeAndTimelines && call(bridgeSeek, hf, [time])) {
-          // Producer bridge handled the seek.
-        } else if (call(playerSeek, player, [time])) {
-          // Legacy player target handled the seek.
-        } else if (fallbackToBridgeAndTimelines) {
-          const timelines = Reflect.get(window, "__timelines");
-          if (typeof timelines === "object" && timelines !== null) {
-            for (const key of Object.keys(timelines)) {
-              const timeline = Reflect.get(timelines, key);
-              call(getProperty(timeline, "pause"), timeline, []);
-              call(getProperty(timeline, "seek"), timeline, [time]);
-            }
-          }
-        }
-        call(getProperty(ticker, "tick"), ticker, []);
-      };
-
-      const gateSlot = Symbol.for("hyperframes.webglDrawGate");
-      let gate = Reflect.get(window, gateSlot) as { skip: boolean; skipped: boolean } | undefined;
-      if (skipDraws && !gate) {
-        const installed = { skip: false, skipped: false };
-        for (const name of ["WebGLRenderingContext", "WebGL2RenderingContext"]) {
-          const proto = getProperty(Reflect.get(window, name), "prototype");
-          if (!proto) continue;
-          for (const method of [
-            "clear",
-            "drawArrays",
-            "drawElements",
-            "drawArraysInstanced",
-            "drawElementsInstanced",
-            "drawRangeElements",
-            "blitFramebuffer",
-          ]) {
-            const draw = getProperty(proto, method);
-            if (typeof draw !== "function") continue;
-            Reflect.set(proto, method, function (this: unknown, ...args: unknown[]) {
-              if (!installed.skip) return Reflect.apply(draw, this, args);
-              installed.skipped = true;
-              return undefined;
-            });
-          }
-        }
-        Reflect.set(window, gateSlot, installed);
-        gate = installed;
-      }
-      const seekWithoutDraws = (time: number): void => {
-        if (!gate) return seekTo(time);
-        gate.skip = true;
-        try {
-          seekTo(time);
-        } finally {
-          gate.skip = false;
-        }
-      };
-
-      if (skipDraws) {
-        seekWithoutDraws(safe);
-        return;
-      }
-      // A skipped draw left the canvas stale and a same-time seek redraws nothing: step off first.
-      if (gate?.skipped) {
-        seekWithoutDraws(safe >= 0.001 ? safe - 0.001 : safe + 0.001);
-        gate.skipped = false;
-      }
-      seekTo(safe);
-    },
+    seekInPage,
     timeSeconds,
     options.fallbackToBridgeAndTimelines === true,
     options.exactTime === true,

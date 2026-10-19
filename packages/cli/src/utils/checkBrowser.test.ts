@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // fallow-ignore-file code-duplication
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -92,6 +92,11 @@ const PROJECT: ProjectDir = {
   indexPath: "/project/index.html",
 };
 
+// The overlap grid logs one marker per sample; keep them out of test output.
+beforeEach(() => {
+  vi.spyOn(console, "debug").mockImplementation(() => undefined);
+});
+
 afterEach(() => {
   vi.useRealTimers();
   vi.clearAllMocks();
@@ -168,6 +173,49 @@ it("carries raw browser geometry through the page driver and pipeline", async ()
   ]);
   expect(result.timings).toEqual({ launchSettleMs: 60, seekLoopMs: 40, contrastMs: 0 });
   expect(mocks.serverClose).toHaveBeenCalledOnce();
+});
+
+it("runs the dense overlap grid in one page task, keeping each sample's time on what it logs", async () => {
+  mountCanvasFixture();
+  const page = fakePage();
+  let onConsole: ((message: ReturnType<typeof fakeConsoleMessage>) => void) | undefined;
+  page.on = vi.fn((event: string, handler: typeof onConsole) => {
+    if (event === "console") onConsole = handler;
+  });
+  // CDP delivers the page's console calls in order; forward jsdom's the same way.
+  vi.spyOn(console, "debug").mockImplementation((text: string) => {
+    onConsole?.(fakeConsoleMessage("debug", text));
+  });
+  let evaluateCalls = 0;
+  const evaluate = page.evaluate;
+  page.evaluate = vi.fn(async (...args: unknown[]) => {
+    evaluateCalls += 1;
+    return Reflect.apply(evaluate, page, args);
+  });
+  const denseAudits: number[] = [];
+  const injectScript = page.addScriptTag;
+  page.addScriptTag = vi.fn(async (arg: { content: string }) => {
+    await injectScript(arg);
+    Reflect.set(window, "__hyperframesOverlapAudit", ({ time }: { time: number }) => {
+      if (time !== 5) denseAudits.push(evaluateCalls);
+      if (time === 2.5) onConsole?.(fakeConsoleMessage("error", "thrown at 2.5"));
+      return [];
+    });
+  });
+  installSessionMock(page);
+
+  const result = await runBrowserCheck(
+    PROJECT,
+    { ...DEFAULT_CHECK_OPTIONS, samples: 1, contrast: false },
+    { kind: "none" },
+    runAuditGrid,
+  );
+
+  expect(denseAudits.length).toBeGreaterThan(10);
+  expect(new Set(denseAudits).size).toBe(1);
+  expect(result.runtimeFindings).toContainEqual(
+    expect.objectContaining({ code: "console_error", message: "thrown at 2.5", time: 2.5 }),
+  );
 });
 
 it("uses check --timeout for both navigation and render-ready settling", async () => {
@@ -1004,6 +1052,7 @@ function fakePage() {
       window.eval(content);
     }),
     evaluate: vi.fn(async (callback: unknown, ...args: unknown[]) => {
+      if (typeof callback === "string") return window.eval(callback);
       if (typeof callback !== "function") throw new Error("Expected an evaluate callback");
       return Reflect.apply(callback, window, args);
     }),

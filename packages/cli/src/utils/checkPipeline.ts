@@ -574,11 +574,11 @@ async function collectMotionOverlapSamples(
     ? mergeSampleTimes(overlapTimes.map((time) => time + range[0]))
     : overlapTimes;
   const probeHold = holdProber(driver, collected, range ? range[1] : grid.duration);
+  const gridIssues = await driver.collectOverlapGrid(shiftedTimes.filter((t) => !baseTimes.has(t)));
+  let sample = 0;
   for (const [index, time] of shiftedTimes.entries()) {
     if (baseTimes.has(time)) continue;
-    // Settle-free seek: collectOverlap reads getBoundingClientRect geometry, valid synchronously after setTime, so the dense pass skips the per-seek paint settle.
-    await driver.seekGeometry(time);
-    const issues = await driver.collectOverlap(time);
+    const issues = gridIssues[sample++] ?? [];
     collected.layoutIssues.push(...issues);
     await probeHold(time, shiftedTimes[index + 1] ?? Number.POSITIVE_INFINITY, issues);
   }

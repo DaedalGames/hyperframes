@@ -210,6 +210,8 @@ export interface CheckAuditDriver {
   ): Promise<AnchoredLayoutIssue[]>;
   /** content_overlap only, for the dense re-sampling grid — catches transient text collisions the sparse grid seeks past. */
   collectOverlap(time: number): Promise<AnchoredLayoutIssue[]>;
+  /** collectOverlap after a settle-free seek to each time, one entry per time, in a single page task. */
+  collectOverlapGrid(times: number[]): Promise<AnchoredLayoutIssue[][]>;
   /** Frozen-sweep guard (#U10): an opaque fingerprint of the seeked visual state, from
    * motion-signature.browser.js (shared with motion-sample's liveness). Legacy name kept. */
   collectLayoutGeometry(): Promise<string>;

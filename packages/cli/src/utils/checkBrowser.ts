@@ -16,6 +16,7 @@ import {
   resolveCliChromeGpuMode,
   seekCompositionTimeline,
   waitForPreferredSeekTarget,
+  seekInPage,
 } from "../capture/captureCompositionFrame.js";
 import {
   auditClipDurations,
@@ -211,6 +212,9 @@ export async function runBrowserCheck(
     options.autoProxy,
   );
   let currentTime = 0;
+  const setTime = (time: number) => {
+    currentTime = time;
+  };
   let failure: { kind: "none" } | { kind: "failed"; error: unknown } = { kind: "none" };
   let chromeBrowser: import("puppeteer-core").Browser | undefined;
 
@@ -225,7 +229,7 @@ export async function runBrowserCheck(
       onBrowser: deadline?.ownBrowser,
       onBrowserReady: deadline?.start,
       beforeNavigate: async (page) => {
-        wireRuntimeListeners(page, drafts, () => currentTime);
+        wireRuntimeListeners(page, drafts, () => currentTime, setTime);
         await deadline?.preparePage(page);
       },
     });
@@ -248,9 +252,7 @@ export async function runBrowserCheck(
       const message = tweenTailMessage(tail);
       drafts.push({ code: "gsap_tween_tail", severity: "warning", message, time: tail.later.end });
     }
-    const driver = createPageDriver(page, (time) => {
-      currentTime = time;
-    });
+    const driver = createPageDriver(page, setTime);
     const result = await runGrid(driver, options, motion);
     const broken = await abortedImagesStillBroken(page, drafts);
     return {
@@ -401,10 +403,20 @@ function runtimeInfoFindingCode(text: string): string | null {
     : "media_proxy_fallback";
 }
 
-function wireRuntimeListeners(page: Page, drafts: RuntimeDraft[], currentTime: () => number): void {
+function wireRuntimeListeners(
+  page: Page,
+  drafts: RuntimeDraft[],
+  currentTime: () => number,
+  setTime: (time: number) => void,
+): void {
   page.on("console", (message) => {
     const type = message.type();
     const text = message.text();
+    // The overlap grid announces each sample in the page, so what it logs keeps that sample's time.
+    if (type === "debug" && text.startsWith(SAMPLE_MARKER)) {
+      setTime(Number(text.slice(SAMPLE_MARKER.length)));
+      return;
+    }
     if (type === "error" && !text.startsWith("Failed to load resource")) {
       const location = message.location();
       pushRuntimeDraft(drafts, {
@@ -589,6 +601,7 @@ function createPageDriver(page: Page, setTime: (time: number) => void): CheckAud
     },
     collectLayout: (time, tolerance, layout) => collectLayout(page, time, tolerance, layout),
     collectOverlap: (time) => collectOverlap(page, time),
+    collectOverlapGrid: (times) => collectOverlapGrid(page, times),
     collectLayoutGeometry: () => collectLayoutGeometry(page),
     collectSeekClock: () => collectSeekClock(page),
     collectRotationSample: (time) => collectRotationSample(page, time),
@@ -741,6 +754,73 @@ async function collectOverlap(page: Page, time: number): Promise<AnchoredLayoutI
     { time },
   );
   return anchorLayoutIssues(page, raw.flatMap(parseLayoutIssue));
+}
+
+const SAMPLE_MARKER = "__hfCheckSample ";
+
+interface OverlapGridSample {
+  raw: unknown[];
+  anchors: CheckAnchor[];
+}
+
+// Serialized into the page with its helpers; awaits only the seek barrier, so no frame is painted between samples.
+async function overlapGridInPage(
+  grid: {
+    times: number[];
+    marker: string;
+    fallback: boolean;
+    skipDraws: boolean;
+    videoFrames: boolean;
+  },
+  seek: typeof seekInPage,
+  anchors: typeof anchorsInPage,
+): Promise<OverlapGridSample[]> {
+  const audit = Reflect.get(window, "__hyperframesOverlapAudit");
+  const waitForCompletion = Reflect.get(window, "__hfWaitForSeekCompletion");
+  const samples: OverlapGridSample[] = [];
+  for (const time of grid.times) {
+    console.debug(`${grid.marker}${time}`);
+    seek(time, grid.fallback, false, grid.skipDraws);
+    if (typeof waitForCompletion === "function") {
+      await Reflect.apply(waitForCompletion, window, [{ videoFrames: grid.videoFrames }]);
+    }
+    const result: unknown =
+      typeof audit === "function" ? Reflect.apply(audit, window, [{ time }]) : [];
+    const raw = Array.isArray(result) ? result : [];
+    const zero = { x: 0, y: 0, width: 0, height: 0 };
+    const requests = raw.map((issue) => ({
+      selector: String(Reflect.get(Object(issue), "selector")),
+      time,
+      bbox: zero,
+    }));
+    samples.push({ raw, anchors: anchors(requests) });
+  }
+  return samples;
+}
+
+/** The dense grid's seek + collectOverlap for every time in one page task: a software renderer otherwise paints after each seek. */
+async function collectOverlapGrid(page: Page, times: number[]): Promise<AnchoredLayoutIssue[][]> {
+  if (times.length === 0) return [];
+  const grid = {
+    times,
+    marker: SAMPLE_MARKER,
+    fallback: DENSE_GEOMETRY_SEEK_OPTIONS.fallbackToBridgeAndTimelines,
+    skipDraws: DENSE_GEOMETRY_SEEK_OPTIONS.skipWebglDraws,
+    videoFrames: DENSE_GEOMETRY_SEEK_OPTIONS.waitForVideoFrames,
+  };
+  const samples = (await page.evaluate(
+    `(${overlapGridInPage})(${JSON.stringify(grid)}, ${seekInPage}, ${anchorsInPage})`,
+  )) as OverlapGridSample[];
+  return samples.map(({ raw, anchors }) =>
+    raw.flatMap((value, index) =>
+      parseLayoutIssue(value).map((issue) => ({
+        ...issue,
+        ...(anchors[index] ?? fallbackAnchor(undefined)),
+        bbox: rectToBbox(issue.rect),
+        time: issue.time,
+      })),
+    ),
+  );
 }
 
 async function collectLayoutGeometry(page: Page): Promise<string> {
@@ -949,36 +1029,39 @@ async function anchorLayoutIssues(
 
 async function resolveAnchors(page: Page, requests: AnchorRequest[]): Promise<CheckAnchor[]> {
   if (requests.length === 0) return [];
-  return page.evaluate((values: AnchorRequest[]) => {
-    const root = document.querySelector("[data-composition-id]");
-    return values.map((request) => {
-      let element: Element | null = null;
-      try {
-        element = document.querySelector(request.selector);
-      } catch {
-        element = null;
-      }
-      element ??= root;
-      // Clones the anchor-extraction block in prepareContrast's evaluate() below;
-      // both run inside separate serialized browser closures and can't share a
-      // Node-side helper.
-      // fallow-ignore-next-line code-duplication
-      const dataAttributes: Record<string, string> = {};
-      for (const attribute of Array.from(element?.attributes ?? [])) {
-        if (attribute.name.startsWith("data-")) dataAttributes[attribute.name] = attribute.value;
-      }
-      const source = element
-        ?.closest("[data-composition-file]")
-        ?.getAttribute("data-composition-file");
-      return {
-        selector: element ? request.selector : "[data-composition-id]",
-        dataAttributes,
-        sourceFile: source || "index.html",
-        bbox: request.bbox,
-        time: request.time,
-      };
-    });
-  }, requests);
+  return page.evaluate(anchorsInPage, requests);
+}
+
+// Serialized into the page, alone or inside the overlap grid.
+function anchorsInPage(values: AnchorRequest[]): CheckAnchor[] {
+  const root = document.querySelector("[data-composition-id]");
+  return values.map((request) => {
+    let element: Element | null = null;
+    try {
+      element = document.querySelector(request.selector);
+    } catch {
+      element = null;
+    }
+    element ??= root;
+    // Clones the anchor-extraction block in prepareContrast's evaluate() below;
+    // both run inside separate serialized browser closures and can't share a
+    // Node-side helper.
+    // fallow-ignore-next-line code-duplication
+    const dataAttributes: Record<string, string> = {};
+    for (const attribute of Array.from(element?.attributes ?? [])) {
+      if (attribute.name.startsWith("data-")) dataAttributes[attribute.name] = attribute.value;
+    }
+    const source = element
+      ?.closest("[data-composition-file]")
+      ?.getAttribute("data-composition-file");
+    return {
+      selector: element ? request.selector : "[data-composition-id]",
+      dataAttributes,
+      sourceFile: source || "index.html",
+      bbox: request.bbox,
+      time: request.time,
+    };
+  });
 }
 
 async function resolveRootAnchor(page: Page): Promise<CheckAnchor> {
