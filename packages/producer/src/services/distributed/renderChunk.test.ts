@@ -844,7 +844,7 @@ describe("extractDeferredVideoFramesForChunk", () => {
     extractDeferredVideoFramesForChunk({
       planDir: root,
       planVideos: bigVideos(),
-      slice: { index: 5, startFrame: 1800, endFrame: 1815 },
+      frames: frameSpan(1800, 1815),
       fps: { num: 30, den: 1 },
       outputRoot,
       cfg: {},
@@ -921,7 +921,7 @@ describe("extractDeferredVideoFramesForChunk", () => {
       extractDeferredVideoFramesForChunk({
         planDir,
         planVideos: planVideos(false),
-        slice: { index: 0, startFrame: 0, endFrame: 5 },
+        frames: frameSpan(0, 5),
         fps: { num: 30, den: 1 },
         outputRoot: join(root, "chunk-stray-url"),
         cfg: {},
