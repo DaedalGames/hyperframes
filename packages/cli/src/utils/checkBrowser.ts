@@ -312,11 +312,10 @@ function createRuntimeClock(): RuntimeClock {
 
 const SAMPLING_BROWSER_BYTES = 250 * 1024 * 1024;
 
-/** Chromes the sample grid splits over: one per spare core and 250 MB free, at most two. */
+/** Chromes the sample grid splits over: one per spare core and 250 MB free (a container's limit counts), at most two. */
 export function samplingBrowserCount(
   options: CheckOptions,
   cores = os.availableParallelism(),
-  // freemem() is the host's; availableMemory() also honours a container's memory limit.
   free = Math.min(os.freemem(), process.availableMemory()),
 ): number {
   if (options.at?.length === 1) return 1;
@@ -398,7 +397,6 @@ const draftKey = (draft: RuntimeDraft) => `${draft.code} ${draft.time} ${draft.m
 /**
  * The first page's drafts with the helper's sample-loop drafts merged in by time, as one page seeking every
  * sample would have logged them; the helper's load is the first page's, and what both logged at one time counts once.
- * The sort is stable and also orders samples the first page redid for a failed helper.
  */
 export function mergeHelperDrafts(primary: SampleWindow, helper: SampleWindow): RuntimeDraft[] {
   const window = ({ drafts, start, end }: SampleWindow) =>
