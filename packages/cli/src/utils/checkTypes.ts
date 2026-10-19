@@ -77,6 +77,7 @@ export interface CheckAnchor {
 }
 
 export interface CheckFinding extends CheckAnchor {
+  timeRange?: [number, number];
   code: string;
   severity: CheckSeverity;
   message: string;

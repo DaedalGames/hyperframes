@@ -70,10 +70,19 @@ interface RuntimeDraft {
   severity: CheckSeverity;
   message: string;
   time: number;
+  timeRange?: [number, number];
   url?: string;
   line?: number;
   count?: number;
   abortedImage?: boolean;
+}
+
+type RuntimeStamp = Pick<RuntimeDraft, "time" | "timeRange">;
+
+interface RuntimeClock {
+  now(): RuntimeStamp;
+  at(time: number): void;
+  during(range: [number, number]): void;
 }
 
 interface AnchorRequest {
@@ -211,9 +220,15 @@ export async function runBrowserCheck(
     [],
     options.autoProxy,
   );
-  let currentTime = 0;
-  const setTime = (time: number) => {
-    currentTime = time;
+  let stamp: RuntimeStamp = { time: 0 };
+  const clock: RuntimeClock = {
+    now: () => stamp,
+    at: (time) => {
+      stamp = { time };
+    },
+    during: (range) => {
+      stamp = { time: range[0], timeRange: range };
+    },
   };
   let failure: { kind: "none" } | { kind: "failed"; error: unknown } = { kind: "none" };
   let chromeBrowser: import("puppeteer-core").Browser | undefined;
@@ -229,7 +244,7 @@ export async function runBrowserCheck(
       onBrowser: deadline?.ownBrowser,
       onBrowserReady: deadline?.start,
       beforeNavigate: async (page) => {
-        wireRuntimeListeners(page, drafts, () => currentTime, setTime);
+        wireRuntimeListeners(page, drafts, clock);
         await deadline?.preparePage(page);
       },
     });
@@ -252,7 +267,7 @@ export async function runBrowserCheck(
       const message = tweenTailMessage(tail);
       drafts.push({ code: "gsap_tween_tail", severity: "warning", message, time: tail.later.end });
     }
-    const driver = createPageDriver(page, setTime);
+    const driver = createPageDriver(page, clock);
     const result = await runGrid(driver, options, motion);
     const broken = await abortedImagesStillBroken(page, drafts);
     return {
@@ -403,13 +418,8 @@ function runtimeInfoFindingCode(text: string): string | null {
     : "media_proxy_fallback";
 }
 
-function wireRuntimeListeners(
-  page: Page,
-  drafts: RuntimeDraft[],
-  currentTime: () => number,
-  setTime: (time: number) => void,
-): void {
-  followSampleTimeMarkers(page, setTime);
+function wireRuntimeListeners(page: Page, drafts: RuntimeDraft[], clock: RuntimeClock): void {
+  followSampleTimeMarkers(page, clock.at);
   page.on("console", (message) => {
     const type = message.type();
     const text = message.text();
@@ -419,7 +429,7 @@ function wireRuntimeListeners(
         code: "console_error",
         severity: "error",
         message: text,
-        time: currentTime(),
+        ...clock.now(),
         url: location.url,
         line: location.lineNumber,
       });
@@ -430,7 +440,7 @@ function wireRuntimeListeners(
         code: webGpuFailure ? "webgpu_runtime_error" : "console_warning",
         severity: webGpuFailure ? "error" : "warning",
         message: text,
-        time: currentTime(),
+        ...clock.now(),
         url: location.url,
         line: location.lineNumber,
       });
@@ -442,7 +452,7 @@ function wireRuntimeListeners(
         code,
         severity: "info",
         message: text,
-        time: currentTime(),
+        ...clock.now(),
         url: location.url,
         line: location.lineNumber,
       });
@@ -457,10 +467,10 @@ function wireRuntimeListeners(
       code: "page_error",
       severity: "error",
       message,
-      time: currentTime(),
+      ...clock.now(),
     });
   });
-  wireNetworkListeners(page, drafts, currentTime);
+  wireNetworkListeners(page, drafts, clock);
 }
 
 /** Check's scrubs cancel image loads: an aborted image failed only if an `<img>` shows it and its decode fails. */
@@ -541,7 +551,7 @@ async function abortedImagesStillBroken(page: Page, drafts: RuntimeDraft[]): Pro
   return new Set(broken);
 }
 
-function wireNetworkListeners(page: Page, drafts: RuntimeDraft[], currentTime: () => number): void {
+function wireNetworkListeners(page: Page, drafts: RuntimeDraft[], clock: RuntimeClock): void {
   page.on("requestfailed", (request) => {
     const url = request.url();
     if (url.includes("favicon") || url.startsWith("data:")) return;
@@ -551,7 +561,7 @@ function wireNetworkListeners(page: Page, drafts: RuntimeDraft[], currentTime: (
       code: "request_failed",
       severity: "error",
       message: `Failed to load ${urlPath(url)}: ${failure ?? "net::ERR_FAILED"}`,
-      time: currentTime(),
+      ...clock.now(),
       url,
       abortedImage: failure === "net::ERR_ABORTED" && request.resourceType() === "image",
     });
@@ -565,13 +575,13 @@ function wireNetworkListeners(page: Page, drafts: RuntimeDraft[], currentTime: (
       code: "http_error",
       severity: "error",
       message: `${response.status()} loading ${urlPath(url)}`,
-      time: currentTime(),
+      ...clock.now(),
       url,
     });
   });
 }
 
-function createPageDriver(page: Page, setTime: (time: number) => void): CheckAuditDriver {
+function createPageDriver(page: Page, clock: RuntimeClock): CheckAuditDriver {
   return {
     initialize: (contrast) => injectAuditScripts(page, contrast),
     matchComponents: (components, findings) =>
@@ -584,7 +594,7 @@ function createPageDriver(page: Page, setTime: (time: number) => void): CheckAud
       page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })),
     findAmbiguousSelectors: (selectors) => findAmbiguousSelectors(page, selectors),
     seek: async (time, screenshotFollows) => {
-      setTime(time);
+      clock.at(time);
       await seekCompositionTimeline(
         page,
         time,
@@ -592,12 +602,17 @@ function createPageDriver(page: Page, setTime: (time: number) => void): CheckAud
       );
     },
     seekGeometry: async (time) => {
-      setTime(time);
+      clock.at(time);
       await seekCompositionTimeline(page, time, DENSE_GEOMETRY_SEEK_OPTIONS);
     },
     collectLayout: (time, tolerance, layout) => collectLayout(page, time, tolerance, layout),
     collectOverlap: (time) => collectOverlap(page, time),
-    collectOverlapGrid: (times) => collectOverlapGrid(page, times),
+    collectOverlapGrid: async (times) => {
+      const issues = await collectOverlapGrid(page, times);
+      // What a grid sample queued for later lands after the grid, so it gets the grid's span, not its last time.
+      if (times.length > 0) clock.during([times[0] ?? 0, times.at(-1) ?? 0]);
+      return issues;
+    },
     collectLayoutGeometry: () => collectLayoutGeometry(page),
     collectSeekClock: () => collectSeekClock(page),
     collectRotationSample: (time) => collectRotationSample(page, time),
@@ -1482,6 +1497,7 @@ function runtimeFinding(draft: RuntimeDraft, root: CheckAnchor): CheckFinding {
     sourceFile: root.sourceFile,
     bbox: root.bbox,
     time: draft.time,
+    ...(draft.timeRange ? { timeRange: draft.timeRange } : {}),
     url: draft.url,
     line: draft.line,
   };

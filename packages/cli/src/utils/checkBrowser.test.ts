@@ -193,8 +193,12 @@ it("runs the dense overlap grid in one page task, keeping each sample's time on 
     onConsole(fakeConsoleMessage("debug", text));
   });
   let evaluateCalls = 0;
+  let afterGrid = false;
   const evaluate = page.evaluate;
   page.evaluate = vi.fn(async (...args: unknown[]) => {
+    // A timer a sample queued fires once the grid's task ends, before Node's next command.
+    if (afterGrid) onConsole(fakeConsoleMessage("error", "queued during the grid"));
+    afterGrid = typeof args[0] === "string" && args[0].includes("__hfCheckSample");
     evaluateCalls += 1;
     return Reflect.apply(evaluate, page, args);
   });
@@ -233,6 +237,12 @@ it("runs the dense overlap grid in one page task, keeping each sample's time on 
   expect(result.runtimeFindings).toContainEqual(
     expect.objectContaining({ code: "console_error", message: "thrown at 2.5", time: 2.5 }),
   );
+  expect(result.runtimeFindings).toContainEqual(
+    expect.objectContaining({ message: "queued during the grid", time: 0, timeRange: [0, 10] }),
+  );
+  expect(
+    result.runtimeFindings.find((finding) => finding.message === "thrown at 2.5"),
+  ).not.toHaveProperty("timeRange");
   expect(result.layoutIssues).toContainEqual(
     expect.objectContaining({
       code: "content_overlap",
