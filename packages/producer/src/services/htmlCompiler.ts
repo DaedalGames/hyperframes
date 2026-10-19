@@ -1850,7 +1850,7 @@ async function embedLocalFontFaces(html: string, projectDir: string): Promise<st
               embeddedPaths.add(localPath);
               continue;
             }
-            dataUri = await toDataUri(font.buffer, ext);
+            dataUri = await toDataUri(font.buffer, ext, { compressToWoff2: false });
             dataUriByAbsolutePath.set(absPath, dataUri);
             defaultLogger.info(
               `[Compiler] Embedded local font file: ${localPath} (${(font.buffer.length / 1024).toFixed(0)} KB → data URI)`,

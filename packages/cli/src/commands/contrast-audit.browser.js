@@ -1,49 +1,14 @@
-// Browser-side WCAG contrast audit.
-// Loaded as a raw string and injected via page.addScriptTag to avoid
-// esbuild mangling (page.evaluate serializes functions; __name helpers break).
-//
-// Two-phase API — see packages/cli/src/commands/validate.ts's
-// runContrastAudit() for the calling contract:
-//
-//   1. window.__contrastAuditPrepare() walks the DOM for text-bearing
-//      elements, computes each one's foreground paint (CSS `color`, or SVG
-//      `fill` for SVG text — fill and color are independent CSS properties
-//      in SVG), and HIDES that element's own text paint (color/fill set to
-//      transparent). Hiding is layout-neutral — it doesn't reflow anything —
-//      so the caller can screenshot the frame right after with the glyphs
-//      invisible but everything else unchanged. Returns the candidate list
-//      (selector, text, fg, bbox, font metrics).
-//   2. Caller takes ONE screenshot (page.screenshot()) — same number of
-//      screenshots as before, just moved to after prepare() instead of
-//      before it.
-//   3. window.__contrastAuditFinish(imgBase64, time, candidates) restores
-//      the original paint FIRST (so a slow/failed decode can't leave the
-//      page's text stuck invisible), then decodes the screenshot and, for
-//      each candidate, samples the real composited pixels directly INSIDE
-//      its own bounding box for the true background.
-//
-// Why sample inside the box instead of the 4px ring just outside it (the
-// previous approach): the ring is a proximity heuristic that's wrong
-// whenever what's immediately outside the text differs from what's actually
-// behind it — a neighboring panel/component just past the text's edge, a
-// rounded pill/button whose corner falls inside the ring, a
-// backdrop-filter-blurred glass panel sized only a couple pixels larger
-// than the text, or a translucent decoration that only partially overlaps
-// the ring (or sits entirely inside the bbox, never touching the ring at
-// all). Hiding the glyphs and sampling their own box side-steps all of
-// that: it reads the exact pixels that were behind them.
-//
-// window.__contrastAuditRestoreIfPending() is a safety net: if the caller's
-// screenshot or finish() call throws between prepare() and finish(), calling
-// this restores any still-hidden paint so the next sample in the loop
-// doesn't audit a page with stale invisible text. It's a no-op after a
-// normal finish() call.
-//
-// NOTE: this logic (DOM-walk, foreground/paint-hide, background sampling)
-// plus the pure WCAG math (relLum, wcagRatio, median) is duplicated in
-// skills/hyperframes-creative/scripts/contrast-report.mjs — keep in sync.
-// The pure "which rect to sample" decision is also mirrored in
-// contrast-sample.ts (unit-tested there since this file can't import).
+// Browser-side WCAG contrast audit, injected as a raw string so esbuild can't mangle it.
+// __contrastAuditPrepare() hides each text element's own paint (layout-neutral) and returns candidates;
+// the caller takes one screenshot, full frame or clipped to the candidates (collectContrast in checkBrowser.ts);
+// __contrastAuditFinish(png, time, candidates, region) restores paint first, then samples inside each box.
+
+// Sampling inside the box reads the exact pixels behind the glyphs; a ring outside the text misreads
+// neighbouring panels, rounded pills, blurred glass and partial decorations.
+// __contrastAuditRestoreIfPending() restores hidden paint if the screenshot or finish() throws.
+
+// Duplicated in skills/hyperframes-creative/scripts/contrast-report.mjs (keep in sync); the
+// "which rect to sample" decision is mirrored and unit-tested in contrast-sample.ts.
 
 /* eslint-disable */
 window.__contrastAuditPrepare = function () {
@@ -394,7 +359,7 @@ window.__contrastAuditRestoreIfPending = function () {
   __contrastAuditRestoreAll();
 };
 
-window.__contrastAuditFinish = async function (imgBase64, time, candidates) {
+window.__contrastAuditFinish = async function (imgBase64, time, candidates, region) {
   function relLum(r, g, b) {
     function ch(v) {
       var s = v / 255;
@@ -438,8 +403,11 @@ window.__contrastAuditFinish = async function (imgBase64, time, candidates) {
   if (!ctx) return [];
   ctx.drawImage(img, 0, 0);
   var px = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-  var w = canvas.width;
-  var h = canvas.height;
+  // A clipped shot holds `region.clip` of the frame: clamp to the frame, read at the offset.
+  var w = region ? region.frameWidth : canvas.width;
+  var h = region ? region.frameHeight : canvas.height;
+  var ox = region ? region.clip.x : 0;
+  var oy = region ? region.clip.y : 0;
 
   var out = [];
   for (var ci = 0; ci < candidates.length; ci++) {
@@ -467,7 +435,7 @@ window.__contrastAuditFinish = async function (imgBase64, time, candidates) {
       aa = [];
     for (var y = y0; y <= y1; y += stepY) {
       for (var x = x0; x <= x1; x += stepX) {
-        var idx = (y * w + x) * 4;
+        var idx = ((y - oy) * canvas.width + (x - ox)) * 4;
         rr.push(px[idx]);
         gg.push(px[idx + 1]);
         bb.push(px[idx + 2]);

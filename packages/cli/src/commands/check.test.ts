@@ -158,7 +158,7 @@ function fakeDriver(overrides: Partial<CheckAuditDriver> = {}): CheckAuditDriver
   // by accident in unrelated scenarios — tests that want it force a constant
   // via `collectLayoutGeometry: vi.fn(async () => "same")`.
   let geometryCallCount = 0;
-  return {
+  const driver: CheckAuditDriver = {
     initialize: vi.fn(async (_contrast: boolean) => undefined),
     getDuration: vi.fn(async () => 9),
     hasNoTimelineDeclaration: vi.fn(async () => false),
@@ -183,8 +183,17 @@ function fakeDriver(overrides: Partial<CheckAuditDriver> = {}): CheckAuditDriver
       })),
     ),
     collectContrast: vi.fn(async (_time: number) => ({ entries: [], pngBase64: PNG_BASE64 })),
+    collectOverlapGrid: vi.fn(async (times: number[]) => {
+      const issues: AnchoredLayoutIssue[][] = [];
+      for (const time of times) {
+        await driver.seekGeometry(time);
+        issues.push(await driver.collectOverlap(time));
+      }
+      return issues;
+    }),
     ...overrides,
   };
+  return driver;
 }
 
 interface GeometryFixture {
@@ -1006,6 +1015,16 @@ it("keeps contrast and snapshot sampling on the pre-gate layout grid", async () 
   expect(report.contrast.samples).toEqual([5]);
   expect(collectContrast).toHaveBeenCalledTimes(1);
   expect(collectContrast).toHaveBeenCalledWith(5);
+});
+
+it("waits for paint only on the grid seeks a contrast screenshot follows", async () => {
+  const driver = fakeDriver({ getDuration: vi.fn(async () => 10) });
+  await runScenario(driver, { samples: 1, captionZone: { x0: 0, y0: 0.8, x1: 1, y1: 1 } });
+
+  expect(vi.mocked(driver.seek).mock.calls).toEqual([
+    [5, true],
+    [10, false],
+  ]);
 });
 
 function layoutFindingOf(

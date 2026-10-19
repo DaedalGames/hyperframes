@@ -31,6 +31,7 @@ const sharedOpts = {
   format: "esm",
   minify: false,
   external: [
+    "@aws-sdk/client-lambda",
     "@aws-sdk/client-s3",
     "@aws-sdk/client-sfn",
     "@aws-sdk/s3-request-presigner",
