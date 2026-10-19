@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -56,7 +56,8 @@ describe("whisper transcribe with a signal", () => {
     "stops on abort while the audio track probe is still running",
     async () => {
       const hang = join(dir, "hang.sh");
-      writeFileSync(hang, "#!/bin/sh\nexec sleep 60\n");
+      const asked = join(dir, "asked.log");
+      writeFileSync(hang, `#!/bin/sh\necho "$*" >> "${asked}"\nexec sleep 60\n`);
       chmodSync(hang, 0o755);
       vi.stubEnv("HYPERFRAMES_FFPROBE_PATH", hang);
       vi.stubEnv("HYPERFRAMES_FFMPEG_PATH", hang);
@@ -68,6 +69,9 @@ describe("whisper transcribe with a signal", () => {
       controller.abort(reason);
 
       await expect(preparing).rejects.toBe(reason);
+      expect(readFileSync(asked, { encoding: "utf8", flag: "a+" })).not.toContain(
+        "format=duration",
+      );
     },
   );
 });

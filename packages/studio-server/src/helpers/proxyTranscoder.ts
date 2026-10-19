@@ -25,7 +25,7 @@ import { mkdirWithinProject, realpath, realProjectRoot } from "./safePath.js";
  * dropped from the queue or its ffmpeg is killed.
  */
 
-export const PROXY_PARAMS_VERSION = "v5";
+export const PROXY_PARAMS_VERSION = "v6";
 
 export const CACHE_DIR_NAME = ".transcode-cache";
 
@@ -417,7 +417,7 @@ function stderrReason(stderrTail: string): string {
 }
 
 function streamMaps(metadata: MediaMetadata): string[] {
-  if (metadata.probeError) return [];
+  if (metadata.probeError || metadata.kind !== "video") return [];
   const audio = metadata.audioTrack === undefined ? [] : ["-map", `0:a:${metadata.audioTrack}`];
   return ["-map", "0:V:0?", ...audio];
 }

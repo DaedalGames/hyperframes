@@ -574,6 +574,48 @@ describe("resolveProxy", () => {
     60_000,
   );
 
+  it.skipIf(!realFfmpeg || !findFfBinary("ffprobe") || process.platform === "win32")(
+    "keeps the sound of a symlinked clip whose target has no extension",
+    async () => {
+      vi.resetModules();
+      vi.doUnmock("./mediaMetadata.js");
+      const { resolveProxy } = await import("./proxyTranscoder.js");
+      const projectDir = tmpProject();
+      const blob = join(projectDir, "blob");
+      execFileSync(realFfmpeg!, [
+        "-v",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc2=size=64x64:rate=10:duration=0.5",
+        "-f",
+        "lavfi",
+        "-i",
+        "sine=frequency=440:duration=0.5",
+        "-c:v",
+        "libx264",
+        "-c:a",
+        "aac",
+        "-f",
+        "mov",
+        "-y",
+        blob,
+      ]);
+      const clip = join(projectDir, "clip.mov");
+      symlinkSync(blob, clip);
+
+      const proxyPath = await resolveProxy(projectDir, clip);
+      const streams = execFileSync(
+        findFfBinary("ffprobe")!,
+        ["-v", "error", "-show_entries", "stream=codec_name", "-of", "csv=p=0", "--", proxyPath],
+        { encoding: "utf8" },
+      );
+      expect(streams.trim().split("\n")).toEqual(["h264", "aac"]);
+    },
+    60_000,
+  );
+
   it("dedupes two concurrent same-key calls to one spawn", async () => {
     const { spawn, calls } = createSpawnSpy();
     const { resolveProxy } = await loadModule(spawn, FFMPEG_PATH);
