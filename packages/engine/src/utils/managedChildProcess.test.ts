@@ -48,7 +48,7 @@ describe("ManagedChildProcess", () => {
     child.emit("close", 1, null);
 
     const { stderr } = await managed.wait();
-    expect(stderr).toContain("X-Amz-Credential=… -t 0.5");
+    expect(stderr).toBe(" -t 0.5");
     for (const leaked of ["secret", "AKID"]) expect(stderr).not.toContain(leaked);
   });
 
