@@ -279,7 +279,7 @@ describe("resolveProxy", () => {
         (...args) => Object.assign(spawn(...args), { pid: 4242, kill: vi.fn(() => true) }),
         FFMPEG_PATH,
       );
-      const projectDir = tmpProject();
+      const projectDir = realpathSync(tmpProject());
       const [seek, waited] = ["sparse.mp4", "hevc.mov"].map((name) => {
         const sourcePath = join(projectDir, name);
         writeFileSync(sourcePath, name);
@@ -297,7 +297,7 @@ describe("resolveProxy", () => {
         calls.forEach((call) => succeed(call));
         await Promise.all(copies);
       };
-      return { transcoder, signals, finish };
+      return { transcoder, signals, finish, projectDir, seek: seek! };
     }
 
     afterEach(() => vi.useRealTimers());
@@ -340,6 +340,51 @@ describe("resolveProxy", () => {
       await finish();
     });
 
+    it("frees a stopped copy's slot for a needed copy, and resumes stopped copies only into free slots", async () => {
+      vi.useFakeTimers();
+      const { spawn, calls } = createSpawnSpy();
+      const transcoder = await loadModule(
+        (...args) => Object.assign(spawn(...args), { pid: 4242, kill: vi.fn(() => true) }),
+        FFMPEG_PATH,
+      );
+      const projectDir = tmpProject();
+      const source = (name: string) => {
+        writeFileSync(join(projectDir, name), name);
+        return join(projectDir, name);
+      };
+      const copies = ["a.mp4", "b.mp4"].map((name) =>
+        transcoder.resolveProxy(projectDir, source(name), "h264", box, { background: true }),
+      );
+      await flush();
+      const signals = (index: number) =>
+        (calls[index] as Killable).proc.kill.mock.calls.map(([sig]) => sig);
+
+      transcoder.notePreviewPlaying(true);
+      copies.push(transcoder.resolveProxy(projectDir, source("prores.mov"), "h264", box));
+      await flush();
+      expect(calls).toHaveLength(MAX_CONCURRENT + 1);
+
+      transcoder.notePreviewPlaying(false);
+      expect([signals(0), signals(1)]).toEqual([["SIGSTOP", "SIGCONT"], ["SIGSTOP"]]);
+      succeed(calls[2]!);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(signals(1)).toEqual(["SIGSTOP", "SIGCONT"]);
+      calls.forEach((call) => succeed(call));
+      await Promise.all(copies);
+    });
+
+    it("resumes a stopped background copy as soon as a viewer asks for it", async () => {
+      const { transcoder, signals, finish, projectDir, seek } = await startCopies();
+      transcoder.notePreviewPlaying(true);
+      expect(signals("sparse.mp4")).toEqual(["SIGSTOP"]);
+
+      const asked = transcoder.resolveProxy(projectDir, seek, "h264", box);
+      expect(signals("sparse.mp4")).toEqual(["SIGSTOP", "SIGCONT"]);
+      transcoder.notePreviewPlaying(false);
+      await finish();
+      await asked;
+    });
+
     it("never signals on Windows, where Node would kill the copy instead", async () => {
       const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
       Object.defineProperty(process, "platform", { ...platform, value: "win32" });
@@ -376,6 +421,7 @@ describe("resolveProxy", () => {
         calls: calls as Array<SpawnCall & { proc: { kill: ReturnType<typeof vi.fn> } }>,
         copyAt,
         pathAt,
+        projectDir,
       };
     }
 
@@ -392,6 +438,35 @@ describe("resolveProxy", () => {
       succeed(calls[0]!);
       await expect(smaller).resolves.toBe(pathAt(large));
       await expect(larger).resolves.toBe(pathAt(large));
+    });
+
+    it("moves the larger queued copy up when a priority ask is served by it", async () => {
+      const { transcoder, calls, copyAt, projectDir } = await source();
+      const others = ["fill-1.mp4", "fill-2.mp4", "other.mp4"].map((name) => {
+        writeFileSync(join(projectDir, name), name);
+        return transcoder.resolveProxy(projectDir, join(projectDir, name), "h264", small);
+      });
+      await flush();
+      const larger = copyAt(large);
+      const asked = transcoder.resolveProxy(
+        projectDir,
+        join(projectDir, "clip.mp4"),
+        "h264",
+        small,
+        {
+          priority: true,
+        },
+      );
+      await flush();
+      expect(calls).toHaveLength(MAX_CONCURRENT);
+
+      succeed(calls[0]!);
+      await flush();
+      expect(calls[2]!.args.some((arg) => arg.endsWith("clip.mp4"))).toBe(true);
+      calls.forEach((call) => succeed(call));
+      await flush();
+      calls.forEach((call) => succeed(call));
+      await Promise.all([...others, larger, asked]);
     });
 
     it("stops a smaller copy being made when a larger box is asked, and makes one at the larger box", async () => {

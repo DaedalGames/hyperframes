@@ -300,6 +300,9 @@ interface ProxyJob {
   callers: number;
   /** Set while the job waits for a slot. */
   queued?: { start: () => void; drop: () => void };
+  /** Counted in activeTranscodes; a stopped background copy gives its slot back. */
+  holdsSlot?: boolean;
+  stopped?: boolean;
 }
 
 class ProxyDroppedError extends ProxyTranscodeError {
@@ -323,16 +326,21 @@ function dequeue(job: ProxyJob): void {
   if (index !== -1) waitQueue.splice(index, 1);
 }
 
+function takeSlot(job: ProxyJob): void {
+  job.holdsSlot = true;
+  activeTranscodes++;
+}
+
 function acquireSlot(job: ProxyJob): Promise<void> {
   if (activeTranscodes < MAX_CONCURRENT_TRANSCODES) {
-    activeTranscodes++;
+    takeSlot(job);
     return Promise.resolve();
   }
   return new Promise((resolveSlot, reject) => {
     job.queued = {
       start: () => {
         job.queued = undefined;
-        activeTranscodes++;
+        takeSlot(job);
         resolveSlot();
       },
       drop: () => {
@@ -350,7 +358,9 @@ function queueIsFull(): boolean {
   return activeTranscodes >= MAX_CONCURRENT_TRANSCODES && waitQueue.length >= MAX_QUEUED_TRANSCODES;
 }
 
-function releaseSlot(): void {
+function releaseSlot(job: ProxyJob): void {
+  if (!job.holdsSlot) return;
+  job.holdsSlot = false;
   activeTranscodes--;
   waitQueue.shift()?.queued?.start();
 }
@@ -361,6 +371,14 @@ function prioritize(job: ProxyJob): void {
   if (!job.queued) return;
   dequeue(job);
   enqueue(job);
+}
+
+/** A caller's ask lifts the copy it joins: priority moves it up the queue, a foreground ask stops it yielding. */
+function raise(job: ProxyJob, options: ResolveProxyOptions): void {
+  if (options.priority) prioritize(job);
+  if (options.background || !job.background) return;
+  job.background = false;
+  applyHold();
 }
 
 function leave(job: ProxyJob): void {
@@ -374,7 +392,7 @@ function leave(job: ProxyJob): void {
 const PREVIEW_PLAYING_LEASE_MS = 15_000;
 let previewPlayingUntil = 0;
 const runningExports = new Set<{ status: string }>();
-const backgroundCopies = new Map<ChildProcess, boolean>();
+const backgroundCopies = new Map<ChildProcess, ProxyJob>();
 let holdTimer: NodeJS.Timeout | undefined;
 
 function backgroundCopiesHeld(): boolean {
@@ -382,17 +400,31 @@ function backgroundCopiesHeld(): boolean {
   return runningExports.size > 0 || Date.now() < previewPlayingUntil;
 }
 
+// A stopped copy frees its slot so a needed copy never waits behind it, and resumes only into a free one.
 function applyHold(): void {
   if (process.platform === "win32") return;
   const held = backgroundCopiesHeld();
-  for (const [proc, stopped] of backgroundCopies) {
-    if (stopped !== held && proc.kill(held ? "SIGSTOP" : "SIGCONT"))
-      backgroundCopies.set(proc, held);
+  for (const [proc, job] of backgroundCopies) {
+    if (held && job.background) stopCopy(proc, job);
+    else resumeCopy(proc, job);
   }
 }
 
-function holdWhileBusy(proc: ChildProcess): void {
-  backgroundCopies.set(proc, false);
+function stopCopy(proc: ChildProcess, job: ProxyJob): void {
+  if (job.stopped || !proc.kill("SIGSTOP")) return;
+  job.stopped = true;
+  releaseSlot(job);
+}
+
+function resumeCopy(proc: ChildProcess, job: ProxyJob): void {
+  if (!job.stopped || activeTranscodes >= MAX_CONCURRENT_TRANSCODES) return;
+  job.stopped = false;
+  takeSlot(job);
+  proc.kill("SIGCONT");
+}
+
+function holdWhileBusy(proc: ChildProcess, job: ProxyJob): void {
+  backgroundCopies.set(proc, job);
   applyHold();
   holdTimer ??= setInterval(applyHold, 1000).unref();
   proc.once("close", () => {
@@ -429,7 +461,7 @@ function superviseEncoder(proc: ChildProcess, outputPath: string, job?: ProxyJob
   if (!job) return;
   job.stop = () => proc.kill("SIGKILL");
   if (job.replaced) job.stop();
-  if (job.background) holdWhileBusy(proc);
+  if (job.background) holdWhileBusy(proc, job);
 }
 
 /** The preview says it is playing (repeated while it plays) or paused. */
@@ -747,7 +779,7 @@ async function transcodeToCache(
       if (existsSync(tempPath)) unlinkSync(tempPath);
     }
   } finally {
-    releaseSlot();
+    releaseSlot(job);
   }
 }
 
@@ -792,6 +824,7 @@ export async function resolveProxy(
   const sourceKey = buildProxySourceKey(source, variant);
   const pending = box ? pendingBoxedCopy(sourceKey) : undefined;
   if (box && pending?.job.box && covers(pending.job.box, box)) {
+    raise(pending.job, options);
     return joinJob(pending.promise, pending.job, options.signal);
   }
   const target = box && pending?.job.box ? largerOf(box, pending.job.box) : box;
@@ -837,7 +870,7 @@ export async function resolveProxy(
     entry = { promise, job };
     inFlight.set(cachePath, entry);
   }
-  if (options.priority) prioritize(entry.job);
+  raise(entry.job, options);
   return joinJob(entry.promise, entry.job, options.signal);
 }
 
