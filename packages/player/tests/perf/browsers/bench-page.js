@@ -43,6 +43,19 @@ window.__hfBench = async function bench(cfg) {
         `${v.currentSrc.split("/").pop()}: ${v.error.code} ${v.error.message || ""}`.trim(),
       );
 
+  // The composition's own rAF callbacks (the runtime tick) are timed, so work splits into script and rendering.
+  let compositionScriptMs = 0;
+  const compositionRaf = win.requestAnimationFrame.bind(win);
+  win.requestAnimationFrame = (callback) =>
+    compositionRaf((ts) => {
+      const start = now();
+      try {
+        callback(ts);
+      } finally {
+        compositionScriptMs += now() - start;
+      }
+    });
+
   // A message posted from a rAF callback is delivered after that frame's style, layout and paint,
   // so (delivery - callback start) is the frame's main-thread work, runtime tick included.
   function recordFrames(durationMs) {
@@ -50,13 +63,17 @@ window.__hfBench = async function bench(cfg) {
     const channel = new MessageChannel();
     let pending = null;
     channel.port1.onmessage = () => {
-      if (pending) pending.work = now() - pending.start;
+      if (pending) {
+        pending.work = now() - pending.start;
+        pending.script = compositionScriptMs;
+      }
+      compositionScriptMs = 0;
       pending = null;
     };
     return new Promise((resolve) => {
       const end = now() + durationMs;
       function tick(ts) {
-        const frame = { ts, start: now(), work: null, comp: runtime.getTime() };
+        const frame = { ts, start: now(), work: null, script: null, comp: runtime.getTime() };
         frames.push(frame);
         pending = frame;
         channel.port2.postMessage(0);
@@ -70,6 +87,7 @@ window.__hfBench = async function bench(cfg) {
   // What the runtime does to its media during playback; a seek or rate change resets a decoder.
   const mediaOps = { seek: 0, rate: 0, play: 0, pause: 0, load: 0 };
   let countOps = false;
+  const rateLog = [];
   const proto = win.HTMLMediaElement.prototype;
   for (const [prop, key] of [
     ["currentTime", "seek"],
@@ -80,6 +98,9 @@ window.__hfBench = async function bench(cfg) {
       ...d,
       set(value) {
         if (countOps) mediaOps[key]++;
+        if (countOps && key === "rate" && rateLog.length < 40) {
+          rateLog.push({ at: Math.round(now()), from: this.playbackRate, to: value });
+        }
         d.set.call(this, value);
       },
     });
@@ -149,13 +170,14 @@ window.__hfBench = async function bench(cfg) {
     videoCount: videos().length,
     mediaErrors: mediaErrors(),
     idle: idle.map((f) => f.ts),
-    frames: play.map((f) => ({ ts: f.ts, work: f.work, comp: f.comp })),
+    frames: play.map((f) => ({ ts: f.ts, work: f.work, script: f.script, comp: f.comp })),
     decoded: {
       dropped: decodedAfter.dropped - decodedBefore.dropped,
       total: decodedAfter.total - decodedBefore.total,
     },
     droppedTimeline,
     mediaOps,
+    rateLog,
     seeks,
   };
 };

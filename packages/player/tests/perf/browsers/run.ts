@@ -97,7 +97,7 @@ type PageResult = {
   videoCount: number;
   mediaErrors: string[];
   idle: number[];
-  frames: Array<{ ts: number; work: number | null; comp: number }>;
+  frames: Array<{ ts: number; work: number | null; script: number | null; comp: number }>;
   decoded: { dropped: number; total: number };
   droppedTimeline: number[];
   mediaOps: Record<"seek" | "rate" | "play" | "pause" | "load", number>;
@@ -126,6 +126,12 @@ function score(page: PageResult) {
     maxWorkMs: round(Math.max(...work)),
     p95WorkMs: round(percentile(work, 95)),
     framesOverBudget: work.filter((w) => w > WORK_BUDGET_MS).length,
+    p95ScriptMs: round(
+      percentile(
+        page.frames.map((f) => f.script ?? 0),
+        95,
+      ),
+    ),
     clockRatio:
       Math.round((((last.comp - first.comp) * 1000) / (last.ts - first.ts)) * 1000) / 1000,
     decoderDropped: page.decoded.dropped,
@@ -136,6 +142,44 @@ function score(page: PageResult) {
     seekP95Ms: round(percentile(seekMs, 95)),
     seekTimeouts: page.seeks.filter((s) => s.timedOut).length,
   };
+}
+
+// The same media played natively, without the player: separates browser decoder drops from runtime-caused ones.
+const CONTROLS = [
+  { name: "grid-sample", src: "/fixtures/10-video-grid/sample.mp4", n: 10, rate: 1 },
+  { name: "grid-sample-rate-1.03", src: "/fixtures/10-video-grid/sample.mp4", n: 10, rate: 1.03 },
+  { name: "16x1080", src: "/fixtures/_media/h264-1080.mp4", n: 16, rate: 1 },
+  { name: "alpha-webm", src: "/fixtures/_media/alpha-vp9.webm", n: 6, rate: 1 },
+];
+
+async function runControl(
+  base: string,
+  browser: Browser,
+  origin: string,
+  c: (typeof CONTROLS)[number],
+) {
+  const session = await wd(base, "POST", "/session", {
+    capabilities: { alwaysMatch: DRIVERS[browser].caps },
+  });
+  const s = `/session/${session.sessionId}`;
+  try {
+    await wd(base, "POST", `${s}/url`, {
+      url: `${origin}/fixtures/_control/index.html?src=${c.src}&n=${c.n}&rate=${c.rate}`,
+    });
+    const deadline = Date.now() + 60_000;
+    while (Date.now() < deadline) {
+      const r = await wd(base, "POST", `${s}/execute/sync`, {
+        script: "return window.__control",
+        args: [],
+      });
+      if (r?.error) throw new Error(r.error);
+      if (r) return r as { dropped: number; total: number };
+      await Bun.sleep(500);
+    }
+    throw new Error("control did not finish within 60 s");
+  } finally {
+    await wd(base, "DELETE", s).catch(() => {});
+  }
 }
 
 async function runFilm(base: string, browser: Browser, origin: string, fixture: string) {
@@ -222,6 +266,21 @@ try {
           }
         }
       }
+      for (const c of CONTROLS) {
+        try {
+          const r = await runControl(`http://127.0.0.1:${port}`, browser, server.origin, c);
+          rows.push({
+            browser,
+            fixture: `control:${c.name}`,
+            run: 1,
+            decoderDropped: r.dropped,
+            decoderFrames: r.total,
+          });
+          console.log(JSON.stringify(rows[rows.length - 1]));
+        } catch (e) {
+          rows.push({ browser, fixture: `control:${c.name}`, run: 1, error: String(e) });
+        }
+      }
     } finally {
       driver.kill();
     }
@@ -241,6 +300,7 @@ const cols = [
   "maxWorkMs",
   "p95WorkMs",
   "framesOverBudget",
+  "p95ScriptMs",
   "clockRatio",
   "decoderDropped",
   "decoderFrames",

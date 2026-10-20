@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>control: native video playback without the player</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #000;
+      }
+      video {
+        width: 320px;
+        height: 180px;
+        object-fit: cover;
+      }
+    </style>
+  </head>
+  <body>
+    <script>
+      // ?src=<file in _media or a fixture path>&n=<count>&rate=<playbackRate>; same decoder counters as the bench.
+      (async function () {
+        var q = new URLSearchParams(location.search);
+        var videos = [];
+        for (var i = 0; i < Number(q.get("n") || 1); i++) {
+          var v = document.createElement("video");
+          v.src = q.get("src");
+          v.muted = true;
+          v.playsInline = true;
+          v.preload = "auto";
+          document.body.appendChild(v);
+          videos.push(v);
+        }
+        await Promise.all(
+          videos.map(
+            (v) => new Promise((r) => v.addEventListener("canplaythrough", r, { once: true })),
+          ),
+        );
+        var decoded = () =>
+          videos.reduce(
+            (a, v) => {
+              var p = v.getVideoPlaybackQuality();
+              return {
+                dropped: a.dropped + p.droppedVideoFrames,
+                total: a.total + p.totalVideoFrames,
+              };
+            },
+            { dropped: 0, total: 0 },
+          );
+        await Promise.all(videos.map((v) => v.play()));
+        videos.forEach((v) => (v.playbackRate = Number(q.get("rate") || 1)));
+        var before = decoded();
+        await new Promise((r) => setTimeout(r, 8000));
+        var after = decoded();
+        window.__control = {
+          dropped: after.dropped - before.dropped,
+          total: after.total - before.total,
+        };
+      })().catch((e) => (window.__control = { error: String(e) }));
+    </script>
+  </body>
+</html>
