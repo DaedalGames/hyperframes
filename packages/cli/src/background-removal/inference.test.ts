@@ -136,7 +136,10 @@ describe("background-removal/inference — missing optional native modules", () 
 
   it("createSession asks the optional-package loader for onnxruntime-node and surfaces its error", async () => {
     const loadOptionalPackage = vi.fn().mockRejectedValue(new Error("run npm install it yourself"));
-    vi.doMock("../utils/optionalPackages.js", () => ({ loadOptionalPackage }));
+    vi.doMock("../utils/optionalPackages.js", () => ({
+      loadOptionalPackage,
+      loadSharp: async () => ({}),
+    }));
     const { createSession } = await import("./inference.js");
     await expect(createSession()).rejects.toThrow("run npm install it yourself");
     expect(loadOptionalPackage).toHaveBeenCalledWith("onnxruntime-node", "background removal");
@@ -148,7 +151,9 @@ describe("background-removal/inference — missing optional native modules", () 
       throw new Error("Could not load the sharp module");
     });
     const { createSession } = await import("./inference.js");
-    await expect(createSession()).rejects.toThrow(/sharp.*isn't available[\s\S]*npm i sharp/);
+    await expect(createSession()).rejects.toThrow(
+      /remove-background needs sharp, which is installed but could not load[\s\S]*npm i sharp/,
+    );
     vi.doUnmock("sharp");
   });
 });

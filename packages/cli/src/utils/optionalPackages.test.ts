@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   renameSync,
   rmSync,
   symlinkSync,
@@ -13,6 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { satisfies } from "compare-versions";
 import { buildSync } from "esbuild";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -22,7 +24,10 @@ import {
   loadBesideCli,
   loadInstalledOptionalPackage,
   loadOptionalPackage,
+  loadSharp,
+  loadSharpInBackground,
   optionalPackageDir,
+  SHARP_VERSION,
   type OptionalPackageDeps,
 } from "./optionalPackages.js";
 
@@ -127,6 +132,81 @@ describe("loadOptionalPackage", () => {
     expect(optionalPackageDir("@google/genai", "/cache")).toMatch(
       /[\\/]cache[\\/]@google__genai@\d+\.\d+\.\d+$/,
     );
+  });
+});
+
+describe("loadSharp", () => {
+  const sharp = { fake: "sharp" };
+  const absent = async () => null;
+
+  it("uses the installed copy, whatever its version, without installing", async () => {
+    const { deps, install } = fakeDeps();
+
+    expect(await loadSharp("compare", deps, async () => sharp as never)).toBe(sharp);
+    expect(install).not.toHaveBeenCalled();
+  });
+
+  it("installs once when the host left sharp out, then loads it from the cache", async () => {
+    const { deps, install, log } = fakeDeps();
+
+    const first = await loadSharp("compare", deps, absent);
+    const second = await loadSharp("compare", deps, absent);
+
+    expect(first).toBe(second);
+    expect(install).toHaveBeenCalledTimes(1);
+    expect(install).toHaveBeenCalledWith(
+      optionalPackageDir("sharp", "/cache"),
+      "sharp",
+      SHARP_VERSION,
+    );
+    expect(log.mock.calls).toEqual([["installing sharp for compare, once"]]);
+  });
+
+  it("offline with no cached copy, fails with the command to run", async () => {
+    const { deps } = fakeDeps({
+      install: async () => {
+        throw new Error("npm error code ENOTFOUND\nnpm error syscall getaddrinfo");
+      },
+    });
+
+    await expect(loadSharp("compare", deps, absent)).rejects.toThrow(
+      `compare needs sharp, and installing it failed (npm error code ENOTFOUND). ` +
+        `Check your network connection, then retry, or install it yourself: ` +
+        `npm install sharp@${SHARP_VERSION} --prefix "${optionalPackageDir("sharp", "/cache")}"`,
+    );
+  });
+
+  it("installs a version the CLI's own dependency range accepts", () => {
+    const manifest = JSON.parse(
+      readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
+    );
+    expect(satisfies(SHARP_VERSION, manifest.dependencies.sharp)).toBe(true);
+  });
+});
+
+describe("loadSharpInBackground", () => {
+  it("rejects at once, installs once in the background, then serves the installed copy", async () => {
+    const sharp = { fake: "sharp" };
+    const { deps, installed } = fakeDeps();
+    let finish = () => {};
+    const install = vi.fn(
+      (dir: string) =>
+        new Promise<void>((resolve) => {
+          finish = () => {
+            installed.set(dir, sharp);
+            resolve();
+          };
+        }),
+    );
+    deps.install = install;
+    const load = () => loadSharpInBackground("image thumbnails", deps, async () => null);
+
+    await expect(load()).rejects.toThrow("installing it once for image thumbnails");
+    await expect(load()).rejects.toThrow("installing it once for image thumbnails");
+    expect(install).toHaveBeenCalledTimes(1);
+
+    finish();
+    expect(await load()).toBe(sharp);
   });
 });
 
