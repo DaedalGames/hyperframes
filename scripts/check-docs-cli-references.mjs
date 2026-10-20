@@ -28,37 +28,51 @@ const ENV_ASSIGNMENT = /^[A-Z_][A-Z0-9_]*=/;
 // `<name>`, `[options]`, `{id}`, `$VAR`, `...`: the docs' stand-ins for a value the reader supplies.
 const PLACEHOLDER = /[<>[\]{}$|]|\.\.\.|…/;
 
+// Labels each line as a fence marker, a line inside a fence, or prose.
+function lineKinds(lines) {
+  let fence = null;
+  return lines.map((raw) => {
+    const marker = raw.match(/^\s*(`{3,}|~{3,})/);
+    if (!marker || (fence && !raw.trim().startsWith(fence))) return fence ? "code" : "prose";
+    fence = fence ? null : marker[1];
+    return "fence";
+  });
+}
+
+function proseSpans(raw, line) {
+  return [
+    ...[...raw.matchAll(/(`+)([^`]+?)\1(?!`)/g)].map((m) => ({ line, text: m[2] })),
+    // Catalog pages hand the install line to a component: <InstallCommand command="npx hyperframes add x" />.
+    ...[...raw.matchAll(/\bcommand=(?:"([^"]*)"|\{"([^"]*)"\})/g)].map((m) => ({
+      line,
+      text: m[1] ?? m[2],
+    })),
+  ];
+}
+
+const CONTINUED = /\\\s*$/;
+
+// Joins a fenced line onto a command a `\` continued; a command that ends here comes back as `span`.
+function fencedStep(pending, raw, index) {
+  const line = pending?.line ?? index + 1;
+  const text = pending ? `${pending.text} ${raw.trim()}` : raw;
+  if (CONTINUED.test(text)) return { pending: { line, text: text.replace(CONTINUED, "") } };
+  return { pending: null, span: { line, text } };
+}
+
 /** Each piece of code on an MDX page as `{ line, text }`: fenced lines (joined across `\` continuations), inline code, command props. */
 export function codeSpans(source) {
-  const spans = [];
   const lines = source.split("\n");
-  let fence = null;
+  const kinds = lineKinds(lines);
+  const spans = [];
   let pending = null;
   for (const [index, raw] of lines.entries()) {
     const ignored = raw.includes(IGNORE) || (lines[index - 1] ?? "").includes(IGNORE);
-    const marker = raw.match(/^\s*(`{3,}|~{3,})/);
-    if (marker && (!fence || raw.trim().startsWith(fence))) {
-      fence = fence ? null : marker[1];
-      pending = null;
-      continue;
-    }
-    if (fence) {
-      const line = pending?.line ?? index + 1;
-      const text = pending ? `${pending.text} ${raw.trim()}` : raw;
-      if (/\\\s*$/.test(text)) {
-        pending = { line, text: text.replace(/\\\s*$/, "") };
-        continue;
-      }
-      pending = null;
-      if (!ignored) spans.push({ line, text });
-      continue;
-    }
+    const step = kinds[index] === "code" ? fencedStep(pending, raw, index) : { pending: null };
+    pending = step.pending;
     if (ignored) continue;
-    for (const m of raw.matchAll(/(`+)([^`]+?)\1(?!`)/g))
-      spans.push({ line: index + 1, text: m[2] });
-    // Catalog pages hand the install line to a component: <InstallCommand command="npx hyperframes add x" />.
-    for (const m of raw.matchAll(/\bcommand=(?:"([^"]*)"|\{"([^"]*)"\})/g))
-      spans.push({ line: index + 1, text: m[1] ?? m[2] });
+    if (step.span) spans.push(step.span);
+    if (kinds[index] === "prose") spans.push(...proseSpans(raw, index + 1));
   }
   return spans;
 }
@@ -148,57 +162,57 @@ function flagReadings(word) {
   return [...word.slice(1).split("=")[0]].map((letter) => [letter]);
 }
 
+function flagProblem(spellings, shown, dashes, readings) {
+  const flag = readings.map((name) => spellings.get(name)).find(Boolean);
+  const name = `${dashes}${readings[0]}`;
+  if (!flag) {
+    const hint = dashes === "--" ? suggestion(readings[0], [...spellings.keys()], "--") : "";
+    return { severity: "error", message: `\`${shown}\` has no ${name}${hint}` };
+  }
+  if (flag.deprecated)
+    return { severity: "warning", message: `\`${shown} ${name}\` is deprecated` };
+  if (flag.hidden)
+    return { severity: "warning", message: `\`${shown} ${name}\` is hidden from --help` };
+  return null;
+}
+
 function flagProblems(command, shown, words) {
   const spellings = flagSpellings(command);
-  const problems = [];
-  for (const word of words) {
-    if (word === "--") break;
-    if (!isFlag(word) || PLACEHOLDER.test(word.split("=")[0])) continue;
-    const dashes = word.startsWith("--") ? "--" : "-";
-    for (const readings of flagReadings(word)) {
-      const flag = readings.map((name) => spellings.get(name)).find(Boolean);
-      const name = `${dashes}${readings[0]}`;
-      if (!flag) {
-        const hint = dashes === "--" ? suggestion(readings[0], [...spellings.keys()], "--") : "";
-        problems.push({ severity: "error", message: `\`${shown}\` has no ${name}${hint}` });
-      } else if (flag.deprecated || flag.hidden) {
-        const state = flag.deprecated ? "deprecated" : "hidden from --help";
-        problems.push({ severity: "warning", message: `\`${shown} ${name}\` is ${state}` });
-      }
-    }
-  }
-  return problems;
+  const end = words.indexOf("--");
+  return (end < 0 ? words : words.slice(0, end))
+    .filter((word) => isFlag(word) && !PLACEHOLDER.test(word.split("=")[0]))
+    .flatMap((word) => {
+      const dashes = word.startsWith("--") ? "--" : "-";
+      return flagReadings(word).map((readings) => flagProblem(spellings, shown, dashes, readings));
+    })
+    .filter(Boolean);
+}
+
+function unknownSubcommand(command, path, name) {
+  if (PLACEHOLDER.test(name)) return [];
+  const kind = path.length === 1 ? "command" : "subcommand";
+  const hint = suggestion(name, Object.keys(command.subCommands));
+  return [{ severity: "error", message: `unknown ${kind} \`${path.join(" ")} ${name}\`${hint}` }];
+}
+
+function commandProblems(command, path, words) {
+  const hasSubs = Object.keys(command.subCommands).length > 0;
+  const at = hasSubs ? subCommandIndex(words, flagSpellings(command)) : -1;
+  const own = flagProblems(command, path.join(" "), at < 0 ? words : words.slice(0, at));
+  if (at < 0) return own;
+  const name = unquote(words[at]);
+  const next = command.subCommands[name];
+  if (!next) return [...own, ...unknownSubcommand(command, path, name)];
+  const nextPath = [...path, name];
+  const deprecated = next.deprecated
+    ? [{ severity: "warning", message: `\`${nextPath.join(" ")}\` is deprecated` }]
+    : [];
+  return [...own, ...deprecated, ...commandProblems(next, nextPath, words.slice(at + 1))];
 }
 
 /** Problems with one invocation (the words after `hyperframes`), as `{ severity: "error" | "warning", message }`. */
 export function invocationProblems(tree, args) {
-  const problems = [];
-  let command = tree;
-  let words = args;
-  const path = ["hyperframes"];
-  for (;;) {
-    const hasSubs = Object.keys(command.subCommands).length > 0;
-    const at = hasSubs ? subCommandIndex(words, flagSpellings(command)) : -1;
-    problems.push(...flagProblems(command, path.join(" "), at < 0 ? words : words.slice(0, at)));
-    if (at < 0) return problems;
-    const name = unquote(words[at]);
-    const next = command.subCommands[name];
-    if (!next) {
-      if (PLACEHOLDER.test(name)) return problems;
-      const kind = path.length === 1 ? "command" : "subcommand";
-      const hint = suggestion(name, Object.keys(command.subCommands));
-      problems.push({
-        severity: "error",
-        message: `unknown ${kind} \`${path.join(" ")} ${name}\`${hint}`,
-      });
-      return problems;
-    }
-    path.push(name);
-    if (next.deprecated)
-      problems.push({ severity: "warning", message: `\`${path.join(" ")}\` is deprecated` });
-    command = next;
-    words = words.slice(at + 1);
-  }
+  return commandProblems(tree, ["hyperframes"], args);
 }
 
 /** Problems on one page, each with the line its command starts on. */

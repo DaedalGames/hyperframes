@@ -9,6 +9,7 @@ import {
   touchesCli,
   touchesDocs,
   touchesPackages,
+  verdict,
 } from "./check-docs-impact.mjs";
 
 const flag = (type, aliases = [], extra = {}) => ({
@@ -89,4 +90,15 @@ test("changed-file filters: CLI sources without tests or fixtures, package entri
   assert.ok(!touchesPackages(["packages/core/README.md"]));
   assert.ok(touchesDocs(["docs/packages/cli.mdx"]));
   assert.ok(!touchesDocs(["DOCS_GUIDELINES.md"]));
+});
+
+test("verdict passes with no surface change or with an excuse, and fails otherwise unless dry-run", () => {
+  assert.equal(verdict({ changed: 0, excuse: null }).pass, true);
+  assert.deepEqual(verdict({ changed: 2, excuse: "it changes docs/" }), {
+    pass: true,
+    message: "passes, it changes docs/.",
+  });
+  assert.equal(verdict({ changed: 2, excuse: null }).pass, false);
+  assert.match(verdict({ changed: 2, excuse: null }).message, /docs-not-needed/);
+  assert.equal(verdict({ changed: 2, excuse: null, dryRun: true }).pass, true);
 });

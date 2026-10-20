@@ -37,9 +37,10 @@ export function gitReader(ref, cwd) {
 }
 
 // Same precedence as package-subpaths.mjs's sourceTarget: the file a workspace consumer actually loads.
+const SOURCE_CONDITIONS = ["bun", "browser", "import", "node", "default"];
 function sourceTarget(target) {
   if (typeof target === "string") return target;
-  return target?.bun ?? target?.browser ?? target?.import ?? target?.node ?? target?.default;
+  return SOURCE_CONDITIONS.map((condition) => target?.[condition]).find(Boolean);
 }
 
 function resolveModule(from, specifier, read) {
@@ -69,27 +70,28 @@ function declaredExports(statement) {
   return statement.name && ts.isIdentifier(statement.name) ? [statement.name.text] : [];
 }
 
+function starExports(path, specifier, read, seen) {
+  const target = specifier.startsWith(".") ? resolveModule(path, specifier, read) : undefined;
+  if (!target) return [`* from "${specifier}"`];
+  return moduleExports(target, read, seen).filter((name) => name !== "default");
+}
+
+function statementExports(statement, path, read, seen) {
+  if (ts.isExportAssignment(statement)) return [statement.isExportEquals ? "export=" : "default"];
+  if (!ts.isExportDeclaration(statement)) return declaredExports(statement);
+  const clause = statement.exportClause;
+  if (!clause) return starExports(path, statement.moduleSpecifier.text, read, seen);
+  return ts.isNamedExports(clause)
+    ? clause.elements.map((element) => element.name.text)
+    : [clause.name.text];
+}
+
 /** Every name the module at `path` exports, following relative `export *`; a package re-export stays `* from "<pkg>"`. */
 export function moduleExports(path, read, seen = new Set()) {
   if (seen.has(path)) return [];
   seen.add(path);
   const file = ts.createSourceFile(path, read(path) ?? "", ts.ScriptTarget.Latest, false);
-  const names = [];
-  for (const statement of file.statements) {
-    if (ts.isExportAssignment(statement))
-      names.push(statement.isExportEquals ? "export=" : "default");
-    else if (!ts.isExportDeclaration(statement)) names.push(...declaredExports(statement));
-    else if (statement.exportClause && ts.isNamedExports(statement.exportClause))
-      names.push(...statement.exportClause.elements.map((element) => element.name.text));
-    else if (statement.exportClause) names.push(statement.exportClause.name.text);
-    else {
-      const specifier = statement.moduleSpecifier.text;
-      const target = specifier.startsWith(".") ? resolveModule(path, specifier, read) : undefined;
-      if (!target) names.push(`* from "${specifier}"`);
-      else names.push(...moduleExports(target, read, seen).filter((name) => name !== "default"));
-    }
-  }
-  return names;
+  return file.statements.flatMap((statement) => statementExports(statement, path, read, seen));
 }
 
 // A root entry built into dist/ (player) is read from the source file tsup builds it from.

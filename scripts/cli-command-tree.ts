@@ -16,7 +16,7 @@ interface CittyArg {
   description?: string;
 }
 
-interface CittyCommand {
+export interface CittyCommand {
   meta?: Resolvable<{ name?: string; description?: string; hidden?: boolean }>;
   args?: Resolvable<Record<string, CittyArg>>;
   subCommands?: Resolvable<Record<string, Resolvable<CittyCommand>>>;
@@ -61,29 +61,30 @@ export function commandLoaders(
   return entries;
 }
 
-async function describe(command: CittyCommand): Promise<TreeCommand> {
+function describeFlag(def: CittyArg): TreeFlag {
+  return {
+    type: def.type ?? "string",
+    aliases: def.alias === undefined ? [] : [def.alias].flat(),
+    hidden: def.hidden === true,
+    deprecated: DEPRECATED.test(def.description ?? ""),
+  };
+}
+
+/** One citty command and its subcommands, with every lazy part resolved. Positionals are not flags. */
+export async function describeCommand(command: CittyCommand): Promise<TreeCommand> {
   const meta = (await settle(command.meta)) ?? {};
-  const args = (await settle(command.args)) ?? {};
-  const subs = (await settle(command.subCommands)) ?? {};
-  const flags: Record<string, TreeFlag> = {};
-  for (const [name, def] of Object.entries(args)) {
-    if (def.type === "positional") continue;
-    flags[name] = {
-      type: def.type ?? "string",
-      aliases: def.alias === undefined ? [] : [def.alias].flat(),
-      hidden: def.hidden === true,
-      deprecated: DEPRECATED.test(def.description ?? ""),
-    };
-  }
+  const args = Object.entries((await settle(command.args)) ?? {});
+  const subs = Object.entries((await settle(command.subCommands)) ?? {});
   const subCommands: Record<string, TreeCommand> = {};
-  for (const [name, sub] of Object.entries(subs)) {
-    const resolved = await settle(sub);
-    if (resolved) subCommands[name] = await describe(resolved);
-  }
+  for (const [name, sub] of subs) subCommands[name] = await describeCommand((await settle(sub))!);
   return {
     hidden: meta.hidden === true,
     deprecated: DEPRECATED.test(meta.description ?? ""),
-    flags,
+    flags: Object.fromEntries(
+      args
+        .filter(([, def]) => def.type !== "positional")
+        .map(([name, def]) => [name, describeFlag(def)]),
+    ),
     subCommands,
   };
 }
@@ -96,7 +97,7 @@ export async function cliCommandTree(root: string): Promise<TreeCommand> {
     const mod = (await import(url)) as Record<string, CittyCommand>;
     const command = mod[loader.exportName];
     if (!command) throw new Error(`commands/${loader.file}.ts has no export ${loader.exportName}`);
-    subCommands[loader.name] = await describe(command);
+    subCommands[loader.name] = await describeCommand(command);
   }
   // The root answers --version/-V before citty runs (cli.ts's fast path) and --help/-h through citty.
   const version = { type: "boolean", aliases: ["V"], hidden: false, deprecated: false };

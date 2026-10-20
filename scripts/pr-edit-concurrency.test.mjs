@@ -13,8 +13,8 @@ const workflows = readdirSync(workflowsDir)
 // fail-closed `Test` stays red on the PR. Only a push or a base change cancels.
 const CANCEL_UNLESS_PLAIN_EDIT =
   "${{ github.event.action != 'edited' || github.event.changes.base != null }}";
-// Reads the PR body itself, so the newest edit should replace an older run.
-const BODY_WORKFLOWS = new Set(["pr-captures.yml"]);
+// Read the PR body itself, so the newest edit should replace an older run.
+const BODY_WORKFLOWS = new Set(["docs-impact.yml", "pr-captures.yml"]);
 
 const editedWorkflows = workflows.filter(({ config }) =>
   config.on?.pull_request?.types?.includes("edited"),
@@ -23,6 +23,7 @@ const editedWorkflows = workflows.filter(({ config }) =>
 test("the workflows that re-run on a PR edit are known", () => {
   assert.deepEqual(editedWorkflows.map(({ file }) => file).sort(), [
     "ci.yml",
+    "docs-impact.yml",
     "pr-captures.yml",
     "regression.yml",
     "windows-render.yml",

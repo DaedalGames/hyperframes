@@ -118,6 +118,29 @@ function report(heading, lines) {
   for (const line of lines) console.log(`  ${line}`);
 }
 
+/** The outcome for a PR: `{ pass, message }`, given how many surface lines changed and any excuse. */
+export function verdict({ changed, excuse, dryRun = false }) {
+  if (changed === 0)
+    return { pass: true, message: "passes, no CLI command, flag or public export changed." };
+  if (excuse) return { pass: true, message: `passes, ${excuse}.` };
+  const optOut = `opt out with the \`${OPT_OUT_LABEL}\` label or a \`docs-impact: none\` line in the PR body (say why)`;
+  return { pass: dryRun, message: `update docs/ for the changes above, or ${optOut}.` };
+}
+
+function cliChanges(args, files, base) {
+  const baseTreePath = flag(args, "--base-tree");
+  const headTreePath = flag(args, "--head-tree");
+  if (!touchesCli(files) && !baseTreePath) return [];
+  const before = baseTreePath ? readJson(baseTreePath) : baseTree(base);
+  const after = headTreePath ? readJson(headTreePath) : treeAt(ROOT);
+  return surfaceDiff(cliSurface(before), cliSurface(after));
+}
+
+function exportChanges(files, base) {
+  if (!touchesPackages(files)) return [];
+  return surfaceDiff(publicApiSurface(base, ROOT), publicApiSurface("HEAD", ROOT));
+}
+
 function main() {
   const args = process.argv.slice(2);
   const dryRun = args.includes("--dry-run");
@@ -125,39 +148,18 @@ function main() {
   const files = git(["diff", "--name-only", base, "HEAD"]).split("\n").filter(Boolean);
   const pr = { labels: parseLabels(process.env.PR_LABELS), body: process.env.PR_BODY ?? "" };
   const excuse = touchesDocs(files) ? "it changes docs/" : optOutReason(pr);
+  // Past the excuse, the surfaces only matter to a dry run, which shows them anyway.
   if (excuse && !dryRun) {
     console.log(`Docs impact: passes, ${excuse}.`);
     return;
   }
-
-  const baseTreePath = flag(args, "--base-tree");
-  const headTreePath = flag(args, "--head-tree");
-  const cliChanges =
-    touchesCli(files) || baseTreePath
-      ? surfaceDiff(
-          cliSurface(baseTreePath ? readJson(baseTreePath) : baseTree(base)),
-          cliSurface(headTreePath ? readJson(headTreePath) : treeAt(ROOT)),
-        )
-      : [];
-  const exportChanges = touchesPackages(files)
-    ? surfaceDiff(publicApiSurface(base, ROOT), publicApiSurface("HEAD", ROOT))
-    : [];
-
-  report("CLI commands and flags changed:", cliChanges);
-  report("Public package exports changed:", exportChanges);
-  if (cliChanges.length + exportChanges.length === 0) {
-    console.log("Docs impact: passes, no CLI command, flag or public export changed.");
-    return;
-  }
-  if (excuse) {
-    console.log(`Docs impact: passes, ${excuse}.`);
-    return;
-  }
-  console.log(
-    `\nDocs impact${dryRun ? " (dry run)" : ""}: update docs/ for the changes above, or opt out with the \`${OPT_OUT_LABEL}\` label` +
-      " or a `docs-impact: none` line in the PR body (say why).",
-  );
-  if (!dryRun) process.exitCode = 1;
+  const cli = cliChanges(args, files, base);
+  const exports = exportChanges(files, base);
+  report("CLI commands and flags changed:", cli);
+  report("Public package exports changed:", exports);
+  const result = verdict({ changed: cli.length + exports.length, excuse, dryRun });
+  console.log(`Docs impact${dryRun ? " (dry run)" : ""}: ${result.message}`);
+  if (!result.pass) process.exitCode = 1;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href)
