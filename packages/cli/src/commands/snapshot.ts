@@ -57,7 +57,7 @@ import { runCancellableProcess } from "../utils/cancellableProcess.js";
 import { findFFmpeg, findFFprobe, getFFmpegInstallHint } from "../browser/ffmpeg.js";
 import { parseAngle, type Camera } from "./motionShotLayout.js";
 import type { Example } from "./_examples.js";
-import { loadOptionalPackage, loadSharp } from "../utils/optionalPackages.js";
+import { loadInstalledSharp, loadOptionalPackage } from "../utils/optionalPackages.js";
 import { resolveLocalBrowserGpuMode, type BrowserGpuMode } from "../browser/gpuPolicy.js";
 
 // Runs IN THE BROWSER (serialized into page.evaluate). Tilt the whole stage so
@@ -1248,19 +1248,34 @@ export default defineCommand({
               ];
 
               // Scale down PNGs before sending to stay under Gemini's 4 MB inline
-              // limit. Full 1920×1080 PNGs are typically 3-6 MB.
-              const sharp = await loadSharp("--describe");
+              // limit. Full 1920×1080 PNGs are typically 3-6 MB. Use sharp if it is
+              // already there (never installed for this); otherwise skip files over the limit.
+              let sharp: ReturnType<typeof loadInstalledSharp> = null;
+              try {
+                sharp = loadInstalledSharp("--describe");
+              } catch {
+                /* a copy that cannot load — fall back to size check */
+              }
 
               const results = await Promise.allSettled(
                 paths.map(async (p) => {
                   const filename = basename(p);
                   const filePath = join(snapshotDir, filename);
                   if (!existsSync(filePath)) return { filename, desc: "file not found" };
-                  const imageData = await sharp(readFileSync(filePath))
-                    .resize(960)
-                    .jpeg()
-                    .toBuffer();
-                  const mimeType = "image/jpeg";
+                  const raw = readFileSync(filePath);
+                  let imageData: Buffer;
+                  let mimeType = "image/png";
+                  if (sharp) {
+                    imageData = await sharp(raw).resize(960).jpeg().toBuffer();
+                    mimeType = "image/jpeg";
+                  } else {
+                    if (raw.length > 3_800_000)
+                      return {
+                        filename,
+                        desc: "file too large for Gemini — install sharp to enable auto-resize",
+                      };
+                    imageData = raw;
+                  }
                   const base64 = imageData.toString("base64");
                   const response = await ai.models.generateContent({
                     model,

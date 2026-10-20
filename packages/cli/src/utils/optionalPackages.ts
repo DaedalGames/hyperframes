@@ -133,10 +133,10 @@ export async function loadSharpInBackground(
   return sharpExport(settled);
 }
 
-function loadInstalledSharp(
+export function loadInstalledSharp(
   feature: string,
-  deps: OptionalPackageDeps,
-  besideCli: FindSharp,
+  deps: OptionalPackageDeps = defaultDeps,
+  besideCli: FindSharp = requireSharpBesideCli,
 ): Sharp | null {
   const found = besideCli(feature) ?? loadPresent("sharp", deps);
   return found === null ? null : sharpExport(found);
