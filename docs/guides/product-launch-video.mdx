@@ -1,12 +1,22 @@
 ---
-title: "Create a product or website video"
+title: "Make a product launch video with AI"
 sidebarTitle: "Product or website"
-description: "Turn a product URL or launch brief into a promo, product tour, or social video."
+description: "Make a product launch video with AI from your website URL. Your agent captures the real site and builds an editable promo, tour, or social video."
+keywords: ["product launch video", "launch video", "promo video", "website to video", "url to video", "saas promo video", "product tour video"]
 ---
 
 import { DocsVideo } from "/snippets/docs-video.jsx";
 
-Give HyperFrames the real URL when the product, website, or brand should appear in the result.
+{/* FILM: 20–30 s launch film for one real product, built by this workflow from its URL: a hook that proves the product in the first two seconds, three real-screen beats, one CTA end card. Open on a cut of the URL being pasted, so the page's promise is visible. */}
+
+To make a product launch video with AI, give your coding agent your product's
+URL and the result you want. HyperFrames captures the real website (screens,
+text, colors, fonts, and images), proposes a story, and builds a launch video,
+product tour, or short social video as an editable project you can render to MP4.
+
+Because the video is built from what is actually on your site, the interface in
+it is your interface, not a mock-up. Use this page for any video of a website,
+including a portfolio or landing-page tour.
 
 <DocsVideo
   title="A launch film built by this workflow from huly.io, end to end"
@@ -77,8 +87,39 @@ timing change. Render from the agent, Studio, or the CLI when the result is read
   Check the final project, render it from your preferred surface, and review the file.
 </Card>
 
+## FAQ
+
+### What should I put in the request?
+
+The URL and the kind of video are enough to start. Add the audience, the claim
+that must appear, the length, and the final action when any of them must be
+exact.
+
+### Can I use my own script?
+
+Yes. Paste it and say whether it must stay word for word or may be
+restructured. The agent builds the visuals around it.
+
+### Can it make a video from a site on localhost or a staging server?
+
+Not by capturing it. Website capture reads public HTTP(S) sites only and
+refuses localhost and private network addresses. Give the agent screenshots or
+a screen recording of the local site instead.
+
+### Can I get a vertical version for Reels, TikTok, or Shorts?
+
+Yes. Ask for 9:16 in the request, or ask for both a 16:9 film and a vertical
+cut.
+
+### How is a launch video different from a demo?
+
+A launch video persuades: it rearranges product evidence into a story with one
+action at the end. A [product demo](/guides/product-demo-video) walks through
+one task from start to finish.
+
 ## Related topics
 
+- [Make a product demo video](/guides/product-demo-video)
 - [Create a faceless explainer when there is no product to show](/guides/faceless-explainer)
 - [Edit the finished project in Studio](/studio)
 - [Prompt for product-launch videos](/prompting/product-launch)

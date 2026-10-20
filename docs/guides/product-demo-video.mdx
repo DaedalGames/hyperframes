@@ -1,0 +1,184 @@
+---
+title: "Make a product demo video with AI"
+sidebarTitle: "Product demo video"
+description: "Make a product demo video with AI from your website or app: capture real screens, add a voiceover and captions, and render an MP4."
+keywords: ["product demo video", "demo video maker", "ai demo video", "software demo video", "saas demo video", "app demo video", "product walkthrough video"]
+---
+
+{/* FILM: 30–45 s demo of a real SaaS task, made by this workflow: the captured screens move through one complete task (open, act, see the result), with a calm voiceover and word-timed captions, ending on the product name and URL. Shows the capture folder for one second as the "made from this" proof. */}
+
+To make a product demo video with AI, give your coding agent the product URL and
+the one task the demo should show. HyperFrames captures the real site, writes
+the script, records a voiceover, times captions to the words, and renders an
+MP4 you can edit in Studio.
+
+```text
+Using /hyperframes, make a 45-second product demo of https://example.com.
+Show how a new user creates their first project. Calm voiceover, captions.
+```
+
+The video is built from your product's real screens, text, and brand, not from
+stock footage or mocked-up interfaces. The result is an editable HTML project,
+so you can change one word or one scene without starting over.
+
+## When to use a demo
+
+A demo shows one complete task through the product, from the first action to
+the result. Use it for onboarding, a docs page, a sales follow-up, or a feature
+announcement that needs proof.
+
+- Make a [product launch video](/guides/product-launch-video) when the goal is
+  to persuade, not to walk through a task.
+- Make a [faceless explainer](/guides/faceless-explainer) when there is no
+  product interface to show.
+- Use [captions or recuts](/guides/captions-and-recuts) when you already
+  recorded the demo and only want to edit it.
+
+## Write a good request
+
+Say four things. The agent asks about anything important you leave out.
+
+| Tell the agent | Example |
+| --- | --- |
+| The product | `https://example.com`, or a screen recording you attach |
+| The task | "Invite a teammate and assign their first issue" |
+| The viewer | "A team lead trying the product for the first time" |
+| Length and shape | "45 seconds, 16:9, calm voiceover, captions" |
+
+If you already have an approved script, paste it and say whether it must stay
+word for word.
+
+## What happens
+
+<Steps>
+  <Step title="Capture">
+    The agent runs `npx hyperframes capture` on your URL. It saves scroll
+    screenshots, the page text, design tokens, fonts, images, and SVGs into a
+    `capture/` folder, so every screen in the demo comes from the real product.
+  </Step>
+  <Step title="Plan">
+    It writes a storyboard and a script around the task you named, and shows
+    you the plan before building.
+  </Step>
+  <Step title="Voice and captions">
+    It generates the voiceover, then transcribes it into word-level timings
+    so captions land on the spoken words.
+  </Step>
+  <Step title="Build and render">
+    It builds each scene as an HTML composition, checks it, and renders an MP4.
+    You review it in the preview, then edit in [Studio](/studio) or ask the agent
+    for changes.
+  </Step>
+</Steps>
+
+## Do it by hand with the CLI
+
+Every step the agent runs is a CLI command you can run yourself.
+
+<Steps>
+  <Step title="Capture the site">
+    ```bash
+    npx hyperframes capture https://example.com -o capture
+    ```
+
+    Open `capture/screenshots/contact-sheet.jpg` first. It shows every scroll
+    screenshot in one grid. The page text is in `capture/extracted/visible-text.txt`.
+  </Step>
+  <Step title="Create the project">
+    ```bash
+    npx hyperframes init demo --non-interactive
+    ```
+
+    For an app that is not on a public URL, record the screen yourself and start
+    from the recording instead. HyperFrames converts it to H.264 if needed and
+    transcribes any speech in it:
+
+    ```bash
+    npx hyperframes init demo --video recording.mp4 --non-interactive
+    ```
+  </Step>
+  <Step title="Record the voiceover">
+    Run the next commands from inside the `demo` folder. Save the script as
+    `script.txt` and generate speech with the local Kokoro model. No API key is
+    needed and nothing leaves your machine. Kokoro runs in Python, so install it
+    once with `pip install kokoro-onnx soundfile`.
+
+    ```bash
+    cd demo
+    npx hyperframes tts script.txt --voice af_heart --output assets/voiceover.wav
+    ```
+
+    Run `npx hyperframes tts --list` to see the other voices. When you work
+    through the agent and are signed in with `npx hyperframes auth login`, the
+    `/media-use` skill can use HeyGen voices instead.
+  </Step>
+  <Step title="Time the captions">
+    ```bash
+    npx hyperframes transcribe assets/voiceover.wav
+    ```
+
+    This writes word-level timings to a `transcript.json` beside the audio
+    file. If the project already has caption HTML, it is updated automatically.
+    Read the transcript and fix product names before you build on it.
+  </Step>
+  <Step title="Build the scenes">
+    Copy the screenshots you need from `../capture/screenshots/` into `assets/`,
+    then place them, the voiceover `<audio>` element, and the captions in
+    `index.html`. The [HTML to MP4 guide](/guides/html-to-mp4) shows the
+    rules a composition follows, and [GSAP animation](/guides/gsap-animation)
+    covers the motion. Run `npx hyperframes lint` and `npx hyperframes preview`
+    from the project folder as you go.
+  </Step>
+  <Step title="Render">
+    ```bash
+    npx hyperframes render --output demo.mp4
+    ```
+
+    Add `--video-frame-format png` when the demo uses a screen recording, so
+    interface colors stay exact.
+  </Step>
+</Steps>
+
+## Review the demo
+
+- The task is complete: the viewer sees the first action and the result.
+- Every interface state is real and current, with no private customer data.
+- Interface text stays readable at the size people will watch it.
+- The voiceover says what is on screen at the moment it is on screen.
+- Captions match the spoken words, including product names.
+
+## FAQ
+
+### Can I make a demo of an app that runs on localhost or behind a login?
+
+`capture` only reads public HTTP(S) sites. It refuses localhost, private network
+addresses, and URLs with credentials. For a local, staging, or signed-in app,
+record the screen yourself, or take screenshots, and give those files to the
+agent instead of a URL.
+
+### Can I use my own script?
+
+Yes. Paste it and say whether the agent may restructure it or must keep every
+word.
+
+### Can I make a vertical version for social?
+
+Yes. Ask for 9:16 in the request. By hand, scaffold with
+`npx hyperframes init demo --resolution portrait`.
+
+### Can I change the video after it renders?
+
+Yes. The project stays as editable HTML. Open it in [Studio](/studio) to change
+text, timing, or animation, or ask the agent for a revision, then render again.
+
+### Does it cost anything?
+
+HyperFrames is open source, and local capture, voice, transcription, and
+rendering cost nothing. Your coding agent, HeyGen voices, and cloud rendering
+may have their own costs.
+
+## Related topics
+
+- [Make a product launch video](/guides/product-launch-video)
+- [Use voice, music, sound, and captions](/guides/voice-and-audio)
+- [Finish and share the video](/guides/export-and-share)

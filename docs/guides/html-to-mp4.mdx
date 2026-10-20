@@ -1,0 +1,231 @@
+---
+title: "Convert HTML to MP4"
+sidebarTitle: "HTML to MP4"
+description: "Convert an HTML, CSS, and JavaScript animation to MP4 video. Make the page seekable, then render it frame by frame with one HyperFrames command."
+keywords: ["html to mp4", "html to video", "convert html to video", "render html animation", "css animation to mp4", "gsap to mp4"]
+---
+
+{/* FILM: 10–15 s split screen: an HTML file in a code editor on the left, the same animation scrubbing frame by frame on the right, ending on the finished MP4 playing in a normal video player. No narration; captions name each step. */}
+
+To convert HTML to MP4, give the page a fixed frame size, a duration, and a
+paused animation timeline, then run `npx hyperframes render`. HyperFrames opens
+the page in headless Chrome, seeks the timeline to every frame, captures each
+one, and encodes the frames to an H.264 MP4 with FFmpeg.
+
+A screen recording of a browser tab drops frames and depends on how fast your
+machine is. HyperFrames never plays the page in real time. It asks for frame 0,
+then frame 1, and so on, so the same HTML always produces the same video at any
+frame rate or resolution.
+
+## What makes an HTML page renderable
+
+Most HTML animations play on the browser clock. A renderable page lets the
+renderer decide the time instead. Four things make that work:
+
+| Requirement | Why it matters |
+| --- | --- |
+| A root element with `data-composition-id`, `data-width`, `data-height`, and `data-duration` | Fixes the frame size and the length of the video |
+| `data-start` and `data-duration` on each timed element, plus `class="clip"` | Tells the runtime when each element is on screen |
+| A GSAP timeline created with `{ paused: true }` | HyperFrames owns the playhead and seeks it to each frame |
+| The timeline registered on `window.__timelines["<composition-id>"]` | Lets the runtime find the timeline it has to seek |
+
+[Compositions](/concepts/compositions) explains the model, and the
+[HTML schema](/reference/html-schema) lists every attribute.
+
+## Render your first MP4
+
+You need Node.js 22 or newer and FFmpeg. `npx hyperframes doctor` checks both.
+
+<Steps>
+  <Step title="Save the composition">
+    Create a folder with this `index.html`. It is a complete three-second video:
+    a title rises into place and a bar grows underneath it.
+
+    ```html index.html
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=1920, height=1080" />
+        <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+        <style>
+          html, body { margin: 0; background: #0b0b0f; }
+          #root {
+            position: relative;
+            width: 1920px;
+            height: 1080px;
+            overflow: hidden;
+            font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+          }
+          #title {
+            position: absolute; top: 400px; width: 100%; margin: 0;
+            text-align: center; color: #f4f4f5; font-size: 120px; letter-spacing: -0.04em;
+          }
+          #bar {
+            position: absolute; top: 600px; left: 640px; width: 640px; height: 12px;
+            background: #34d399; border-radius: 6px;
+          }
+        </style>
+      </head>
+      <body>
+        <div id="root" data-composition-id="main" data-start="0" data-duration="3"
+             data-width="1920" data-height="1080">
+          <h1 id="title" class="clip" data-start="0" data-duration="3" data-track-index="0">Hello, MP4</h1>
+          <div id="bar" class="clip" data-start="0" data-duration="3" data-track-index="1"></div>
+        </div>
+        <script>
+          window.__timelines = window.__timelines || {};
+          const tl = gsap.timeline({ paused: true });
+          tl.from("#title", { y: 160, duration: 0.8, ease: "power3.out" }, 0.2)
+            .from("#bar", { scaleX: 0, duration: 1.2, ease: "power2.inOut" }, 0.6)
+            .to("#title", { scale: 1.06, duration: 1.2, ease: "sine.inOut" }, 1.6);
+          window.__timelines.main = tl;
+        </script>
+      </body>
+    </html>
+    ```
+  </Step>
+  <Step title="Check it">
+    Run the linter from that folder. It catches the mistakes that would make a
+    render blank, static, or nondeterministic.
+
+    ```bash
+    npx hyperframes lint
+    ```
+
+    ```text
+    ◇  0 errors, 0 warnings
+    ```
+  </Step>
+  <Step title="Render it">
+    ```bash
+    npx hyperframes render --output hello.mp4
+    ```
+
+    ```text
+    ◇  hello.mp4
+       112.6 KB · 3.0s video · rendered in 4.1s
+    ```
+  </Step>
+  <Step title="Confirm the file">
+    ```bash
+    ffprobe -v error -show_entries format=duration:stream=codec_name,width,height,nb_frames \
+      -of default=nw=1 hello.mp4
+    ```
+
+    ```text
+    codec_name=h264
+    width=1920
+    height=1080
+    nb_frames=90
+    duration=3.000000
+    ```
+
+    Three seconds at the default 30 fps is exactly 90 frames.
+  </Step>
+</Steps>
+
+To preview and scrub the animation before you render, run
+`npx hyperframes preview` in the same folder.
+
+## Convert an existing animation
+
+Keep your HTML and CSS. Change how the motion is driven:
+
+- **CSS transitions or keyframe loops that run on load.** Move the motion onto
+  the paused GSAP timeline. A CSS `transition` runs on the browser clock, so
+  lint reports it as `css_transition_used`.
+- **`requestAnimationFrame` loops.** Replace the loop with timeline tweens or a
+  timeline `onUpdate` callback.
+- **`Math.random()` or `Date.now()`.** Compute the value once and write it in
+  as a constant, or use a seeded generator.
+- **Infinite loops (`repeat: -1`).** Use a finite repeat count that fits the
+  composition's `data-duration`.
+- **Content loaded with `fetch` after the page opens.** Put the data in the
+  page or in a local file so it is ready before the first frame.
+
+The [GSAP guide](/guides/gsap-animation) covers the timeline patterns.
+HyperFrames also seeks CSS, Anime.js, Lottie, Three.js, Web Animations, and
+TypeGPU animation through its runtime. See [Frame adapters](/concepts/frame-adapters).
+
+## Choose the output
+
+| You need | Command |
+| --- | --- |
+| A standard MP4 | `npx hyperframes render --output video.mp4` |
+| Smoother motion | `npx hyperframes render --fps 60 --output video.mp4` |
+| A transparent overlay | `npx hyperframes render --format mov --output overlay.mov` (ProRes 4444) or `--format webm` |
+| A GIF | `npx hyperframes render --format gif --output loop.gif` |
+| Identical output on every machine | `npx hyperframes render --docker --output video.mp4` |
+
+The [Rendering guide](/guides/rendering) and the
+[CLI reference](/packages/cli#render) list every flag.
+
+## Common problems
+
+### The video is static
+
+The timeline is not paused, not registered, or registered under the wrong key.
+`window.__timelines["main"]` must match `data-composition-id="main"`. Lint
+reports `gsap_timeline_not_registered` or `timeline_id_mismatch`.
+
+### An element is always visible
+
+A timed element needs `class="clip"` and its `data-start` and `data-duration`.
+Lint reports `timed_element_missing_clip_class`.
+
+### The video is shorter or longer than expected
+
+The root `data-duration` is the render length. Set it on the root element
+directly; a script cannot change it once the render starts.
+
+### Every render waits about 45 seconds
+
+The page never registers a timeline, so the renderer waits for one until it
+times out. Add `data-no-timeline` to the root of a composition with no
+animation. Lint reports `missing_data_no_timeline`.
+
+### "HyperFrames requires Node.js >= 22"
+
+Switch to Node.js 22 or newer and run the command again.
+
+### "FFmpeg not found"
+
+Install FFmpeg, then rerun `npx hyperframes doctor`. The
+[troubleshooting guide](/guides/troubleshooting) has the install command for
+each platform.
+
+The [lint rules reference](/reference/lint-rules) explains every lint message.
+
+## FAQ
+
+### Can I convert any web page to MP4?
+
+You can render any HTML you control once its motion is driven by a seekable
+timeline. To turn a live website into a video, use
+[product and website videos](/guides/product-launch-video): the agent captures
+the site and builds a composition from it.
+
+### Do I have to use GSAP?
+
+No. GSAP is the default, and HyperFrames also seeks CSS animations, Anime.js,
+Lottie, Three.js, the Web Animations API, and TypeGPU. What matters is that the
+animation can be moved to an exact time.
+
+### Can an AI agent write the HTML for me?
+
+Yes. Install the HyperFrames skills and ask your agent for the video in plain
+words. It writes a composition that follows these rules, lints it, and renders
+it. Start with [Make your first video](/quickstart).
+
+### Is it free?
+
+HyperFrames is open source under the Apache 2.0 license, and local rendering
+costs nothing. Optional cloud rendering and hosted voice or media services may
+have their own costs.
+
+## Related topics
+
+- [Animate with GSAP](/guides/gsap-animation)
+- [Render options and formats](/guides/rendering)
+- [Why renders are deterministic](/concepts/determinism)

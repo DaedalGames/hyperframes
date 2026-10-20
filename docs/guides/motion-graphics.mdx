@@ -1,12 +1,22 @@
 ---
-title: "Create a motion graphic"
+title: "Make AI motion graphics"
 sidebarTitle: "Motion graphic"
-description: "Make a short, motion-led title, statistic, chart, logo sting, or overlay."
+description: "Make AI motion graphics from one sentence: kinetic type, a stat count-up, chart, logo sting, or lower third, rendered as MP4 or a transparent overlay."
+keywords: ["ai motion graphics", "motion graphics", "kinetic typography", "logo animation", "lower third", "animated chart", "motion graphics generator"]
 ---
 
 import { DocsVideo } from "/snippets/docs-video.jsx";
 
-Use Motion Graphics for one short, design-led idea—usually under ten seconds—where the movement carries the message.
+{/* FILM: 8–12 s reel of three motion graphics made from one-sentence requests, each request typed on screen first and then playing: a kinetic headline, a count-up that lands on a number, and a lower third composited over real footage to prove the transparent export. No narration. */}
+
+To make AI motion graphics, describe the message in one sentence and ask your
+coding agent for it. HyperFrames designs and animates it as code (kinetic type,
+a statistic, a chart, a logo sting, a lower third, or a map) and renders it as
+an MP4 or as a transparent overlay for your editor.
+
+Use it for one short, design-led idea, usually under ten seconds, where the
+movement carries the message. Every graphic stays editable, so you can change
+the words or the timing and render again.
 
 
 <DocsVideo
@@ -76,6 +86,31 @@ music and sound, no narration, the motion carrying all of it.
   />
 </Frame>
 
+
+## FAQ
+
+### Can I use the graphic in Premiere Pro, Final Cut, or DaVinci Resolve?
+
+Yes. Ask for a transparent MOV. It renders as ProRes 4444 with an alpha channel,
+which video editors read. A transparent WebM is smaller, but only browsers
+decode its transparency; editors show the empty areas as black.
+
+### Do I need to describe the animation rules in my prompt?
+
+No. The installed skills already carry the motion rules. Describe the message,
+the exact words or numbers, and the length. Add a style or a reference only when
+you have one in mind.
+
+### Can I keep the code instead of a video?
+
+Yes. The graphic is an HTML composition in your project folder. You can edit
+it, keep it in version control, and render it again whenever it changes.
+
+### How long can a motion graphic be?
+
+Most are under ten seconds, and the workflow goes up to about thirty. For
+narration, several scenes, or a longer story, use
+[General Video](/guides/general-video).
 
 ## Related topics
 
