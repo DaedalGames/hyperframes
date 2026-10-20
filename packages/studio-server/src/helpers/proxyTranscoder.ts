@@ -282,12 +282,10 @@ export function getProxyCachePath(
 }
 
 // --- global concurrency limiter -------------------------------------------
-// ponytail: a counter + one wait line is the whole semaphore. Priority copies
-// are never refused for a full queue, so a few priority asks can exceed the cap.
-// Invariant: a freed slot goes to the head of the line, ordered priority, then
-// foreground (a viewer waits), then background, FIFO within each by when it joined
-// that rank. A stopped copy a viewer now waits on joins the line as foreground
-// (resumed, not restarted), so it is never starved by queued background copies.
+// ponytail: a counter + one wait line is the whole semaphore; priority asks skip the queue cap.
+// Invariant: a freed slot goes to the line's head: priority, then foreground, then background,
+// FIFO within each by when it joined that rank. A stopped copy a viewer waits on joins as
+// foreground and resumes, so queued background copies never starve it.
 
 /** One copy per cache key, shared by every caller asking for it. */
 interface ProxyJob {
@@ -306,7 +304,6 @@ interface ProxyJob {
   queued?: { start: () => void; drop: () => void };
   /** Counted in activeTranscodes; a stopped background copy gives its slot back. */
   holdsSlot?: boolean;
-  /** SIGSTOPped; set until SIGCONT, so a kill while stopped is never a failure. */
   stopped?: boolean;
   /** Set while its ffmpeg runs: SIGCONTs a stopped copy into a free slot. */
   resume?: () => void;
@@ -383,7 +380,6 @@ function releaseSlot(job: ProxyJob): void {
   else next?.resume?.();
 }
 
-/** Moves a job in the line to its rank's tail, as if it joined now. */
 function requeue(job: ProxyJob): void {
   if (!waitQueue.includes(job)) return;
   dequeue(job);
@@ -490,12 +486,8 @@ function trackEncoder(proc: ChildProcess, tempPath: string): void {
   });
 }
 
-/**
- * Hard ceiling so a hung ffmpeg can never permanently occupy a slot: killed after
- * TRANSCODE_TIMEOUT_MS of running, generous as long assets encode at about real
- * time. Not spawn's `timeout`, which also counts time spent SIGSTOPped, killing a
- * copy held through a long playback.
- */
+/** A hung ffmpeg never keeps a slot: killed after TRANSCODE_TIMEOUT_MS of encoding (long assets
+ * encode at about real time). Not spawn's `timeout`, which also counts time spent SIGSTOPped. */
 function timeEncoder(proc: ChildProcess, job: ProxyJob): void {
   let left = TRANSCODE_TIMEOUT_MS;
   let since = 0;
@@ -777,7 +769,6 @@ async function runFfmpeg(
     ];
     const args = [...commonArgs, ...(variant === "vp8" ? vp8Args : h264Args), outputPath];
 
-    // The running-time ceiling is timeEncoder's; the slot is released via the caller's finally.
     signal.throwIfAborted();
     const proc = spawn(ffmpegPath, args, {
       stdio: ["ignore", "ignore", "pipe"],
