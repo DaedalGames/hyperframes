@@ -53,6 +53,14 @@ jobs:
           sw_vers
           CHROMEDRIVER="$CHROMEWEBDRIVER/chromedriver" bun run tests/perf/browsers/run.ts --browsers safari,chrome --runs 2
 
+      - name: Record the screen while films play
+        if: always()
+        working-directory: packages/player
+        run: |
+          system_profiler SPDisplaysDataType | grep -i resolution || true
+          ffmpeg -hide_banner -f avfoundation -list_devices true -i "" 2>&1 | grep -i "screen" || true
+          CHROMEDRIVER="$CHROMEWEBDRIVER/chromedriver" bun run tests/perf/browsers/record.ts --browsers safari,chrome
+
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
