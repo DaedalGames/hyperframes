@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { realpathSync } from "node:fs";
 
-const SWEEP = `$b=[int]$env:HF_CHROME_PID; $x=$env:HF_CHROME_EXE; Get-CimInstance Win32_Process | Where-Object { ($_.ProcessId -eq $b -or $_.ParentProcessId -eq $b) -and $_.ExecutablePath -eq $x } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
+const SWEEP = `$b=[int]$env:HF_CHROME_PID; $x=$env:HF_CHROME_EXE; $t=[DateTimeOffset]::FromUnixTimeMilliseconds([int64]$env:HF_CHROME_SINCE).UtcDateTime; Get-CimInstance Win32_Process | Where-Object { ($_.ProcessId -eq $b -or $_.ParentProcessId -eq $b) -and $_.ExecutablePath -eq $x -and $_.CreationDate.ToUniversalTime() -ge $t } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
 
 const WATCHDOG = `let clean = false;
 const done = () => {
@@ -25,12 +25,20 @@ function executableOf(chrome: ChildProcess): string | undefined {
 }
 
 /** Windows does not end a process's children with it, so Chrome's children outlive a killed CLI without this. */
-export function watchChromeTree(chrome: ChildProcess): ChromeWatchdog | undefined {
+export function watchChromeTree(
+  chrome: ChildProcess,
+  launchedAt: number,
+): ChromeWatchdog | undefined {
   const executable = process.platform === "win32" ? executableOf(chrome) : undefined;
   if (!executable || chrome.pid === undefined) return undefined;
   const watchdog = spawn(process.execPath, ["-e", WATCHDOG], {
     detached: true,
-    env: { ...process.env, HF_CHROME_PID: String(chrome.pid), HF_CHROME_EXE: executable },
+    env: {
+      ...process.env,
+      HF_CHROME_PID: String(chrome.pid),
+      HF_CHROME_EXE: executable,
+      HF_CHROME_SINCE: String(launchedAt),
+    },
     stdio: ["pipe", "ignore", "ignore"],
     windowsHide: true,
   });
