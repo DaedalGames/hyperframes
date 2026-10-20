@@ -272,8 +272,12 @@ describe("loadSharpInBackground", () => {
       const { deps, install, log } = fakeDeps();
       const load = () => loadSharpInBackground("image thumbnails", deps, () => null);
 
-      await expect(load()).rejects.toThrow("HYPERFRAMES_NO_OPTIONAL_INSTALL turns off installing it");
-      await expect(load()).rejects.toThrow("HYPERFRAMES_NO_OPTIONAL_INSTALL turns off installing it");
+      await expect(load()).rejects.toThrow(
+        "HYPERFRAMES_NO_OPTIONAL_INSTALL turns off installing it",
+      );
+      await expect(load()).rejects.toThrow(
+        "HYPERFRAMES_NO_OPTIONAL_INSTALL turns off installing it",
+      );
       expect(install).not.toHaveBeenCalled();
       expect(log).toHaveBeenCalledTimes(1);
     } finally {

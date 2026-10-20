@@ -200,7 +200,9 @@ describe("snapshot contact sheet failures", () => {
     vi.stubEnv("HYPERFRAMES_NO_OPTIONAL_INSTALL", "sharp");
     const generateContent = vi.fn(async (_request: unknown) => ({ text: "a described frame" }));
     const loadSharp = vi.fn(async () => {
-      throw new Error("sharp is not installed, and HYPERFRAMES_NO_OPTIONAL_INSTALL turns off installing it");
+      throw new Error(
+        "sharp is not installed, and HYPERFRAMES_NO_OPTIONAL_INSTALL turns off installing it",
+      );
     });
     vi.doMock("../utils/optionalPackages.js", async (importOriginal) => ({
       ...(await importOriginal<typeof import("../utils/optionalPackages.js")>()),
@@ -224,7 +226,9 @@ describe("snapshot contact sheet failures", () => {
       });
 
       expect(generateContent).toHaveBeenCalledTimes(2);
-      expect(JSON.stringify(generateContent.mock.calls[0]?.[0])).toContain('"mimeType":"image/png"');
+      expect(JSON.stringify(generateContent.mock.calls[0]?.[0])).toContain(
+        '"mimeType":"image/png"',
+      );
       expect(readFileSync(join(project, "snapshots", "descriptions.md"), "utf8")).toContain(
         "a described frame",
       );

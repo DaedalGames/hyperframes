@@ -129,7 +129,8 @@ export async function loadSharpInBackground(
   }
   const notYet = Symbol("installing");
   const settled = await Promise.race([install, notYet]);
-  if (settled === notYet) throw new Error(`sharp is not installed yet; installing it once for ${feature}`);
+  if (settled === notYet)
+    throw new Error(`sharp is not installed yet; installing it once for ${feature}`);
   return sharpExport(settled);
 }
 
