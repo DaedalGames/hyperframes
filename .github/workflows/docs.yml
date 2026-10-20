@@ -16,6 +16,11 @@ on:
       - "DOCS_GUIDELINES.md"
       - "packages/core/schemas/**"
       - "scripts/sync-schemas.ts"
+      # A CLI change can strand a command or flag the docs still show.
+      - "packages/cli/src/**"
+      - "scripts/cli-command-tree.ts"
+      - "scripts/check-docs-cli-references.mjs"
+      - ".github/workflows/docs.yml"
   push:
     branches: [main]
     paths:
@@ -23,6 +28,11 @@ on:
       - "DOCS_GUIDELINES.md"
       - "packages/core/schemas/**"
       - "scripts/sync-schemas.ts"
+      # A CLI change can strand a command or flag the docs still show.
+      - "packages/cli/src/**"
+      - "scripts/cli-command-tree.ts"
+      - "scripts/check-docs-cli-references.mjs"
+      - ".github/workflows/docs.yml"
 
 concurrency:
   group: docs-${{ github.ref }}
@@ -52,3 +62,24 @@ jobs:
         # --check-redirects also resolves every redirect destination, so a
         # restructure cannot leave a redirect pointing at a page it removed.
         run: npx mint broken-links --check-redirects
+
+  cli-references:
+    name: CLI references
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - run: bash scripts/ci/install-workspace-dependencies.sh
+
+      # The command tree loads the CLI's command modules, which import core's generated sources.
+      - run: bun run --cwd packages/core build
+
+      - name: Check every command and flag the docs show exists in the CLI
+        run: node scripts/check-docs-cli-references.mjs
