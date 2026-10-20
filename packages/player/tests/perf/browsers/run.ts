@@ -269,13 +269,12 @@ const CONTROLS: Array<{
 }> = [
   { name: "grid-native", media: "grid-sample", n: 10, rate: 1 },
   { name: "grid-runtime-bare", film: "10-video-grid" },
-  { name: "grid-runtime-bare-scale-0.67", film: "10-video-grid", extra: "&displayScale=0.6667" },
-  { name: "grid-runtime-bare (2)", film: "10-video-grid" },
-  {
-    name: "grid-runtime-bare-scale-0.67 (2)",
-    film: "10-video-grid",
-    extra: "&displayScale=0.6667",
-  },
+  { name: "grid-bare-player-attrs", film: "10-video-grid", extra: "&attrs=1" },
+  { name: "grid-bare-shadow-root", film: "10-video-grid", extra: "&shadow=1" },
+  { name: "grid-bare-player-messages", film: "10-video-grid", extra: "&messages=1" },
+  { name: "grid-bare-all-three", film: "10-video-grid", extra: "&attrs=1&shadow=1&messages=1" },
+  { name: "grid-bare-player-messages (2)", film: "10-video-grid", extra: "&messages=1" },
+  { name: "grid-bare-all-three (2)", film: "10-video-grid", extra: "&attrs=1&shadow=1&messages=1" },
 ];
 
 // Opens a page and returns the value it publishes on window[global] once it has one.

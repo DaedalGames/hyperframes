@@ -22,7 +22,9 @@
     <script>
       // ?film=<key>: the same runtime and film as the bench, driven through the runtime's own API;
       // &ticks=1 adds the player's per-frame "tick" message from the parent; &displayScale=<s> sends the
-      // player's display-scale message, which below 1 turns on the runtime's raster hints.
+      // player's display-scale message, which below 1 turns on the runtime's raster hints;
+      // &attrs=1 gives the iframe the player's attributes, &shadow=1 hosts it in a shadow root,
+      // &messages=1 sends the player's setup messages and starts playback by message, as the player does.
       (async function () {
         var FILMS = {
           "10-video-grid": "../10-video-grid/index.html",
@@ -32,8 +34,26 @@
         var src = FILMS[q.get("film")];
         if (!src) throw new Error("unknown film");
         var frame = document.createElement("iframe");
+        if (q.get("attrs")) {
+          frame.sandbox.add("allow-scripts", "allow-same-origin");
+          frame.allow = "autoplay; fullscreen";
+          frame.referrerPolicy = "no-referrer";
+        }
         frame.src = src;
-        document.body.appendChild(frame);
+        if (q.get("shadow")) {
+          var hostEl = document.createElement("div");
+          document.body.appendChild(hostEl);
+          var root = hostEl.attachShadow({ mode: "open" });
+          var style = document.createElement("style");
+          style.textContent =
+            "iframe { border: 0; width: 1920px; height: 1080px; transform-origin: 0 0; transform: scale(0.6667); }";
+          root.append(style, frame);
+        } else document.body.appendChild(frame);
+        var control = (action, extra) =>
+          frame.contentWindow.postMessage(
+            Object.assign({ source: "hf-parent", type: "control", action }, extra),
+            "*",
+          );
         var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
         var player = null;
         for (var i = 0; i < 300 && !player; i++) {
@@ -93,7 +113,21 @@
             requestAnimationFrame(tick);
           })();
         }
-        player.play();
+        if (q.get("messages")) {
+          control("set-muted", { muted: true });
+          control("set-volume", { volume: 1 });
+          control("set-playback-rate", { playbackRate: 1 });
+          control("set-native-media-sync-disabled", { disabled: false });
+          control("set-web-audio-media-disabled", { disabled: false });
+          control("set-idle-heartbeat", { slow: false });
+          control("set-display-scale", { scale: 0.6667 });
+          await sleep(300);
+          control("play");
+          (function tick() {
+            control("tick");
+            requestAnimationFrame(tick);
+          })();
+        } else player.play();
         for (var j = 0; j < 50 && !player.isPlaying(); j++) await sleep(100);
         var before = decoded();
         var movesBefore = timelineMoves;
