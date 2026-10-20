@@ -386,6 +386,27 @@ describe("offloadHeavyMedia", () => {
     }
   });
 
+  it("never decodes a media file as text, since one can exceed the longest string allowed", async () => {
+    const dir = project({
+      "index.html": html(`<video src="clip.mp4"></video>`),
+      "clip.mp4": HEAVY,
+    });
+    const fileMap = buildPublishFileMap(dir);
+    const binary = Buffer.alloc(16);
+    binary.toString = () => {
+      throw new Error("decoded a binary entry");
+    };
+    fileMap.set("media/raw.bin", binary);
+
+    await expect(
+      offloadHeavyMedia(dir, fileMap, {
+        apiBaseUrl: "https://api.example",
+        upload: fakeUpload(),
+        cachePath: cachePath(),
+      }),
+    ).resolves.toHaveLength(1);
+  });
+
   it("leaves small media and remote URLs alone", async () => {
     const dir = project({
       "index.html": html(`<img src="logo.png" /><video src="https://cdn.example/a.mp4"></video>`),

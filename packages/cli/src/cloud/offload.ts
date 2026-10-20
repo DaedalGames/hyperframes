@@ -708,14 +708,15 @@ function rewriteReferences(
   };
 
   for (const [entryPath, content] of [...fileMap]) {
-    const text = content.toString("utf-8");
-    const next = /\.html?$/i.test(entryPath)
-      ? rewriteHtmlEntry(absDir, entryPath, text, urlFor, fileMap)
+    // Decode text entries only: a media file can be larger than the longest string V8 allows.
+    const rewrite: ((text: string) => string | null) | null = /\.html?$/i.test(entryPath)
+      ? (text) => rewriteHtmlEntry(absDir, entryPath, text, urlFor, fileMap)
       : /\.css$/i.test(entryPath)
-        ? rewriteCssEntry(absDir, entryPath, text, urlFor)
+        ? (text) => rewriteCssEntry(absDir, entryPath, text, urlFor)
         : /\.(m?js|cjs|json)$/i.test(entryPath)
-          ? rewriteStringLiterals(text, urlFor)
+          ? (text) => rewriteStringLiterals(text, urlFor)
           : null;
+    const next = rewrite?.(content.toString("utf-8")) ?? null;
     if (next !== null) fileMap.set(entryPath, Buffer.from(next, "utf-8"));
   }
 }
