@@ -148,6 +148,20 @@ function score(page: PageResult) {
 const CONTROLS = [
   { name: "grid-sample", src: "/fixtures/10-video-grid/sample.mp4", n: 10, rate: 1 },
   { name: "grid-sample-rate-1.03", src: "/fixtures/10-video-grid/sample.mp4", n: 10, rate: 1.03 },
+  {
+    name: "grid-sample-tick",
+    src: "/fixtures/10-video-grid/sample.mp4",
+    n: 10,
+    rate: 1,
+    extra: "&tick=1",
+  },
+  {
+    name: "grid-sample-animate",
+    src: "/fixtures/10-video-grid/sample.mp4",
+    n: 10,
+    rate: 1,
+    extra: "&animate=1",
+  },
   { name: "16x1080", src: "/fixtures/_media/h264-1080.mp4", n: 16, rate: 1 },
   { name: "alpha-webm", src: "/fixtures/_media/alpha-vp9.webm", n: 6, rate: 1 },
 ];
@@ -164,7 +178,7 @@ async function runControl(
   const s = `/session/${session.sessionId}`;
   try {
     await wd(base, "POST", `${s}/url`, {
-      url: `${origin}/fixtures/_control/index.html?src=${c.src}&n=${c.n}&rate=${c.rate}`,
+      url: `${origin}/fixtures/_control/index.html?src=${c.src}&n=${c.n}&rate=${c.rate}${c.extra ?? ""}`,
     });
     const deadline = Date.now() + 60_000;
     while (Date.now() < deadline) {

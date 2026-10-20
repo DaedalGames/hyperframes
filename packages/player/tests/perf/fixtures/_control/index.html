@@ -18,7 +18,7 @@
   </head>
   <body>
     <script>
-      // ?src=<file in _media or a fixture path>&n=<count>&rate=<playbackRate>; same decoder counters as the bench.
+      // ?src=&n=&rate=, plus &tick=1 (the runtime's per-frame media writes) or &animate=1 (transform every frame).
       (async function () {
         var q = new URLSearchParams(location.search);
         var videos = [];
@@ -49,6 +49,22 @@
           );
         await Promise.all(videos.map((v) => v.play()));
         videos.forEach((v) => (v.playbackRate = Number(q.get("rate") || 1)));
+        if (q.get("tick")) {
+          (function tick() {
+            videos.forEach((v) => {
+              v.volume = 1;
+              v.muted = true;
+              void v.currentTime;
+            });
+            requestAnimationFrame(tick);
+          })();
+        }
+        if (q.get("animate")) {
+          (function frame(t) {
+            document.body.style.transform = "scale(" + (0.9 + 0.05 * Math.sin(t / 500)) + ")";
+            requestAnimationFrame(frame);
+          })(0);
+        }
         var before = decoded();
         await new Promise((r) => setTimeout(r, 8000));
         var after = decoded();
