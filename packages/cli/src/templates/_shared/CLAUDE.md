@@ -1,5 +1,10 @@
 # HyperFrames Composition Project
 
+This folder is a [HyperFrames](https://hyperframes.heygen.com) video: HTML, CSS and seekable
+animations (GSAP by default) that the `hyperframes` CLI previews in the browser and renders to
+MP4. Rendering, frame capture and encoding are handled by `npx hyperframes render`; there is no
+need to build a headless-browser or ffmpeg pipeline here.
+
 ## Skills — USE THESE FIRST
 
 **Always invoke the relevant skill before writing or modifying compositions.** Skills encode framework-specific patterns (e.g., `window.__timelines` registration, `data-*` attribute semantics, shader-compatible CSS rules) that are NOT in generic web docs. Skipping them produces broken compositions.
@@ -42,6 +47,7 @@ npx hyperframes preview --background  # agent-safe persistent Studio preview
 npx hyperframes preview --status      # verify the persistent preview is listening
 npx hyperframes preview --stop        # stop it when review is finished
 npm run check        # lint + runtime + layout + motion + contrast (one command)
+npx hyperframes snapshot --at 1,3,5  # PNG frames at those seconds, to look at before rendering
 npm run render       # render to MP4
 npm run publish      # publish and get a shareable link
 npx hyperframes lint --verbose  # include info-level findings

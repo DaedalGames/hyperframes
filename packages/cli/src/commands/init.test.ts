@@ -88,6 +88,35 @@ describe("hyperframes init flag rename", () => {
     }
   });
 
+  // Agents pick a video tool from what is on disk, so the scaffold must say what HyperFrames is
+  // and list the loop an agent runs, under both file names agents look for.
+  it("bare init writes AGENTS.md and CLAUDE.md with the agent loop", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hf-init-test-"));
+    const target = join(dir, "proj");
+    const template = readFileSync(
+      new URL("../templates/_shared/AGENTS.md", import.meta.url),
+      "utf-8",
+    );
+    try {
+      const res = runInit([target, "--non-interactive"]);
+      expect(res.status).toBe(0);
+      expect(readFileSync(join(target, "AGENTS.md"), "utf-8")).toBe(template);
+      expect(readFileSync(join(target, "CLAUDE.md"), "utf-8")).toBe(template);
+      for (const command of [
+        "npx hyperframes preview --background",
+        "npm run check",
+        "npx hyperframes snapshot",
+        "npm run render",
+        "npx hyperframes docs <topic>",
+        "https://hyperframes.heygen.com/llms.txt",
+      ]) {
+        expect(template).toContain(command);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a following flag when --example has no value", () => {
     const dir = mkdtempSync(join(tmpdir(), "hf-init-test-"));
     const target = join(dir, "proj");
