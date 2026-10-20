@@ -1161,12 +1161,21 @@ async function bundleProject(projectDir: string, options?: BundleOptions): Promi
   const subCompositionHosts = trackedCompositionHosts.filter((host) =>
     host.hasAttribute("data-composition-src"),
   );
+  const sceneSources = new Map<string, string | null>();
   const subCompResult = inlineSubCompositions(document, subCompositionHosts, {
     resolveHtml: (srcPath: string) => {
       if (!isRelativeUrl(srcPath)) return null;
       const compPath = resolveEntryPath(srcPath);
-      const html = compPath ? safeReadFile(compPath) : null;
-      return html === null ? null : readSource(html);
+      if (!compPath) return null;
+      let source = sceneSources.get(compPath);
+      if (source === undefined) {
+        const html = safeReadFile(compPath);
+        source = html === null ? null : readSource(html);
+        sceneSources.set(compPath, source);
+      } else {
+        noteRead(compPath);
+      }
+      return source;
     },
     parseHtml: parseHTMLContent,
     hostIdentityMap: hostIdentityByElement,
