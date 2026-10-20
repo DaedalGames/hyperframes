@@ -80,6 +80,29 @@ export async function bench(cfg) {
       }
     }
     const lag = () => all.map((v) => runtime.getTime() - v.currentTime);
+    // The player's parent-page media proxies: owner, count and state, and an option to empty them first.
+    const proxies = () => host._media?._entries ?? [];
+    if (cfg.emptyProxies) {
+      for (const entry of proxies()) {
+        entry.el.removeAttribute("src");
+        entry.el.load();
+      }
+    }
+    const hostOps = { play: 0, seek: 0 };
+    const hostProto = window.HTMLMediaElement.prototype;
+    const hostPlay = hostProto.play;
+    hostProto.play = function (...args) {
+      hostOps.play++;
+      return hostPlay.apply(this, args);
+    };
+    const hostTime = Object.getOwnPropertyDescriptor(hostProto, "currentTime");
+    Object.defineProperty(hostProto, "currentTime", {
+      ...hostTime,
+      set(value) {
+        hostOps.seek++;
+        hostTime.set.call(this, value);
+      },
+    });
     host.play();
     await until(() => runtime.isPlaying(), 5_000, "isPlaying");
     const before = decoded();
@@ -94,6 +117,11 @@ export async function bench(cfg) {
     }, 100);
     await sleep(1000);
     const lagEarly = lag();
+    const proxyState = {
+      owner: host._media?._audioOwner === "parent" ? 1 : 0,
+      count: proxies().length,
+      playing: proxies().filter((e) => !e.el.paused).length,
+    };
     await sleep(cfg.playMs - 1000);
     const lagLate = lag();
     clearInterval(rateSampler);
@@ -104,6 +132,8 @@ export async function bench(cfg) {
       videoCount: videos().length,
       decoded: { dropped: after.dropped - before.dropped, total: after.total - before.total },
       frameReads,
+      proxyState,
+      hostOps,
       perVideo: all.map((v, i) => {
         const a = startQuality.get(v);
         const b = quality(v);

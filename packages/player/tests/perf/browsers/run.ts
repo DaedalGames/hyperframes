@@ -237,6 +237,21 @@ function dropsBySteering(perVideo: PerVideo[] | undefined) {
   };
 }
 
+type ProxyReport = {
+  proxyState?: { owner: number; count: number; playing: number };
+  hostOps?: { play: number; seek: number };
+};
+
+function proxyColumns(page: ProxyReport) {
+  return {
+    proxyOwnerParent: num(page.proxyState?.owner),
+    proxies: num(page.proxyState?.count),
+    proxiesPlaying: num(page.proxyState?.playing),
+    hostPlays: num(page.hostOps?.play),
+    hostSeeks: num(page.hostOps?.seek),
+  };
+}
+
 // The player with no per-frame probe: its decoder drops are the player's alone.
 const COUNTERS_ONLY_FILMS = ["10-video-grid", "heavy-16x1080"];
 
@@ -251,11 +266,7 @@ const CONTROLS: Array<{
 }> = [
   { name: "grid-native", media: "grid-sample", n: 10, rate: 1 },
   { name: "grid-runtime-bare", film: "10-video-grid" },
-  { name: "grid-runtime-bare-ticks", film: "10-video-grid", extra: "&ticks=1" },
-  { name: "grid-runtime-bare (2)", film: "10-video-grid" },
-  { name: "grid-runtime-bare-ticks (2)", film: "10-video-grid", extra: "&ticks=1" },
   { name: "16x1080-runtime-bare", film: "heavy-16x1080" },
-  { name: "16x1080-runtime-bare-ticks", film: "heavy-16x1080", extra: "&ticks=1" },
 ];
 
 // Opens a page and returns the value it publishes on window[global] once it has one.
@@ -293,6 +304,7 @@ async function runFilm(
   origin: string,
   fixture: string,
   countersOnly = false,
+  emptyProxies = false,
 ) {
   const session = await wd(base, "POST", "/session", {
     capabilities: { alwaysMatch: DRIVERS[browser].caps },
@@ -310,7 +322,7 @@ async function runFilm(
         window.__hfBench(arguments[0]).then(
         (r) => { window.__bench = { ok: r }; },
         (e) => { window.__bench = { error: String(e && e.stack || e) }; });`,
-      args: [{ playMs: PLAY_MS, seekFractions: SEEK_FRACTIONS, countersOnly }],
+      args: [{ playMs: PLAY_MS, seekFractions: SEEK_FRACTIONS, countersOnly, emptyProxies }],
     });
     const deadline = Date.now() + 180_000;
     while (Date.now() < deadline) {
@@ -399,9 +411,12 @@ try {
           }
         }
       }
-      for (const fixture of COUNTERS_ONLY_FILMS) {
+      for (const [fixture, emptyProxies] of COUNTERS_ONLY_FILMS.flatMap((f) => [
+        [f, false] as const,
+        [f, true] as const,
+      ])) {
         for (let run = 1; run <= runs; run++) {
-          const label = `${fixture} (counters only)`;
+          const label = `${fixture} (counters only${emptyProxies ? ", proxies emptied" : ""})`;
           try {
             const { page } = await runFilm(
               `http://127.0.0.1:${port}`,
@@ -409,6 +424,7 @@ try {
               server.origin,
               fixture,
               true,
+              emptyProxies,
             );
             const dropped = num(page.decoded.dropped) ?? 0;
             const total = num(page.decoded.total) ?? 0;
@@ -428,6 +444,7 @@ try {
               videoDraws: num(
                 (page as { frameReads?: { videoDraws: number } }).frameReads?.videoDraws,
               ),
+              ...proxyColumns(page as ProxyReport),
             });
             console.log(JSON.stringify(rows[rows.length - 1]));
           } catch (e) {
@@ -505,6 +522,11 @@ const cols = [
   "videoFrameCallbacks",
   "videoDraws",
   "timelineMovesPerSecond",
+  "proxyOwnerParent",
+  "proxies",
+  "proxiesPlaying",
+  "hostPlays",
+  "hostSeeks",
   "mediaSeeks",
   "rateWrites",
   "seekP50Ms",
