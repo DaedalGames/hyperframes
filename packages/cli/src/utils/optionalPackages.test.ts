@@ -237,7 +237,7 @@ describe("loadSharp", () => {
     const manifest = JSON.parse(
       readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
     );
-    expect(satisfies(SHARP_VERSION, manifest.dependencies.sharp)).toBe(true);
+    expect(satisfies(SHARP_VERSION, manifest.optionalDependencies.sharp)).toBe(true);
   });
 });
 
