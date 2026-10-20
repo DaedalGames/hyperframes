@@ -74,9 +74,8 @@ function usePreviewRefresh(deps: PreviewRefreshDeps) {
     // the iframe from the FIRST reload is mid-teardown: getAdapter() can still
     // return that dying document's adapter, whose getTime() reads 0 — and the
     // store's currentTime can lag the visual playhead. Overwriting the
-    // still-unconsumed pendingSeek with either value is exactly how the
-    // playhead used to end up at 0 after a Finder drop (verified live via a
-    // currentTime write-trace). So: while a refresh is already in flight and a
+    // still-unconsumed pendingSeek with either value puts the playhead at 0
+    // after a Finder drop. So: while a refresh is already in flight and a
     // save exists, keep it; otherwise trust the live adapter, then the store.
     const refreshInFlight = isRefreshingRef.current && pendingSeekRef.current != null;
     if (!refreshInFlight) {
