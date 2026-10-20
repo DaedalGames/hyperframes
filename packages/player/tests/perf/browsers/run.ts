@@ -202,26 +202,38 @@ function score(page: PageResult) {
   };
 }
 
-type PerVideo = { dropped: number; total: number; steeredFraction?: number; rate?: number };
+type PerVideo = {
+  dropped: number;
+  total: number;
+  steeredFraction?: number;
+  rate?: number;
+  rateBlocked?: boolean;
+  lagLate?: number;
+};
 
 /** Decoder drops of rate-steered videos against the rest of the same page, so runner noise hits both alike. */
 function dropsBySteering(perVideo: PerVideo[] | undefined) {
-  const sums = { steered: [0, 0, 0], unsteered: [0, 0, 0] };
+  const sums = { steered: [0, 0, 0, 0], unsteered: [0, 0, 0, 0] };
   for (const v of perVideo ?? []) {
     const steered =
-      v.steeredFraction !== undefined
-        ? v.steeredFraction > 0.5
-        : Math.abs((num(v.rate) ?? 1) - 1) > 1e-6;
+      v.rateBlocked !== undefined
+        ? v.rateBlocked !== true
+        : v.steeredFraction !== undefined
+          ? v.steeredFraction > 0.5
+          : Math.abs((num(v.rate) ?? 1) - 1) > 1e-6;
     const sum = steered ? sums.steered : sums.unsteered;
     sum[0] += num(v.dropped) ?? 0;
     sum[1] += num(v.total) ?? 0;
     sum[2] += 1;
+    sum[3] += num(v.lagLate) ?? 0;
   }
   const pct = ([dropped, total]: number[]) => (total ? num((dropped! / total) * 100) : null);
   return {
     steeredVideos: sums.steered[2],
     steeredDropPct: pct(sums.steered),
     unsteeredDropPct: pct(sums.unsteered),
+    steeredLagMs: sums.steered[2] ? num((sums.steered[3] / sums.steered[2]) * 1000) : null,
+    unsteeredLagMs: sums.unsteered[2] ? num((sums.unsteered[3] / sums.unsteered[2]) * 1000) : null,
   };
 }
 
@@ -437,6 +449,13 @@ try {
               decoderFrames: total,
               presentedFps: videos ? num((total - dropped) / videos / (PLAY_MS / 1000)) : null,
               ...dropsBySteering((page as { perVideo?: PerVideo[] }).perVideo),
+              videoFrameCallbacks: num(
+                (page as { frameReads?: { videoFrameCallbacks: number } }).frameReads
+                  ?.videoFrameCallbacks,
+              ),
+              videoDraws: num(
+                (page as { frameReads?: { videoDraws: number } }).frameReads?.videoDraws,
+              ),
             });
             console.log(JSON.stringify(rows[rows.length - 1]));
           } catch (e) {
@@ -505,6 +524,10 @@ const cols = [
   "steeredVideos",
   "steeredDropPct",
   "unsteeredDropPct",
+  "steeredLagMs",
+  "unsteeredLagMs",
+  "videoFrameCallbacks",
+  "videoDraws",
   "mediaSeeks",
   "rateWrites",
   "seekP50Ms",

@@ -45,6 +45,41 @@ export async function bench(cfg) {
 
   // Decoder counters only, no per-frame probe or wrappers: separates the probe's own cost from the player's.
   if (cfg.countersOnly) {
+    // Odd-numbered videos ignore the runtime's rate steering, so both halves of one page can be compared.
+    const all = videos();
+    const unsteerable = new Set(all.filter((_, i) => i % 2 === 1));
+    const proto = win.HTMLMediaElement.prototype;
+    const rateDescriptor = Object.getOwnPropertyDescriptor(proto, "playbackRate");
+    Object.defineProperty(proto, "playbackRate", {
+      ...rateDescriptor,
+      set(value) {
+        if (!unsteerable.has(this)) rateDescriptor.set.call(this, value);
+      },
+    });
+    const frameReads = { videoFrameCallbacks: 0, videoDraws: 0 };
+    const videoProto = win.HTMLVideoElement.prototype;
+    if (videoProto.requestVideoFrameCallback) {
+      const request = videoProto.requestVideoFrameCallback;
+      videoProto.requestVideoFrameCallback = function (...args) {
+        frameReads.videoFrameCallbacks++;
+        return request.apply(this, args);
+      };
+    }
+    for (const Ctx of [
+      win.CanvasRenderingContext2D,
+      win.WebGLRenderingContext,
+      win.WebGL2RenderingContext,
+    ]) {
+      for (const method of ["drawImage", "texImage2D", "texSubImage2D"]) {
+        const original = Ctx?.prototype?.[method];
+        if (!original) continue;
+        Ctx.prototype[method] = function (...args) {
+          if (args.some((a) => a instanceof win.HTMLVideoElement)) frameReads.videoDraws++;
+          return original.apply(this, args);
+        };
+      }
+    }
+    const lag = () => all.map((v) => runtime.getTime() - v.currentTime);
     host.play();
     await until(() => runtime.isPlaying(), 5_000, "isPlaying");
     const before = decoded();
@@ -57,7 +92,10 @@ export async function bench(cfg) {
       for (const v of videos())
         if (Math.abs(v.playbackRate - 1) > 1e-6) steeredTicks.set(v, steeredTicks.get(v) + 1);
     }, 100);
-    await sleep(cfg.playMs);
+    await sleep(1000);
+    const lagEarly = lag();
+    await sleep(cfg.playMs - 1000);
+    const lagLate = lag();
     clearInterval(rateSampler);
     const after = decoded();
     host.pause();
@@ -65,13 +103,17 @@ export async function bench(cfg) {
       countersOnly: true,
       videoCount: videos().length,
       decoded: { dropped: after.dropped - before.dropped, total: after.total - before.total },
-      perVideo: videos().map((v) => {
+      frameReads,
+      perVideo: all.map((v, i) => {
         const a = startQuality.get(v);
         const b = quality(v);
         return {
           dropped: b.droppedVideoFrames - a.droppedVideoFrames,
           total: b.totalVideoFrames - a.totalVideoFrames,
           steeredFraction: ticks ? steeredTicks.get(v) / ticks : 0,
+          rateBlocked: unsteerable.has(v),
+          lagEarly: lagEarly[i],
+          lagLate: lagLate[i],
         };
       }),
     };
