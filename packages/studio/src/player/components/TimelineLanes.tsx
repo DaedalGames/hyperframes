@@ -220,6 +220,14 @@ export function TimelineLanes({
           if (!logicalRow) return null;
           const rowHeight = rowGeometry.getRowHeight(row);
           const els = tracks.find(([t]) => t === trackNum)?.[1] ?? [];
+          // Only the selected/most-keyframed clip owns expanded lanes on a shared track.
+          const keyframeClip = resolveTrackKeyframeClip(
+            els,
+            laneCounts,
+            selectedElementId,
+            selectedElementIds,
+          );
+          const keyframeClipKey = keyframeClip?.key ?? keyframeClip?.id;
           const renderElements = rowsVirtualized
             ? withoutHiddenSlivers(
                 queryTimelineClipIndex(
@@ -234,6 +242,8 @@ export function TimelineLanes({
                   const key = getTimelineElementIdentity(el);
                   return (
                     pinnedClipIdentities.has(key) ||
+                    // It holds the lanes the header caret's aria-controls names.
+                    key === keyframeClipKey ||
                     selectedElementId === key ||
                     selectedElementIds.has(key) ||
                     hoveredClip === key ||
@@ -269,14 +279,6 @@ export function TimelineLanes({
           });
           const isTrackHidden = els.length > 0 && els.every((element) => element.hidden === true);
           const isAudioTrack = els.length > 0 && els.some(isAudioTimelineElement);
-          // Only the selected/most-keyframed clip owns expanded lanes on a shared track.
-          const keyframeClip = resolveTrackKeyframeClip(
-            els,
-            laneCounts,
-            selectedElementId,
-            selectedElementIds,
-          );
-          const keyframeClipKey = keyframeClip?.key ?? keyframeClip?.id;
           const rowExpanded = isTrackRowExpanded(els, expandedClipIds);
           // How tall a clip BAR is drawn. An expanded row is mostly lanes, and a
           // clip left to fill it painted its waveform straight over them — so the
