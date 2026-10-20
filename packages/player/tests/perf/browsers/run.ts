@@ -240,50 +240,21 @@ function dropsBySteering(perVideo: PerVideo[] | undefined) {
 // The player with no per-frame probe: its decoder drops are the player's alone.
 const COUNTERS_ONLY_FILMS = ["10-video-grid", "heavy-16x1080"];
 
-// The same media played natively, without the player: separates browser decoder drops from runtime-caused ones.
-const CONTROLS = [
+// The same media played natively, and the same films run by the runtime in a bare iframe without the player element.
+const CONTROLS: Array<{
+  name: string;
+  media?: string;
+  n?: number;
+  rate?: number;
+  extra?: string;
+  film?: string;
+}> = [
   { name: "grid-native", media: "grid-sample", n: 10, rate: 1 },
-  { name: "grid-native-mixrate", media: "grid-sample", n: 10, rate: 1, extra: "&mixrate=1.03" },
-  {
-    name: "grid-scaled-tiles-animated-mixrate",
-    media: "grid-sample",
-    n: 10,
-    rate: 1,
-    extra: "&frame=scaled&tiles=1&animate=scale&mixrate=1.03",
-  },
-  { name: "grid-in-iframe", media: "grid-sample", n: 10, rate: 1, extra: "&frame=plain" },
-  { name: "grid-in-scaled-iframe", media: "grid-sample", n: 10, rate: 1, extra: "&frame=scaled" },
-  {
-    name: "grid-scaled-tiles",
-    media: "grid-sample",
-    n: 10,
-    rate: 1,
-    extra: "&frame=scaled&tiles=1",
-  },
-  {
-    name: "grid-scaled-tiles-animated",
-    media: "grid-sample",
-    n: 10,
-    rate: 1,
-    extra: "&frame=scaled&tiles=1&animate=scale",
-  },
-  {
-    name: "grid-scaled-tiles-animated-steered",
-    media: "grid-sample",
-    n: 10,
-    rate: 1.03,
-    extra: "&frame=scaled&tiles=1&animate=scale&tick=1",
-  },
-  {
-    name: "grid-scaled-tiles-reads",
-    media: "grid-sample",
-    n: 10,
-    rate: 1,
-    extra: "&frame=scaled&tiles=1&reads=1",
-  },
-  { name: "grid-native-probe", media: "grid-sample", n: 10, rate: 1, extra: "&probe=1" },
+  { name: "grid-runtime-bare", film: "10-video-grid" },
+  { name: "grid-runtime-bare (2)", film: "10-video-grid" },
   { name: "16x1080-native", media: "h264-1080", n: 16, rate: 1 },
-  { name: "16x1080-in-scaled-iframe", media: "h264-1080", n: 16, rate: 1, extra: "&frame=scaled" },
+  { name: "16x1080-runtime-bare", film: "heavy-16x1080" },
+  { name: "16x1080-runtime-bare (2)", film: "heavy-16x1080" },
 ];
 
 // Opens a page and returns the value it publishes on window[global] once it has one.
@@ -474,7 +445,9 @@ try {
           }>(
             `http://127.0.0.1:${port}`,
             browser,
-            `${server.origin}/fixtures/_control/index.html?media=${c.media}&n=${c.n}&rate=${c.rate}${c.extra ?? ""}`,
+            c.film
+              ? `${server.origin}/fixtures/_control/bare.html?film=${c.film}`
+              : `${server.origin}/fixtures/_control/index.html?media=${c.media}&n=${c.n}&rate=${c.rate}${c.extra ?? ""}`,
             "__control",
           );
           rows.push({

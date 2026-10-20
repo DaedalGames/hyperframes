@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>control: a composition in a bare iframe, without the player element</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #000;
+      }
+      iframe {
+        border: 0;
+        width: 1920px;
+        height: 1080px;
+        transform-origin: 0 0;
+        transform: scale(0.6667);
+      }
+    </style>
+  </head>
+  <body>
+    <script>
+      // ?film=<key>: the same runtime and film as the bench, driven through the runtime's own API.
+      (async function () {
+        var FILMS = {
+          "10-video-grid": "../10-video-grid/index.html",
+          "heavy-16x1080": "../heavy-16x1080/index.html",
+        };
+        var src = FILMS[new URLSearchParams(location.search).get("film")];
+        if (!src) throw new Error("unknown film");
+        var frame = document.createElement("iframe");
+        frame.src = src;
+        document.body.appendChild(frame);
+        var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+        var player = null;
+        for (var i = 0; i < 300 && !player; i++) {
+          await sleep(100);
+          player = frame.contentWindow && frame.contentWindow.__player;
+        }
+        if (!player) throw new Error("runtime did not start");
+        var videos = Array.from(frame.contentDocument.querySelectorAll("video"));
+        await Promise.all(
+          videos.map((v) =>
+            v.readyState >= 4
+              ? null
+              : new Promise((r) => v.addEventListener("canplaythrough", r, { once: true })),
+          ),
+        );
+        var decoded = () =>
+          videos.reduce(
+            (a, v) => {
+              var p = v.getVideoPlaybackQuality();
+              return {
+                dropped: a.dropped + p.droppedVideoFrames,
+                total: a.total + p.totalVideoFrames,
+              };
+            },
+            { dropped: 0, total: 0 },
+          );
+        player.play();
+        for (var j = 0; j < 50 && !player.isPlaying(); j++) await sleep(100);
+        var before = decoded();
+        await sleep(8000);
+        var after = decoded();
+        player.pause();
+        window.__control = {
+          dropped: after.dropped - before.dropped,
+          total: after.total - before.total,
+          presentedFps:
+            Math.round(
+              ((after.total - before.total - (after.dropped - before.dropped)) /
+                videos.length /
+                8) *
+                10,
+            ) / 10,
+        };
+      })().catch((e) => (window.__control = { error: String(e) }));
+    </script>
+  </body>
+</html>
