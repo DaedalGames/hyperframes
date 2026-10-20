@@ -2,15 +2,6 @@
   "name": "@hyperframes/producer",
   "version": "0.8.181",
   "description": "HTML-to-video rendering engine using Chrome's BeginFrame API",
-  "keywords": [
-    "ffmpeg",
-    "headless-chrome",
-    "html-to-video",
-    "hyperframes",
-    "mp4",
-    "render",
-    "video"
-  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/heygen-com/hyperframes",

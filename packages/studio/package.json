@@ -1,14 +1,7 @@
 {
   "name": "@hyperframes/studio",
   "version": "0.8.181",
-  "description": "Browser-based video editor for HyperFrames compositions: timeline, code editor and live preview",
-  "keywords": [
-    "html-to-video",
-    "hyperframes",
-    "timeline",
-    "video",
-    "video-editor"
-  ],
+  "description": "",
   "repository": {
     "type": "git",
     "url": "https://github.com/heygen-com/hyperframes",
