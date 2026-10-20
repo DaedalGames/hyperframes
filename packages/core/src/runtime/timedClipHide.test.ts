@@ -14,7 +14,11 @@ const injectedSelectors = () =>
     Array.from(style.sheet!.cssRules).map((rule) => (rule as CSSStyleRule).selectorText),
   );
 
-type ShaderWindow = Window & { HyperShader?: unknown; __hf?: object; __hfClipRevealAware?: boolean };
+type ShaderWindow = Window & {
+  HyperShader?: unknown;
+  __hf?: object;
+  __hfClipRevealAware?: boolean;
+};
 
 afterEach(() => {
   const win = window as ShaderWindow;
@@ -43,11 +47,10 @@ describe("hideTimedClipsUntilFirstPass", () => {
     expect(getComputedStyle(document.querySelector("p")!).visibility).toBe("hidden");
   });
 
-  it("keeps a hidden clip's contents hidden over an author's important visibility rule", () => {
-    document.head.innerHTML = "<style>p.title { visibility: visible !important; }</style>";
+  // jsdom resolves !important ties by order, not weight, so the weight is asserted on the selector.
+  it("keeps the contents rule at the weight of two attribute selectors", () => {
     hideTimedClipsUntilFirstPass();
-    document.body.innerHTML = `<div data-start="5" ${CLIP_HIDDEN_ATTR}><p class="title">Later</p></div>`;
-    expect(getComputedStyle(document.querySelector("p")!).visibility).toBe("hidden");
+    expect(injectedSelectors()).toContain(`[${CLIP_HIDDEN_ATTR}][${CLIP_HIDDEN_ATTR}] *`);
   });
 });
 
