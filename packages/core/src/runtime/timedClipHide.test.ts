@@ -4,6 +4,7 @@ import { revealClip } from "./clipReveal";
 import {
   CLIP_HIDDEN_ATTR,
   hideTimedClipsUntilFirstPass,
+  keepInlineHideRulesForOlderShaders,
   revealTimedClipsAfterFirstPass,
   showHiddenClips,
 } from "./timedClipHide";
@@ -13,7 +14,13 @@ const injectedSelectors = () =>
     Array.from(style.sheet!.cssRules).map((rule) => (rule as CSSStyleRule).selectorText),
   );
 
+type ShaderWindow = Window & { HyperShader?: unknown; __hf?: object; __hfClipRevealAware?: boolean };
+
 afterEach(() => {
+  const win = window as ShaderWindow;
+  delete win.HyperShader;
+  delete win.__hf;
+  delete win.__hfClipRevealAware;
   revealTimedClipsAfterFirstPass();
   document.head.innerHTML = "";
   document.body.innerHTML = "";
@@ -41,6 +48,48 @@ describe("hideTimedClipsUntilFirstPass", () => {
     hideTimedClipsUntilFirstPass();
     document.body.innerHTML = `<div data-start="5" ${CLIP_HIDDEN_ATTR}><p class="title">Later</p></div>`;
     expect(getComputedStyle(document.querySelector("p")!).visibility).toBe("hidden");
+  });
+});
+
+describe("keepInlineHideRulesForOlderShaders", () => {
+  // How a shader build that predates revealClip leaves a scene it reveals for capture.
+  const revealedByInlineStyleOnly = `<div data-start="5" ${CLIP_HIDDEN_ATTR} style="visibility: visible"><p>Title</p><img src="a.png"></div>`;
+  const previewWith = (win: Partial<ShaderWindow>) => {
+    Object.assign(window, win);
+    document.head.append(
+      Object.assign(document.createElement("meta"), { name: STUDIO_PREVIEW_MARK_META }),
+    );
+    hideTimedClipsUntilFirstPass();
+    keepInlineHideRulesForOlderShaders();
+    revealTimedClipsAfterFirstPass();
+    document.body.innerHTML = `${revealedByInlineStyleOnly}<div data-start="9" ${CLIP_HIDDEN_ATTR} style="visibility: hidden"><p>Later</p></div>`;
+    const [revealed, hidden] = Array.from(document.querySelectorAll("p"));
+    return {
+      revealed: getComputedStyle(revealed!).visibility,
+      revealedImage: getComputedStyle(document.querySelector("img")!).display,
+      hidden: getComputedStyle(hidden!).visibility,
+    };
+  };
+
+  it("shows a scene an older shader build revealed, found by its global or its transitions", () => {
+    for (const older of [{ HyperShader: {} }, { __hf: { transitions: [] } }]) {
+      expect(previewWith(older)).toEqual({
+        revealed: "visible",
+        revealedImage: "inline",
+        hidden: "hidden",
+      });
+      delete (window as ShaderWindow).HyperShader;
+      document.head.innerHTML = "";
+    }
+  });
+
+  it("keeps the mark-only rules for a shader build that declares it lifts the mark", () => {
+    expect(previewWith({ HyperShader: {}, __hfClipRevealAware: true })).toEqual({
+      revealed: "hidden",
+      revealedImage: "none",
+      hidden: "hidden",
+    });
+    expect(injectedSelectors().filter((selector) => /\[style\b/.test(selector))).toEqual([]);
   });
 });
 
