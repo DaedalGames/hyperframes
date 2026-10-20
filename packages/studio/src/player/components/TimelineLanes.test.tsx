@@ -10,6 +10,7 @@ import { defaultTimelineTheme } from "./timelineTheme";
 import { TRACK_H, getTimelineRowGeometry } from "./timelineLayout";
 import { createTimelineClipIndex } from "../lib/timelineClipIndex";
 import { buildTimelineLogicalRows } from "./timelineKeyboardNavigation";
+import { timelineClipFocusId } from "./timelineNavigationIdentity";
 import {
   usePlayerStore,
   type KeyframeCacheEntry,
@@ -541,6 +542,40 @@ describe("TimelineLanes selection", () => {
         ?.dispatchEvent(new MouseEvent("click", { bubbles: true, metaKey: true })),
     );
     expect(usePlayerStore.getState().selectedElementIds).toEqual(new Set(["clip-a", "clip-b"]));
+    act(() => view.root.unmount());
+  });
+});
+
+describe("TimelineLanes keyboard focus", () => {
+  // Arrow keys focus a clip without selecting it; Enter then selects it. A
+  // frame-wide audio clip used to swap its button on that selection, dropping
+  // focus to <body> where the arrow keys no longer reach the timeline.
+  it("keeps arrow navigation after Enter selects a focused frame-wide audio clip", () => {
+    const voice = (id: string, start: number): TimelineElement => ({
+      ...element(id, TRACK_A),
+      tag: "audio",
+      start,
+    });
+    const elements = [voice("clip-a", 0), voice("clip-b", 3)];
+    const view = renderLanes({ elements, pps: 5 });
+    const clipA = view.host.querySelector<HTMLButtonElement>('[data-el-id="clip-a"]')!;
+    expect(clipA.getAttribute("data-ladder")).toBe("frame");
+
+    act(() => clipA.focus());
+    act(() => clipA.click()); // Enter on a focused native button
+    expect(view.onSelectElement).toHaveBeenCalledWith(elements[0]);
+    view.rerender({ elements, pps: 5, selectedElementIds: new Set(["clip-a"]) });
+
+    expect(view.host.querySelector('[data-el-id="clip-a"]')).toBe(clipA);
+    expect(document.activeElement).toBe(clipA);
+    const arrow = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "ArrowRight",
+    });
+    act(() => document.activeElement?.dispatchEvent(arrow));
+    expect(arrow.defaultPrevented).toBe(true);
+    expect(usePlayerStore.getState().timelineFocus?.id).toBe(timelineClipFocusId("clip-b"));
     act(() => view.root.unmount());
   });
 });

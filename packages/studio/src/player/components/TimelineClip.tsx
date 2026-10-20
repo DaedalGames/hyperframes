@@ -1,4 +1,4 @@
-import { memo, type CSSProperties, type ReactNode } from "react";
+import { memo, useCallback, useRef, type CSSProperties, type ReactNode } from "react";
 import type { TimelineElement } from "../store/playerStore";
 import {
   CLIP_TRIM_HIT_PX,
@@ -60,6 +60,18 @@ export function clipZoomKey(el: TimelineElement, pps: number, interacting: boole
   return `${clipWidthLadder(widthPx)}${widthPx >= HANDLES_MIN_PX ? "+handles" : ""}`;
 }
 
+function useFocusCarriedAcrossRemount() {
+  const carry = useRef(false);
+  return useCallback((node: HTMLButtonElement | null) => {
+    if (!node) return;
+    if (carry.current) node.focus({ preventScroll: true });
+    carry.current = false;
+    return () => {
+      carry.current = node.ownerDocument.activeElement === node;
+    };
+  }, []);
+}
+
 // fallow-ignore-next-line complexity
 export const TimelineClip = memo(function TimelineClip({
   el,
@@ -110,6 +122,7 @@ export const TimelineClip = memo(function TimelineClip({
   if (linkColor) Object.assign(themeVariables, { "--clip-link-color": linkColor });
   const hasFades = (isAudioClip || Boolean(el.hasAudio)) && !isGestureActor;
   const fade = useClipFadeDraft(el);
+  const buttonRef = useFocusCarriedAcrossRemount();
   const badges =
     ladder === "labeled" && !isGestureActor ? (
       <ClipBadges el={el} onOpenMenu={onContextMenu} />
@@ -146,6 +159,7 @@ export const TimelineClip = memo(function TimelineClip({
 
   const clip = (
     <button
+      ref={buttonRef}
       type="button"
       data-clip={isGestureActor ? undefined : "true"}
       data-el-id={isGestureActor ? undefined : (el.key ?? el.id)}
@@ -273,6 +287,6 @@ export const TimelineClip = memo(function TimelineClip({
       )}
     </button>
   );
-  const describesPeaks = (isAudioClip || el.hasAudio) && (ladder !== "frame" || isSelected);
+  const describesPeaks = (isAudioClip || el.hasAudio) && ladder !== "frame";
   return describesPeaks ? <ClipPeakTooltip>{clip}</ClipPeakTooltip> : clip;
 });
