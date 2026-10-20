@@ -20,8 +20,9 @@ import { mkdirWithinProject, realpath, realProjectRoot } from "./safePath.js";
  * project routes (U3/U4) to serve a `?hf-proxy=` request; never used on
  * the render path (render always sees the original file).
  *
- * A started ffmpeg child is never killed for one caller: every caller of a cache
- * key shares it. A caller's `signal` only detaches it; a larger box for the same
+ * Every caller of a cache key shares one ffmpeg child (in-flight dedupe below). A
+ * caller's `signal` detaches that caller; once no caller is left, the copy is
+ * dropped from the queue or its ffmpeg is killed. A larger box for the same
  * source stops a smaller copy outright (one copy per source, below).
  */
 
@@ -303,11 +304,12 @@ interface ProxyJob {
   /** Counted in activeTranscodes; a stopped background copy gives its slot back. */
   holdsSlot?: boolean;
   stopped?: boolean;
+  abandoned: AbortController;
 }
 
 class ProxyDroppedError extends ProxyTranscodeError {
   constructor() {
-    super("media proxy copy dropped: every caller left before it started", null, "");
+    super("media proxy copy dropped: every caller left", null, "");
     this.name = "ProxyDroppedError";
   }
 }
@@ -383,7 +385,13 @@ function raise(job: ProxyJob, options: ResolveProxyOptions): void {
 
 function leave(job: ProxyJob): void {
   job.callers--;
-  if (job.callers === 0) job.queued?.drop();
+  if (job.callers > 0) return;
+  if (job.queued) {
+    job.queued.drop();
+    return;
+  }
+  forget(job);
+  job.abandoned.abort();
 }
 
 // --- background copies yield ------------------------------------------------
@@ -631,8 +639,9 @@ async function runFfmpeg(
   outputPath: string,
   variant: ProxyVariant,
   box: PreviewProxyBox | undefined,
-  job?: ProxyJob,
+  job: ProxyJob,
 ): Promise<void> {
+  const signal = job.abandoned.signal;
   const metadata = await probeMediaMetadata(sourcePath);
   const ffmpegPath = findFfBinary("ffmpeg", { configuredMustExist: true });
   if (!ffmpegPath) {
@@ -714,10 +723,12 @@ async function runFfmpeg(
     // global transcode slots: the child is killed and the slot released via
     // the caller's finally. Generous because long assets transcode at
     // roughly real time; a healthy encode of any authoring asset fits.
+    signal.throwIfAborted();
     const proc = spawn(ffmpegPath, args, {
       stdio: ["ignore", "ignore", "pipe"],
       timeout: TRANSCODE_TIMEOUT_MS,
       killSignal: "SIGKILL",
+      signal,
       windowsHide: true,
     });
     superviseEncoder(proc, outputPath, job);
@@ -726,6 +737,7 @@ async function runFfmpeg(
       stderrTail = (stderrTail + chunk.toString()).slice(-STDERR_TAIL_MAX_CHARS);
     });
     proc.on("error", (err) => {
+      if (signal.aborted) return;
       reject(new FfmpegUnavailableError(`failed to spawn ffmpeg: ${err.message}`, stderrTail));
     });
     proc.on("close", (code, signal) => {
@@ -846,6 +858,7 @@ export async function resolveProxy(
       sourceKey,
       box: target,
       callers: 0,
+      abandoned: new AbortController(),
     };
     const promise = transcodeToCache(
       job,
@@ -860,7 +873,8 @@ export async function resolveProxy(
         return path;
       })
       .catch((err: unknown) => {
-        if (!(err instanceof ProxyDroppedError) && !job.replaced) rememberFailure(cachePath, err);
+        const stopped = job.replaced || job.abandoned.signal.aborted;
+        if (!(err instanceof ProxyDroppedError) && !stopped) rememberFailure(cachePath, err);
         throw err;
       })
       .finally(() => {

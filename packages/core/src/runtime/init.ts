@@ -67,6 +67,7 @@ import {
 import {
   handleErrorForProxy,
   handleMetadataForProxy,
+  isRenderMode,
   maybeProxyProactively,
   noteSeekCopyPlayback,
   setOwnMediaWrite,
@@ -405,6 +406,7 @@ const MEDIA_URL_ATTRS = new Map([
 ]);
 
 const SLOW_IDLE_HEARTBEAT_MS = 1000;
+const HIDDEN_TRANSPORT_TICK_MS = 16;
 
 // One document.getAnimations() per seek and the pause after it, read on first use, shared by all adapters.
 function pageAnimationsForOnePass(): () => Animation[] {
@@ -2541,6 +2543,13 @@ export function initSandboxRuntimeModular(): void {
       handleMetadataForProxy(event.currentTarget);
     }
   };
+  const onMediaLoadedMetadataForPlayhead = (event: Event) => {
+    const el = event.currentTarget;
+    if (state.tornDown || clock.isPlaying() || !isMediaElement(el) || isRenderMode(el)) return;
+    lastSyncedMediaTimeSeconds = null;
+    state.mediaForceSyncNextTick = true;
+    syncMediaForCurrentState();
+  };
   const onMediaErrorForProxy = (event: Event) => {
     if (isMediaElement(event.currentTarget)) {
       handleErrorForProxy(event.currentTarget);
@@ -2570,6 +2579,7 @@ export function initSandboxRuntimeModular(): void {
     mediaEl.removeEventListener("loadedmetadata", scheduleMetadataDurationHydration);
     mediaEl.removeEventListener("durationchange", scheduleMetadataDurationHydration);
     mediaEl.removeEventListener("loadedmetadata", onMediaLoadedMetadataForProxy);
+    mediaEl.removeEventListener("loadedmetadata", onMediaLoadedMetadataForPlayhead);
     mediaEl.removeEventListener("loadedmetadata", onMediaLoadedMetadataForRoute);
     mediaEl.removeEventListener("error", onMediaErrorForProxy);
     metadataBoundMedia.delete(mediaEl);
@@ -2623,6 +2633,7 @@ export function initSandboxRuntimeModular(): void {
       // triggers. Inert in render mode / when the codec map is absent /
       // for <audio> — all guarded inside mediaProxy.ts itself.
       mediaEl.addEventListener("loadedmetadata", onMediaLoadedMetadataForProxy);
+      mediaEl.addEventListener("loadedmetadata", onMediaLoadedMetadataForPlayhead);
       mediaEl.addEventListener("error", onMediaErrorForProxy);
 
       // Proactive proxy-fallback trigger: consult the codec map and swap
@@ -4922,13 +4933,45 @@ export function initSandboxRuntimeModular(): void {
     armParkTimer();
   };
 
+  // Hidden documents run no animation frames but their media plays on, so tick on a timer.
+  // Chromium clamps it to ~1 s unless audio is audible: a clip may end up to 1 s late.
+  let transportTickTimerId: number | null = null;
+  const transportTickPending = () => state.transportRafId != null || transportTickTimerId != null;
+  const requestTransportTick = () => {
+    if (document.visibilityState === "hidden") {
+      transportTickTimerId = window.setTimeout(() => {
+        transportTickTimerId = null;
+        transportTick();
+      }, HIDDEN_TRANSPORT_TICK_MS);
+      return;
+    }
+    state.transportRafId = window.requestAnimationFrame(transportTick);
+  };
+  const cancelTransportTick = () => {
+    if (state.transportRafId != null) {
+      window.cancelAnimationFrame(state.transportRafId);
+      state.transportRafId = null;
+    }
+    if (transportTickTimerId != null) {
+      window.clearTimeout(transportTickTimerId);
+      transportTickTimerId = null;
+    }
+  };
+  // A frame requested just before the tab hid never fires: move a pending tick across.
+  const onTransportVisibilityChange = () => {
+    if (state.tornDown || !transportTickPending()) return;
+    cancelTransportTick();
+    requestTransportTick();
+  };
+  document.addEventListener("visibilitychange", onTransportVisibilityChange);
+
   const scheduleNextTransportFrame = () => {
     state.transportRafId = null;
     if (state.tornDown) return;
     const woken = transportWakeRequested;
     transportWakeRequested = false;
     if (woken || !canParkTransport()) {
-      state.transportRafId = window.requestAnimationFrame(transportTick);
+      requestTransportTick();
       return;
     }
     // Read fresh rather than reusing the tick's own `timingRevision`: the tick
@@ -4944,13 +4987,13 @@ export function initSandboxRuntimeModular(): void {
     // Inside a tick the tail is the only scheduler; setting the flag there is
     // what stops it parking on work it has just been told about.
     transportWakeRequested = true;
-    if (inTransportTick || state.transportRafId != null) return;
+    if (inTransportTick || transportTickPending()) return;
     if (transportParkTimerId != null) {
       window.clearTimeout(transportParkTimerId);
       transportParkTimerId = null;
     }
     transportWakeRequested = false;
-    state.transportRafId = window.requestAnimationFrame(transportTick);
+    requestTransportTick();
   };
 
   const followedOrLongestRunningAudio = (
@@ -5322,8 +5365,8 @@ export function initSandboxRuntimeModular(): void {
 
   installPositionEditsSeekReapply(window as Window & typeof globalThis);
 
-  // Start the rAF tick loop
-  state.transportRafId = window.requestAnimationFrame(transportTick);
+  // Start the tick loop
+  requestTransportTick();
   postTimeline();
   postState(true);
 
@@ -5478,10 +5521,8 @@ export function initSandboxRuntimeModular(): void {
   const teardown = () => {
     if (state.tornDown) return;
     state.tornDown = true;
-    if (state.transportRafId != null) {
-      window.cancelAnimationFrame(state.transportRafId);
-      state.transportRafId = null;
-    }
+    cancelTransportTick();
+    document.removeEventListener("visibilitychange", onTransportVisibilityChange);
     if (transportParkTimerId != null) {
       window.clearTimeout(transportParkTimerId);
       transportParkTimerId = null;
