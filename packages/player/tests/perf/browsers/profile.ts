@@ -261,6 +261,17 @@ try {
       ]);
       const summary = { fps, ...summarize(parseSamples(readFileSync(xmlPath, "utf8")), seconds) };
       report[name] = summary;
+      // The same paused moment in every arm, to compare how sharp the tiles render.
+      await wd(base, "POST", `${s}/execute/async`, {
+        script: `const done = arguments[arguments.length - 1];
+          const player = document.getElementById("player");
+          player.pause();
+          player.seek(30);
+          setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(done)), 500);`,
+        args: [],
+      });
+      const png = await wd(base, "GET", `${s}/screenshot`);
+      writeFileSync(resolve(OUT, `${slug}.png`), Buffer.from(png as string, "base64"));
       console.log(
         `[profile] ${name}: ${fps} fps, main thread per frame ${JSON.stringify(summary.mainThreadPerFrame)}`,
       );
