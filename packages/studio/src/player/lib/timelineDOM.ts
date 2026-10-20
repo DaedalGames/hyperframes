@@ -31,23 +31,15 @@ import {
   readTimelineElementZIndex,
 } from "./timelineElementHelpers";
 
-// Re-export helpers that were previously public from this module so that
-// existing import sites (hook + tests) don't need to change.
-// fallow-ignore-next-line unused-exports
+// The hook and its tests import these helpers through this module.
 export {
   readTimelineDurationFromDocument,
-  // fallow-ignore-next-line unused-exports
   resolveMediaElement,
-  // fallow-ignore-next-line unused-exports
   applyMediaMetadataFromElement,
   getTimelineElementSelector,
-  // fallow-ignore-next-line unused-exports
   getTimelineElementSourceFile,
-  // fallow-ignore-next-line unused-exports
   getTimelineElementSelectorIndex,
-  // fallow-ignore-next-line unused-exports
   buildTimelineElementIdentity,
-  // fallow-ignore-next-line unused-exports
   getTimelineElementIdentity,
   findTimelineDomNodeForClip,
 } from "./timelineElementHelpers";
