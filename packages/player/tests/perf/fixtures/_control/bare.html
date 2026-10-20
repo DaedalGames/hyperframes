@@ -14,7 +14,7 @@
         width: 1920px;
         height: 1080px;
         transform-origin: 0 0;
-        transform: scale(0.6667);
+        transform: scale(0.5);
       }
     </style>
   </head>
@@ -46,7 +46,7 @@
           var root = hostEl.attachShadow({ mode: "open" });
           var style = document.createElement("style");
           style.textContent =
-            "iframe { border: 0; width: 1920px; height: 1080px; transform-origin: 0 0; transform: scale(0.6667); }";
+            "iframe { border: 0; width: 1920px; height: 1080px; transform-origin: 0 0; transform: scale(0.5); }";
           root.append(style, frame);
         } else document.body.appendChild(frame);
         var control = (action, extra) =>
@@ -120,7 +120,7 @@
           control("set-native-media-sync-disabled", { disabled: false });
           control("set-web-audio-media-disabled", { disabled: false });
           control("set-idle-heartbeat", { slow: false });
-          control("set-display-scale", { scale: 0.6667 });
+          control("set-display-scale", { scale: 0.5 });
           await sleep(300);
           control("play");
           (function tick() {

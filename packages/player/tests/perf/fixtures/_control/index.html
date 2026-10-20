@@ -44,7 +44,7 @@
           var f = document.createElement("iframe");
           f.src = "index.html?" + child.toString();
           f.style.cssText = "border:0;width:1920px;height:1080px;transform-origin:0 0;";
-          if (frame === "scaled") f.style.transform = "scale(0.6667)";
+          if (frame === "scaled") f.style.transform = "scale(0.5)";
           document.body.appendChild(f);
           await new Promise(function poll(resolve) {
             var result = f.contentWindow && f.contentWindow.__control;

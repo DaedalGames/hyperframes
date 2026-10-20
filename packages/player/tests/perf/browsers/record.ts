@@ -19,7 +19,7 @@ type Case = { name: string; path: string; startsItself: boolean };
 const CASES: Case[] = [
   {
     name: "player",
-    path: "/host.html?fixture=10-video-grid&width=1280&height=720",
+    path: "/host.html?fixture=10-video-grid&width=960&height=540",
     startsItself: false,
   },
   {
@@ -106,6 +106,8 @@ function analyse(file: string, rects: number[][]) {
     { encoding: "utf-8" },
   )
     .split("\n")
+    .map((line) => line.replace(/,/g, "").trim())
+    .filter((line) => line !== "")
     .map(Number)
     .filter((t) => Number.isFinite(t));
   const tiles = rects.map(([x, y, w, h]) => {
@@ -205,7 +207,7 @@ try {
         const s = `/session/${session.sessionId}`;
         const file = resolve(OUT, `${browser}-${c.name}.mp4`);
         try {
-          await wd(base, "POST", `${s}/window/rect`, { x: 0, y: 0, width: 1400, height: 900 });
+          await wd(base, "POST", `${s}/window/rect`, { x: 0, y: 0, width: 1024, height: 768 });
           let recorder;
           if (c.startsItself) {
             recorder = startRecording(file, 18);
