@@ -2,8 +2,7 @@
 
 This folder is a [HyperFrames](https://hyperframes.heygen.com) video: HTML, CSS and seekable
 animations (GSAP by default) that the `hyperframes` CLI previews in the browser and renders to
-MP4. Rendering, frame capture and encoding are handled by `npx hyperframes render`; there is no
-need to build a headless-browser or ffmpeg pipeline here.
+MP4.
 
 ## Skills — USE THESE FIRST
 
