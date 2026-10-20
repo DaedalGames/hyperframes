@@ -239,6 +239,7 @@ function dropsBySteering(perVideo: PerVideo[] | undefined) {
 
 type ProxyReport = {
   proxyState?: { owner: number; count: number; playing: number };
+  rasterMarks?: { before: number; atPlay: number };
   hostOps?: { play: number; seek: number };
 };
 
@@ -249,6 +250,8 @@ function proxyColumns(page: ProxyReport) {
     proxiesPlaying: num(page.proxyState?.playing),
     hostPlays: num(page.hostOps?.play),
     hostSeeks: num(page.hostOps?.seek),
+    rasterMarksBefore: num(page.rasterMarks?.before),
+    rasterMarksAtPlay: num(page.rasterMarks?.atPlay),
   };
 }
 
@@ -266,7 +269,13 @@ const CONTROLS: Array<{
 }> = [
   { name: "grid-native", media: "grid-sample", n: 10, rate: 1 },
   { name: "grid-runtime-bare", film: "10-video-grid" },
-  { name: "16x1080-runtime-bare", film: "heavy-16x1080" },
+  { name: "grid-runtime-bare-scale-0.67", film: "10-video-grid", extra: "&displayScale=0.6667" },
+  { name: "grid-runtime-bare (2)", film: "10-video-grid" },
+  {
+    name: "grid-runtime-bare-scale-0.67 (2)",
+    film: "10-video-grid",
+    extra: "&displayScale=0.6667",
+  },
 ];
 
 // Opens a page and returns the value it publishes on window[global] once it has one.
@@ -305,6 +314,7 @@ async function runFilm(
   fixture: string,
   countersOnly = false,
   emptyProxies = false,
+  fullRaster = false,
 ) {
   const session = await wd(base, "POST", "/session", {
     capabilities: { alwaysMatch: DRIVERS[browser].caps },
@@ -322,7 +332,9 @@ async function runFilm(
         window.__hfBench(arguments[0]).then(
         (r) => { window.__bench = { ok: r }; },
         (e) => { window.__bench = { error: String(e && e.stack || e) }; });`,
-      args: [{ playMs: PLAY_MS, seekFractions: SEEK_FRACTIONS, countersOnly, emptyProxies }],
+      args: [
+        { playMs: PLAY_MS, seekFractions: SEEK_FRACTIONS, countersOnly, emptyProxies, fullRaster },
+      ],
     });
     const deadline = Date.now() + 180_000;
     while (Date.now() < deadline) {
@@ -411,12 +423,12 @@ try {
           }
         }
       }
-      for (const [fixture, emptyProxies] of COUNTERS_ONLY_FILMS.flatMap((f) => [
+      for (const [fixture, fullRaster] of COUNTERS_ONLY_FILMS.flatMap((f) => [
         [f, false] as const,
         [f, true] as const,
       ])) {
         for (let run = 1; run <= runs; run++) {
-          const label = `${fixture} (counters only${emptyProxies ? ", proxies emptied" : ""})`;
+          const label = `${fixture} (counters only${fullRaster ? ", display scale 1" : ""})`;
           try {
             const { page } = await runFilm(
               `http://127.0.0.1:${port}`,
@@ -424,7 +436,8 @@ try {
               server.origin,
               fixture,
               true,
-              emptyProxies,
+              false,
+              fullRaster,
             );
             const dropped = num(page.decoded.dropped) ?? 0;
             const total = num(page.decoded.total) ?? 0;
@@ -461,6 +474,7 @@ try {
             presentedFps: number;
             perVideo: PerVideo[];
             timelineMovesPerSecond?: number;
+            rasterMarks?: number;
           }>(
             `http://127.0.0.1:${port}`,
             browser,
@@ -478,6 +492,7 @@ try {
             decoderFrames: num(r.total),
             ...dropsBySteering(r.perVideo),
             timelineMovesPerSecond: num(r.timelineMovesPerSecond),
+            rasterMarksAtPlay: num(r.rasterMarks),
           });
           console.log(JSON.stringify(rows[rows.length - 1]));
         } catch (e) {
@@ -527,6 +542,8 @@ const cols = [
   "proxiesPlaying",
   "hostPlays",
   "hostSeeks",
+  "rasterMarksBefore",
+  "rasterMarksAtPlay",
   "mediaSeeks",
   "rateWrites",
   "seekP50Ms",

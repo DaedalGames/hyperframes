@@ -3,4 +3,5 @@ export function bench(cfg: {
   seekFractions: number[];
   countersOnly?: boolean;
   emptyProxies?: boolean;
+  fullRaster?: boolean;
 }): Promise<unknown>;

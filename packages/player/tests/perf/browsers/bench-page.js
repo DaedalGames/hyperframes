@@ -88,6 +88,18 @@ export async function bench(cfg) {
         entry.el.load();
       }
     }
+    // Display scale 1 makes the runtime drop its below-1x raster hints (previewRasterHints.ts).
+    const rasterMarks = () =>
+      iframe.contentDocument.querySelectorAll("[data-hf-preview-raster]").length;
+    const marksBefore = rasterMarks();
+    if (cfg.fullRaster) {
+      win.postMessage(
+        { source: "hf-parent", type: "control", action: "set-display-scale", scale: 1 },
+        "*",
+      );
+      await sleep(300);
+    }
+    const marksAtPlay = rasterMarks();
     const hostOps = { play: 0, seek: 0 };
     const hostProto = window.HTMLMediaElement.prototype;
     const hostPlay = hostProto.play;
@@ -133,6 +145,7 @@ export async function bench(cfg) {
       decoded: { dropped: after.dropped - before.dropped, total: after.total - before.total },
       frameReads,
       proxyState,
+      rasterMarks: { before: marksBefore, atPlay: marksAtPlay },
       hostOps,
       perVideo: all.map((v, i) => {
         const a = startQuality.get(v);

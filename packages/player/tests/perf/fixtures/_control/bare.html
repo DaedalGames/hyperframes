@@ -21,7 +21,8 @@
   <body>
     <script>
       // ?film=<key>: the same runtime and film as the bench, driven through the runtime's own API;
-      // &ticks=1 adds the player's per-frame "tick" message from the parent.
+      // &ticks=1 adds the player's per-frame "tick" message from the parent; &displayScale=<s> sends the
+      // player's display-scale message, which below 1 turns on the runtime's raster hints.
       (async function () {
         var FILMS = {
           "10-video-grid": "../10-video-grid/index.html",
@@ -69,6 +70,20 @@
             return original.apply(this, arguments);
           };
         });
+        var displayScale = Number(q.get("displayScale"));
+        if (displayScale > 0) {
+          frame.contentWindow.postMessage(
+            {
+              source: "hf-parent",
+              type: "control",
+              action: "set-display-scale",
+              scale: displayScale,
+            },
+            "*",
+          );
+          await sleep(300);
+        }
+        var rasterMarks = frame.contentDocument.querySelectorAll("[data-hf-preview-raster]").length;
         if (q.get("ticks")) {
           (function tick() {
             frame.contentWindow.postMessage(
@@ -88,6 +103,7 @@
         player.pause();
         window.__control = {
           timelineMovesPerSecond: Math.round(moves / 8),
+          rasterMarks: rasterMarks,
           dropped: after.dropped - before.dropped,
           total: after.total - before.total,
           presentedFps:
