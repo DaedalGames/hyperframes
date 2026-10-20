@@ -111,7 +111,7 @@ async function launchOwnedBrowser(
   const abort = new AbortController();
   const signal = options.signal ? AbortSignal.any([options.signal, abort.signal]) : abort.signal;
   const launch = untilLaunchOrAbort(
-    puppeteer.launch({ ...options, signal, handleSIGINT: false, handleSIGTERM: false }),
+    puppeteer.launch({ ...options, pipe: true, signal, handleSIGINT: false, handleSIGTERM: false }),
     signal,
   );
   const limit = options.timeout ?? LAUNCH_TIMEOUT_MS;
