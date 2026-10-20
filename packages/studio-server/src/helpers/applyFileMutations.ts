@@ -1,6 +1,7 @@
 import { readFileSync, statSync } from "node:fs";
 import { replaceFileAtomically } from "@hyperframes/core/atomic-file";
 import { backupPathForResponse, snapshotBeforeWrite } from "./backupJournal.js";
+import { rootCompositionRefusal } from "./rootCompositionGuard.js";
 import {
   clearFileWriteReceipt,
   createWriteToken,
@@ -101,6 +102,8 @@ function applyOneMutation(
       writeToken: null,
     };
   }
+  const refusal = rootCompositionRefusal(mutation.sourceFile, current, mutation.after);
+  if (refusal) throw new Error(refusal);
   const backup = snapshotBeforeWrite(projectDir, mutation.absPath);
   if (backup.error) throw new Error(`backup failed: ${backup.error}`);
   assertExpectedVersion(mutation, readFileSync(mutation.absPath, "utf-8"));

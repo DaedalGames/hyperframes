@@ -44,6 +44,7 @@ import {
   walkDir,
 } from "../helpers/safePath.js";
 import { backupPathForResponse, snapshotBeforeWrite } from "../helpers/backupJournal.js";
+import { rootCompositionRefusal } from "../helpers/rootCompositionGuard.js";
 import { projectDirMissing } from "../helpers/projectDirMissing.js";
 import {
   createWriteToken,
@@ -554,6 +555,8 @@ function writeMutationResult(
   html: string,
   original: string,
 ): { backupPath: string | null; version: string } | Response {
+  const refusal = rootCompositionRefusal(filePath, original, html);
+  if (refusal) return c.json({ error: refusal }, 422);
   const backup = snapshotBeforeWrite(projectDir, absPath);
   if (backup.error) return c.json({ error: `backup failed: ${backup.error}` }, 500);
   if (readFileSync(absPath, "utf-8") !== original) {
@@ -2925,6 +2928,12 @@ export function registerFileRoutes(api: Hono, adapter: StudioApiAdapter): void {
             409,
           );
         }
+        const refusal = rootCompositionRefusal(
+          res.filePath,
+          currentContent.toString("utf-8"),
+          body.toString("utf-8"),
+        );
+        if (refusal) return c.json({ error: refusal }, 422);
         backup = snapshotBeforeWrite(res.project.dir, res.absPath);
         if (backup.error) return c.json({ error: `backup failed: ${backup.error}` }, 500);
         const mode = fstatSync(fd).mode;

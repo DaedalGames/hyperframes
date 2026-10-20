@@ -38,6 +38,23 @@ function expectStaleMutation(after: string, pinVersion = true): void {
 }
 
 describe("applyFileMutations", () => {
+  it("refuses a mutation that removes the root composition and leaves the file untouched", () => {
+    const projectDir = mkdtempSync(join(tmpdir(), "hf-mutation-root-"));
+    const path = join(projectDir, "index.html");
+    const before = '<html><body><div data-composition-id="main"><p>hi</p></div></body></html>';
+    try {
+      writeFileSync(path, before, "utf8");
+      expect(() =>
+        applyFileMutations(projectDir, [
+          { sourceFile: "index.html", absPath: path, after: "<html><body></body></html>" },
+        ]),
+      ).toThrow(/root composition "main"/);
+      expect(readFileSync(path, "utf8")).toBe(before);
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
   it("refuses a file whose version changed since the caller read it", () => {
     expectStaleMutation("after");
   });
