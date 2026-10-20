@@ -23,7 +23,6 @@ import { gotoWhenSent } from "./navigateForCapture.js";
 
 const SHADER_TRANSITIONS_TIMEOUT_MS = 90_000;
 const CAPTURE_SETTLE_MS = 1500;
-const NETWORK_IDLE_MS = 100;
 const PREFERRED_SEEK_TARGET_WAIT_MS = 500;
 const DEFAULT_POST_SEEK_FONT_WAIT_MS = 500;
 
@@ -253,17 +252,41 @@ async function waitForCompositionSettle(
   return runtimeReady;
 }
 
-async function waitForLateSubresources(page: Page): Promise<void> {
+async function waitUntilAFrameStartsNoRequest(
+  page: Pick<Page, "on" | "off" | "waitForNetworkIdle" | "evaluate">,
+  deadline: number,
+): Promise<void> {
+  let started = 0;
+  const onRequest = () => {
+    started += 1;
+  };
+  page.on("request", onRequest);
+  try {
+    for (let seen = -1; seen !== started; ) {
+      seen = started;
+      await page.waitForNetworkIdle({ idleTime: 0, timeout: Math.max(1, deadline - Date.now()) });
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolveTask) =>
+            requestAnimationFrame(() => setTimeout(resolveTask, 0)),
+          ),
+      );
+    }
+  } finally {
+    page.off("request", onRequest);
+  }
+}
+
+export async function waitForLateSubresources(
+  page: Pick<Page, "on" | "off" | "waitForNetworkIdle" | "evaluate" | "waitForFunction">,
+): Promise<void> {
   let cap: ReturnType<typeof setTimeout> | undefined;
   const deadline = Date.now() + CAPTURE_SETTLE_MS;
   const ready = (async () => {
     await page.waitForFunction(() => document.readyState === "complete", {
       timeout: CAPTURE_SETTLE_MS,
     });
-    await page.waitForNetworkIdle({
-      idleTime: NETWORK_IDLE_MS,
-      timeout: Math.max(1, deadline - Date.now()),
-    });
+    await waitUntilAFrameStartsNoRequest(page, deadline);
     await page.evaluate(async () => {
       await Promise.all(Array.from(document.images, (image) => image.decode().catch(() => {})));
       await document.fonts.ready;

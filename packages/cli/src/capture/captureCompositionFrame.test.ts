@@ -16,6 +16,7 @@ import {
   resolveCropRegion,
   runFfmpegOnce,
   seekCompositionTimeline,
+  waitForLateSubresources,
   waitForRuntimeReady,
   type CompositionSeekPage,
 } from "./captureCompositionFrame.js";
@@ -49,6 +50,41 @@ function runBrowserSeek(evaluate: ReturnType<typeof fakeSeekPage>["evaluate"]): 
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+});
+
+describe("waitForLateSubresources", () => {
+  function fakeSettlePage(requestsDuringFrame: number[]) {
+    let onRequest: (() => void) | undefined;
+    let frames = 0;
+    const page = {
+      waitForFunction: vi.fn(async () => undefined),
+      waitForNetworkIdle: vi.fn(
+        async (_options: { idleTime: number; timeout: number }) => undefined,
+      ),
+      evaluate: vi.fn(async () => {
+        for (let i = 0; i < (requestsDuringFrame[frames] ?? 0); i++) onRequest?.();
+        frames += 1;
+      }),
+      on: vi.fn((_event: string, handler: () => void) => {
+        onRequest = handler;
+      }),
+      off: vi.fn(),
+    };
+    return page;
+  }
+
+  it("settles as soon as the network is quiet, without a fixed quiet window", async () => {
+    const page = fakeSettlePage([]);
+    await waitForLateSubresources(page as never);
+    expect(page.waitForNetworkIdle.mock.calls.map(([options]) => options.idleTime)).toEqual([0]);
+    expect(page.off).toHaveBeenCalledWith("request", page.on.mock.calls[0]![1]);
+  });
+
+  it("waits again when a frame after the quiet network starts another request", async () => {
+    const page = fakeSettlePage([1, 0]);
+    await waitForLateSubresources(page as never);
+    expect(page.waitForNetworkIdle).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("waitForRuntimeReady", () => {
