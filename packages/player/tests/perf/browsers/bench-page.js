@@ -43,6 +43,21 @@ export async function bench(cfg) {
         `${v.currentSrc.split("/").pop()}: ${v.error.code} ${v.error.message || ""}`.trim(),
       );
 
+  // Decoder counters only, no per-frame probe or wrappers: separates the probe's own cost from the player's.
+  if (cfg.countersOnly) {
+    host.play();
+    await until(() => runtime.isPlaying(), 5_000, "isPlaying");
+    const before = decoded();
+    await sleep(cfg.playMs);
+    const after = decoded();
+    host.pause();
+    return {
+      countersOnly: true,
+      videoCount: videos().length,
+      decoded: { dropped: after.dropped - before.dropped, total: after.total - before.total },
+    };
+  }
+
   // The composition's own rAF callbacks (the runtime tick) are timed, so work splits into script and rendering.
   let compositionScriptMs = 0;
   const compositionRaf = win.requestAnimationFrame.bind(win);

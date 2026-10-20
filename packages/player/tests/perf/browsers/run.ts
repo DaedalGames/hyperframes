@@ -103,11 +103,30 @@ type PageResult = {
   videoStates: Array<Record<string, unknown>>;
   mediaOps: Record<"seek" | "rate" | "play" | "pause" | "load", number>;
   seeks: Array<{ target: number; ms: number; timedOut: boolean }>;
+  mediaReads: Partial<Record<(typeof MEDIA_READS)[number], number>>;
+  audioCaptures: number;
 };
 
 // Only finite numbers and explicit booleans from the browser reach disk; strings it reports go to the log.
 const num = (v: unknown) =>
   typeof v === "number" && Number.isFinite(v) ? Math.round(v * 1000) / 1000 : null;
+
+const MEDIA_READS = [
+  "currentTime",
+  "buffered",
+  "played",
+  "seekable",
+  "readyState",
+  "paused",
+  "duration",
+  "seeking",
+  "ended",
+  "volume",
+  "muted",
+  "playbackRate",
+  "networkState",
+  "error",
+] as const;
 
 function pageDetail(page: PageResult) {
   return {
@@ -129,6 +148,8 @@ function pageDetail(page: PageResult) {
       bufferedEnd: num(v.bufferedEnd),
       shown: v.shown === true,
     })),
+    audioCaptures: num(page.audioCaptures),
+    mediaReads: Object.fromEntries(MEDIA_READS.map((k) => [k, num(page.mediaReads[k] ?? 0)])),
     seeks: page.seeks.map((x) => ({
       target: num(x.target),
       ms: num(x.ms),
@@ -181,6 +202,9 @@ function score(page: PageResult) {
   };
 }
 
+// The player with no per-frame probe: its decoder drops are the player's alone.
+const COUNTERS_ONLY_FILMS = ["10-video-grid", "heavy-16x1080"];
+
 // The same media played natively, without the player: separates browser decoder drops from runtime-caused ones.
 const CONTROLS = [
   { name: "grid-native", media: "grid-sample", n: 10, rate: 1 },
@@ -214,6 +238,7 @@ const CONTROLS = [
     rate: 1,
     extra: "&frame=scaled&tiles=1&reads=1",
   },
+  { name: "grid-native-probe", media: "grid-sample", n: 10, rate: 1, extra: "&probe=1" },
   { name: "16x1080-native", media: "h264-1080", n: 16, rate: 1 },
   { name: "16x1080-in-scaled-iframe", media: "h264-1080", n: 16, rate: 1, extra: "&frame=scaled" },
 ];
@@ -247,7 +272,13 @@ async function readPage<T>(
   }
 }
 
-async function runFilm(base: string, browser: Browser, origin: string, fixture: string) {
+async function runFilm(
+  base: string,
+  browser: Browser,
+  origin: string,
+  fixture: string,
+  countersOnly = false,
+) {
   const session = await wd(base, "POST", "/session", {
     capabilities: { alwaysMatch: DRIVERS[browser].caps },
   });
@@ -264,7 +295,7 @@ async function runFilm(base: string, browser: Browser, origin: string, fixture: 
         window.__hfBench(arguments[0]).then(
         (r) => { window.__bench = { ok: r }; },
         (e) => { window.__bench = { error: String(e && e.stack || e) }; });`,
-      args: [{ playMs: PLAY_MS, seekFractions: SEEK_FRACTIONS }],
+      args: [{ playMs: PLAY_MS, seekFractions: SEEK_FRACTIONS, countersOnly }],
     });
     const deadline = Date.now() + 180_000;
     while (Date.now() < deadline) {
@@ -350,6 +381,35 @@ try {
             failed = true;
             rows.push({ browser, fixture, run, error: "failed, see the job log" });
             console.error(`[browsers] ${browser} ${fixture} run ${run} failed: ${e}`);
+          }
+        }
+      }
+      for (const fixture of COUNTERS_ONLY_FILMS) {
+        for (let run = 1; run <= runs; run++) {
+          const label = `${fixture} (counters only)`;
+          try {
+            const { page } = await runFilm(
+              `http://127.0.0.1:${port}`,
+              browser,
+              server.origin,
+              fixture,
+              true,
+            );
+            const dropped = num(page.decoded.dropped) ?? 0;
+            const total = num(page.decoded.total) ?? 0;
+            const videos = num(page.videoCount) ?? 0;
+            rows.push({
+              browser,
+              fixture: label,
+              run,
+              decoderDropped: dropped,
+              decoderFrames: total,
+              presentedFps: videos ? num((total - dropped) / videos / (PLAY_MS / 1000)) : null,
+            });
+            console.log(JSON.stringify(rows[rows.length - 1]));
+          } catch (e) {
+            rows.push({ browser, fixture: label, run, error: "failed, see the job log" });
+            console.error(`[browsers] ${browser} ${label} run ${run} failed: ${e}`);
           }
         }
       }

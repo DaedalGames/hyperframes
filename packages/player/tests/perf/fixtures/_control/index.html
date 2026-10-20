@@ -21,7 +21,7 @@
       // ?media=<key>&n=&rate=, &tick=1 (per-frame media writes),
       // &animate=scale|translate|css (ancestor transform every frame; css runs on the compositor),
       // &frame=plain|scaled (inside an iframe, scaled as the player scales it), &tiles=1 (the grid's tile styling),
-      // &reads=1 (reads every media state property of every video each frame).
+      // &reads=1 (reads every media state property of every video each frame), &probe=1 (the bench's rAF probe).
       (async function () {
         var q = new URLSearchParams(location.search);
         var MEDIA = {
@@ -37,7 +37,7 @@
             media: q.get("media"),
             n: String(Number(q.get("n") || 1)),
           });
-          for (var key of ["rate", "tick", "animate", "tiles", "reads"]) {
+          for (var key of ["rate", "tick", "animate", "tiles", "reads", "probe"]) {
             if (q.get(key)) child.set(key, q.get(key));
           }
           var f = document.createElement("iframe");
@@ -89,6 +89,14 @@
           );
         await Promise.all(videos.map((v) => v.play()));
         videos.forEach((v) => (v.playbackRate = Number(q.get("rate") || 1)));
+        if (q.get("probe")) {
+          var channel = new MessageChannel();
+          channel.port1.onmessage = function () {};
+          (function probe() {
+            channel.port2.postMessage(0);
+            requestAnimationFrame(probe);
+          })();
+        }
         if (q.get("reads")) {
           (function read() {
             videos.forEach((v) => {
