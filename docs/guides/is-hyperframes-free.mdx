@@ -1,0 +1,60 @@
+---
+title: "Is HyperFrames free?"
+sidebarTitle: "Is it free?"
+description: "Yes. HyperFrames is open source under Apache 2.0 and renders locally for free. See what can cost money, and who bills you for it."
+---
+
+Yes. The HyperFrames framework, CLI, and agent skills are open source under the
+[Apache 2.0 license](https://github.com/heygen-com/hyperframes/blob/main/LICENSE),
+and rendering on your own computer is free. You pay only for the services you choose to add, such as
+your AI agent's plan or HeyGen-hosted features.
+
+## What is free
+
+| Part | Cost |
+| --- | --- |
+| The framework, CLI, and skills | Free and open source (Apache 2.0). You can use, change, and ship them, including in commercial work, under the license terms. |
+| Preview and render on your computer | Free. Local rendering does not use HeyGen credits and does not need an account. |
+| Offline voice, music, and sound effects | Free. With no key set, voice uses Kokoro, music uses MusicGen, and sound effects come from a bundled library. See [Working offline](/guides/authentication#working-offline). |
+| The HyperFrames Studio app | Free to download for Mac and Linux. You do not need to sign in to download it. |
+| Studio in the browser | Free. It opens from any project with `npx hyperframes preview`. |
+
+## What can cost money
+
+None of these come from HyperFrames itself. Each one bills through its own account.
+
+| You use | Who bills you |
+| --- | --- |
+| An AI agent (Claude Code, Codex, Cursor, and others) | The agent's provider, on your own plan or API key. In the Studio app, runs bill to the plan of the account your agent is signed in with. See [Connect your agent](/studio-app/connect-your-agent). |
+| HeyGen voices, the HeyGen music library, and avatar presenters | Your HeyGen account. Some of these draw on the account's allowance or credits. |
+| Cloud rendering with `hyperframes cloud render` | Your HeyGen account, in credits. 4K renders bill at 1.5×. See [Cloud rendering](/deploy/cloud). |
+| The hosted HyperFrames connector in an AI chat | Your HeyGen account and the chat product's plan. See [Create through an AI chat](/guides/mcp). |
+| Rendering on your own AWS Lambda or Google Cloud Run | Your cloud provider. See [AWS Lambda](/deploy/aws-lambda) and [Google Cloud Run](/deploy/gcp-cloud-run). |
+| Other providers you add a key for, such as ElevenLabs or Gemini | That provider. See [Providers used by agent workflows](/guides/authentication#providers-used-by-agent-workflows). |
+
+Check your HeyGen account's usage before a long or repeated run that uses hosted
+features.
+
+## Do I need a HeyGen account?
+
+Not to make and render videos on your computer. You need one for HeyGen-hosted
+features, cloud rendering, the hosted connector, and the Studio app, which asks
+you to sign in on first launch. Signing in and creating an account are the same
+step:
+
+```bash
+npx hyperframes auth login
+```
+
+See [Authentication and API keys](/guides/authentication).
+
+## Related topics
+
+<CardGroup cols={2}>
+  <Card title="Make your first video" icon="play" href="/quickstart">
+    Install the skills and make a video locally, for free.
+  </Card>
+  <Card title="HyperFrames FAQ" icon="circle-question" href="/faq">
+    Answers to the questions people ask most.
+  </Card>
+</CardGroup>

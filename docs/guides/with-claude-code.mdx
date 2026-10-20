@@ -1,0 +1,110 @@
+---
+title: "Make videos with Claude Code"
+sidebarTitle: "Claude Code"
+description: "Install the HyperFrames plugin in Claude Code, ask for a video in plain words, then preview and render it to MP4 on your computer."
+---
+
+Install the HyperFrames plugin, then ask Claude Code for a video. Claude Code
+writes an HTML project in your folder, opens a live preview, and renders the MP4
+on your computer.
+
+```bash
+claude plugin marketplace add heygen-com/hyperframes
+claude plugin install hyperframes@hyperframes
+```
+
+## Before you start
+
+- [Claude Code](https://code.claude.com/docs), signed in with your Claude account
+  or an Anthropic Console account. Its usage bills to that account.
+- Node.js 22 or newer, and npm.
+- FFmpeg, for rendering MP4 files. Run `npx hyperframes doctor` to check.
+
+## Install
+
+<Tabs>
+  <Tab title="Plugin (recommended)">
+    Run the two commands above in your terminal. Then start a new Claude Code
+    session, or run `/reload-plugins` in the current one.
+
+    To get updates on their own, run `/plugin`, open **Marketplaces**, select
+    **hyperframes**, and choose **Enable auto-update**. See
+    [Install the HyperFrames plugin](/guides/plugins) for manual updates and
+    removal.
+  </Tab>
+  <Tab title="Standalone skills">
+    Run this in your project folder and choose **Core Skills**:
+
+    ```bash
+    npx skills add heygen-com/hyperframes
+    ```
+
+    Or install the core set for your user, with no picker:
+
+    ```bash
+    npx hyperframes skills update
+    ```
+
+    Start a new Claude Code session afterwards. See
+    [Install and update agent skills](/guides/skills).
+  </Tab>
+</Tabs>
+
+## Ask for your first video
+
+Open Claude Code in an empty folder and paste:
+
+```text
+Using /hyperframes:hyperframes, make a 10-second product intro for https://example.com.
+```
+
+With standalone skills, the router is `/hyperframes` instead of
+`/hyperframes:hyperframes`. Replace the URL with the page you want the video to
+show.
+
+## What happens
+
+1. Claude Code proposes a direction and asks for anything important that is
+   missing.
+2. It picks a workflow for your request, such as a product launch video or an
+   explainer, and builds the project in your folder.
+3. It checks the project and opens a local preview.
+
+Watch the first version and say what to change, in the same conversation.
+
+## Preview and render
+
+To reopen the preview later, run this inside the project folder:
+
+```bash
+npx hyperframes preview
+```
+
+The preview opens in Studio, where you can also edit the video by hand. To make
+the MP4 yourself:
+
+```bash
+npx hyperframes render --output final.mp4
+```
+
+You can also ask Claude Code to render it.
+
+## Prefer an app?
+
+The [HyperFrames Studio app](/studio-app) for Mac and Linux uses Claude Code
+too. It installs Claude Code for you and gives you a chat, a preview, and an
+editor in one window. To create inside the Claude chat app instead, with
+nothing installed, use the [hosted connector](/guides/mcp).
+
+## If something goes wrong
+
+- **Claude Code does not see the skill.** Start a new session or run
+  `/reload-plugins`. For standalone skills, run `npx hyperframes skills check`.
+- **The render fails.** Run `npx hyperframes doctor` and fix what it reports.
+- **Anything else.** See [Troubleshooting](/guides/troubleshooting).
+
+## Related topics
+
+- [Make your first video](/quickstart)
+- [Choose a workflow](/workflows)
+- [Write better prompts](/prompting/overview)
