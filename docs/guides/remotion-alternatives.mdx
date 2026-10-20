@@ -1,0 +1,51 @@
+---
+title: "Remotion alternatives"
+description: "Compare tools that make video from code: HyperFrames, Remotion, Motion Canvas, Revideo, Editframe, Shotstack, and Creatomate. What you write, cost, and fit."
+---
+
+The main alternatives to Remotion are HyperFrames (HTML), Motion Canvas and
+Revideo (TypeScript), Editframe (HTML or React), and the hosted APIs Shotstack
+and Creatomate (JSON templates). Pick by what you want to write and where you
+want the render to run.
+
+## At a glance
+
+| Tool | What you write | License and pricing, in plain words | Best for |
+| --- | --- | --- | --- |
+| [HyperFrames](https://github.com/heygen-com/hyperframes) | HTML, CSS, and JavaScript, often written by an AI agent | Open source, [Apache 2.0](https://github.com/heygen-com/hyperframes/blob/main/LICENSE). Local rendering is free; optional [cloud rendering](/deploy/cloud) uses HeyGen credits | Agent-made videos, and teams with existing HTML, CSS, GSAP, or Lottie work |
+| [Remotion](https://www.remotion.dev) | React components | Free for individuals and companies of up to three people; a paid company license is required for four or more ([terms](https://www.remotion.pro/license)) | React teams that want typed components and a mature ecosystem |
+| [Motion Canvas](https://motioncanvas.io) | TypeScript generator functions, with an editor for a live preview | Open source, [MIT](https://github.com/motion-canvas/motion-canvas) | Informative vector animations synced to a voiceover |
+| [Revideo](https://github.com/redotvideo/revideo) | TypeScript scenes as generator functions, plus a render API and a React player | Open source, [MIT](https://github.com/redotvideo/revideo) | Code-defined scenes rendered from your own app or service |
+| [Editframe](https://www.editframe.com) | HTML and CSS custom elements, or React | Free for individuals and teams of up to three; paid plans for larger organizations and for metered cloud rendering ([pricing](https://www.editframe.com/pricing)) | Personalized video from app data, and an editor embedded in your product |
+| [Shotstack](https://shotstack.io) | JSON edits and templates, sent to a cloud API (SDKs for Node.js, Python, PHP, and Ruby) | Hosted service. Free sandbox; you pay per rendered minute with credits, pay as you go or monthly ([pricing](https://shotstack.io/pricing/)) | High-volume templated rendering with no render servers to run |
+| [Creatomate](https://creatomate.com) | Templates made in an online editor, filled through a REST API, or JSON | Hosted service. Free trial; monthly plans with credits, where video cost depends on resolution, frame rate, and length ([pricing](https://creatomate.com/pricing)) | Automated social and marketing videos, including no-code workflows |
+
+Pricing and terms change. Check each linked page before you decide.
+
+## How to choose
+
+- **You want an AI agent to make the video.** HyperFrames ships agent skills
+  that plan, build, check, and render a project. See
+  [Make your first video](/quickstart).
+- **Your team writes React.** Remotion or Editframe keep you in components.
+  For the line-by-line difference from HyperFrames, see
+  [HyperFrames or Remotion?](/guides/hyperframes-vs-remotion).
+- **You animate diagrams or explainers by hand in code.** Motion Canvas and
+  Revideo are built around generator-function scenes.
+- **You fill the same template thousands of times and do not want servers.**
+  Shotstack and Creatomate render in their cloud from JSON or templates.
+  HyperFrames can do this with [template variables](/concepts/variables) and
+  [cloud rendering](/deploy/cloud) or your own
+  [AWS Lambda](/deploy/aws-lambda).
+
+## Moving from Remotion
+
+HyperFrames does not run Remotion code. To port an existing Remotion
+composition, ask your agent to use the `remotion-to-hyperframes` skill. See
+[Porting from Remotion](/prompting/remotion-migration).
+
+## Related topics
+
+- [HyperFrames or Remotion?](/guides/hyperframes-vs-remotion)
+- [Is HyperFrames free?](/guides/is-hyperframes-free)
+- [HyperFrames FAQ](/faq)

@@ -55,6 +55,7 @@
             "group": "Start here",
             "pages": [
               "introduction",
+              "guides/is-hyperframes-free",
               "quickstart",
               "go-further",
               "developers/index"
@@ -74,6 +75,9 @@
             "group": "Choose where to create",
             "pages": [
               "guides/choose-creation-path",
+              "guides/with-claude-code",
+              "guides/with-codex",
+              "guides/with-cursor",
               "guides/mcp",
               "guides/design-tools"
             ]
@@ -169,7 +173,8 @@
               "guides/music-to-video",
               "guides/slideshow",
               "guides/general-video",
-              "guides/hyperframes-vs-remotion"
+              "guides/hyperframes-vs-remotion",
+              "guides/remotion-alternatives"
             ]
           },
           {
@@ -190,6 +195,7 @@
             "group": "Help",
             "pages": [
               "help",
+              "faq",
               "guides/troubleshooting",
               "guides/feedback"
             ]
