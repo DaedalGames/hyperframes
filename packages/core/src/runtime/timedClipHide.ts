@@ -13,8 +13,6 @@ const HIDE_UNTIL_FIRST_PASS =
   "[data-start]:not(video, audio, img) { visibility: hidden !important; }";
 const PREVIEW_HIDE_UNTIL_FIRST_PASS = 'img[loading="lazy"] { display: none !important; }';
 const SKIP_ATTR = "data-hf-skip-hidden-images";
-// Injected rules match the visibility pass's mark, never inline style: a [style] selector above other
-// elements makes WebKit re-serialize an element's whole inline style on every write, as GSAP does per frame.
 export { CLIP_HIDDEN_ATTR };
 export const SKIPPED_CLIP = `[data-start]:not(video, audio, img, [${STUDIO_PREVIEW_UPCOMING_ATTR}], [${RUNTIME_STAMPED_ATTR}])[${CLIP_HIDDEN_ATTR}]`;
 const SKIP_HIDDEN_IMAGES = `${SKIPPED_CLIP} img { display: none !important; }`;

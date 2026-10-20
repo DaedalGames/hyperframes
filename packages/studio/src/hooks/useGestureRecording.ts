@@ -37,7 +37,6 @@ interface GsapRuntime {
   maxSeekTime: number;
   savedVisibility: string;
   savedTranslate: string;
-  /** Puts back the runtime's hidden-clip mark the preview lifted when it forced the element visible. */
   putMarkBack: (() => void) | null;
 }
 

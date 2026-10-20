@@ -16,7 +16,6 @@ interface RevealedNode {
   priors: { display: string; visibility: string; opacity: string };
   /** Values THIS override wrote — restore only while they are still in place. */
   applied: { display?: string; visibility?: string; opacity?: string };
-  /** Puts back the runtime's hidden-clip mark this override lifted with the visibility. */
   putMarkBack?: () => void;
 }
 
