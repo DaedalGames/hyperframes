@@ -518,7 +518,6 @@ export function syncRuntimeMedia(params: {
       const silencedByHidden =
         el.closest("[data-hidden]") !== null || isMemberGroupHidden(el.ownerDocument, el);
       const effectiveVolume = silencedByHidden ? 0 : clampVolume(authorVolume * userVol);
-      // A media write reaches the browser's media pipeline even when the value is unchanged.
       if (Math.abs(el.volume - effectiveVolume) > 1e-6) el.volume = effectiveVolume;
       lastRuntimeAppliedVolume.set(el, effectiveVolume);
       params.onElementVolume?.(el, effectiveVolume, authorVolume);
