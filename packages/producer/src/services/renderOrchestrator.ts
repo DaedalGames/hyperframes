@@ -4868,7 +4868,9 @@ async function executeRenderPipeline(input: {
         };
         // Not under drawElement: its verify failure discards every frame and recaptures.
         const overlap =
-          capturePlan.workerCount > 1 && !cfg.useDrawElement && canEncodeWhileCapturing(encodeInput)
+          !cfg.useDrawElement &&
+          workerSizing !== undefined &&
+          canEncodeWhileCapturing(encodeInput, capturePlan.workerCount, workerSizing.cpuCount)
             ? encodeWhileCapturing(encodeInput, totalFrames)
             : null;
         const captureFrameStart = Date.now();

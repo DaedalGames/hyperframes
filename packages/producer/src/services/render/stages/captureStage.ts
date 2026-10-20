@@ -117,7 +117,6 @@ export interface CaptureStageInput {
    * When set, `endFrame - startFrame` MUST equal `totalFrames`.
    */
   frameRange?: { startFrame: number; endFrame: number };
-  /** Multi-worker capture only: a worker finished writing this frame file. */
   onFrameLanded?: (frame: LandedFrame) => void;
 }
 

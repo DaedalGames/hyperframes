@@ -290,10 +290,17 @@ function videoEncoderOptions(input: EncodeStageInput, engineCfg: Pick<EngineConf
 
 /**
  * Software libx264 from JPEG frames: there the streaming encoder runs the disk
- * encoder's exact arguments, so the output is byte-identical.
+ * encoder's exact arguments, so the output is byte-identical. Needs a core the
+ * capture workers leave free, or the encoder only slows capture down.
  */
-export function canEncodeWhileCapturing(input: EncodeStageInput): boolean {
+export function canEncodeWhileCapturing(
+  input: EncodeStageInput,
+  workerCount: number,
+  cpuCount: number,
+): boolean {
   return (
+    workerCount > 1 &&
+    workerCount < cpuCount &&
     !input.isPngSequence &&
     !input.isGif &&
     !input.enableChunkedEncode &&

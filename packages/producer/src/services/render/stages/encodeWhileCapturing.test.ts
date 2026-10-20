@@ -5,7 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { getFfmpegBinary } from "@hyperframes/engine";
-import { encodeWhileCapturing, runEncodeStage, type EncodeStageInput } from "./encodeStage.js";
+import {
+  canEncodeWhileCapturing,
+  encodeWhileCapturing,
+  runEncodeStage,
+  type EncodeStageInput,
+} from "./encodeStage.js";
 
 const FRAMES = 12;
 const tempDirs: string[] = [];
@@ -87,6 +92,13 @@ async function until(condition: () => boolean) {
 }
 
 describe("encodeWhileCapturing", () => {
+  it("runs only when the capture workers leave a core free for the encoder", () => {
+    const input = makeInput("/r", "/r/frames", "v.mp4");
+    expect(canEncodeWhileCapturing(input, 4, 8)).toBe(true);
+    expect(canEncodeWhileCapturing(input, 4, 4)).toBe(false);
+    expect(canEncodeWhileCapturing(input, 1, 8)).toBe(false);
+  });
+
   it("encodes in frame order while frames land out of order, byte-identical to the encode after capture", async () => {
     const { root, framesDir, landed, merge } = captureToWorkerDirs();
     const overlap = encodeWhileCapturing(makeInput(root, framesDir, "overlap.mp4"), FRAMES);
