@@ -282,9 +282,12 @@ export function getProxyCachePath(
 }
 
 // --- global concurrency limiter -------------------------------------------
-// ponytail: a counter + one wait queue is the whole semaphore. Priority copies
-// queue ahead of the rest and are never refused for a full queue, so a few
-// priority asks (the copy a viewer is waiting on) can exceed the cap.
+// ponytail: a counter + one wait line is the whole semaphore. Priority copies
+// are never refused for a full queue, so a few priority asks can exceed the cap.
+// Invariant: a freed slot goes to the head of the line, ordered priority, then
+// foreground (a viewer waits), then background, FIFO within each by when it joined
+// that rank. A stopped copy a viewer now waits on joins the line as foreground
+// (resumed, not restarted), so it is never starved by queued background copies.
 
 /** One copy per cache key, shared by every caller asking for it. */
 interface ProxyJob {
@@ -303,7 +306,12 @@ interface ProxyJob {
   queued?: { start: () => void; drop: () => void };
   /** Counted in activeTranscodes; a stopped background copy gives its slot back. */
   holdsSlot?: boolean;
+  /** SIGSTOPped; set until SIGCONT, so a kill while stopped is never a failure. */
   stopped?: boolean;
+  /** Set while its ffmpeg runs: SIGCONTs a stopped copy into a free slot. */
+  resume?: () => void;
+  /** Pauses the timeout while stopped, so it counts encoding time only. */
+  clock?: { pause: () => void; run: () => void };
   abandoned: AbortController;
 }
 
@@ -317,10 +325,12 @@ class ProxyDroppedError extends ProxyTranscodeError {
 let activeTranscodes = 0;
 const waitQueue: ProxyJob[] = [];
 
+const rank = (job: ProxyJob): number => (job.priority ? 0 : job.background ? 2 : 1);
+
 function enqueue(job: ProxyJob): void {
-  const firstNormal = job.priority ? waitQueue.findIndex((queued) => !queued.priority) : -1;
-  if (firstNormal === -1) waitQueue.push(job);
-  else waitQueue.splice(firstNormal, 0, job);
+  const firstLower = waitQueue.findIndex((queued) => rank(queued) > rank(job));
+  if (firstLower === -1) waitQueue.push(job);
+  else waitQueue.splice(firstLower, 0, job);
 }
 
 function dequeue(job: ProxyJob): void {
@@ -356,30 +366,39 @@ function acquireSlot(job: ProxyJob): Promise<void> {
   });
 }
 
+/** Stopped copies waiting to resume were admitted already; only unstarted ones fill the queue. */
 function queueIsFull(): boolean {
-  return activeTranscodes >= MAX_CONCURRENT_TRANSCODES && waitQueue.length >= MAX_QUEUED_TRANSCODES;
+  return (
+    activeTranscodes >= MAX_CONCURRENT_TRANSCODES &&
+    waitQueue.filter((job) => job.queued).length >= MAX_QUEUED_TRANSCODES
+  );
 }
 
 function releaseSlot(job: ProxyJob): void {
   if (!job.holdsSlot) return;
   job.holdsSlot = false;
   activeTranscodes--;
-  waitQueue.shift()?.queued?.start();
+  const next = waitQueue.shift();
+  if (next?.queued) next.queued.start();
+  else next?.resume?.();
 }
 
-function prioritize(job: ProxyJob): void {
-  if (job.priority) return;
-  job.priority = true;
-  if (!job.queued) return;
+/** Moves a job in the line to its rank's tail, as if it joined now. */
+function requeue(job: ProxyJob): void {
+  if (!waitQueue.includes(job)) return;
   dequeue(job);
   enqueue(job);
 }
 
-/** A caller's ask lifts the copy it joins: priority moves it up the queue, a foreground ask stops it yielding. */
+/** A caller's ask lifts the copy it joins: priority moves it up the line, a foreground ask stops it yielding. */
 function raise(job: ProxyJob, options: ResolveProxyOptions): void {
-  if (options.priority) prioritize(job);
+  if (options.priority && !job.priority) {
+    job.priority = true;
+    requeue(job);
+  }
   if (options.background || !job.background) return;
   job.background = false;
+  requeue(job);
   applyHold();
 }
 
@@ -391,6 +410,7 @@ function leave(job: ProxyJob): void {
     return;
   }
   forget(job);
+  dequeue(job);
   job.abandoned.abort();
 }
 
@@ -421,21 +441,31 @@ function applyHold(): void {
 function stopCopy(proc: ChildProcess, job: ProxyJob): void {
   if (job.stopped || !proc.kill("SIGSTOP")) return;
   job.stopped = true;
+  job.clock?.pause();
   releaseSlot(job);
 }
 
+/** Into a free slot; with none, a copy a viewer waits on joins the line for the next one. */
 function resumeCopy(proc: ChildProcess, job: ProxyJob): void {
-  if (!job.stopped || activeTranscodes >= MAX_CONCURRENT_TRANSCODES) return;
+  if (!job.stopped) return;
+  if (activeTranscodes >= MAX_CONCURRENT_TRANSCODES) {
+    if (!job.background && !waitQueue.includes(job)) enqueue(job);
+    return;
+  }
+  dequeue(job);
   job.stopped = false;
   takeSlot(job);
   proc.kill("SIGCONT");
+  job.clock?.run();
 }
 
 function holdWhileBusy(proc: ChildProcess, job: ProxyJob): void {
   backgroundCopies.set(proc, job);
+  job.resume = () => resumeCopy(proc, job);
   applyHold();
   holdTimer ??= setInterval(applyHold, 1000).unref();
   proc.once("close", () => {
+    dequeue(job);
     backgroundCopies.delete(proc);
     if (backgroundCopies.size > 0) return;
     clearInterval(holdTimer);
@@ -460,13 +490,38 @@ function trackEncoder(proc: ChildProcess, tempPath: string): void {
   });
 }
 
-/** Below-normal priority, stopped on exit, and stoppable or pausable through its job. */
+/**
+ * Hard ceiling so a hung ffmpeg can never permanently occupy a slot: killed after
+ * TRANSCODE_TIMEOUT_MS of running, generous as long assets encode at about real
+ * time. Not spawn's `timeout`, which also counts time spent SIGSTOPped, killing a
+ * copy held through a long playback.
+ */
+function timeEncoder(proc: ChildProcess, job: ProxyJob): void {
+  let left = TRANSCODE_TIMEOUT_MS;
+  let since = 0;
+  let timer: NodeJS.Timeout | undefined;
+  job.clock = {
+    pause: () => {
+      clearTimeout(timer);
+      left -= Date.now() - since;
+    },
+    run: () => {
+      since = Date.now();
+      timer = setTimeout(() => proc.kill("SIGKILL"), left).unref();
+    },
+  };
+  job.clock.run();
+  proc.once("close", () => clearTimeout(timer));
+}
+
+/** Below-normal priority, stopped on exit, timed, and stoppable or pausable through its job. */
 function superviseEncoder(proc: ChildProcess, outputPath: string, job?: ProxyJob): void {
   try {
     if (proc.pid) setPriority(proc.pid, osConstants.priority.PRIORITY_BELOW_NORMAL);
   } catch {}
   trackEncoder(proc, outputPath);
   if (!job) return;
+  timeEncoder(proc, job);
   job.stop = () => proc.kill("SIGKILL");
   if (job.replaced) job.stop();
   if (job.background) holdWhileBusy(proc, job);
@@ -503,7 +558,10 @@ function replaceCopy(job: ProxyJob): void {
   job.replaced = true;
   forget(job);
   if (job.queued) job.queued.drop();
-  else job.stop?.();
+  else {
+    dequeue(job);
+    job.stop?.();
+  }
 }
 
 /** Drops this source's copies the new one covers, each once nothing has read it for a while. */
@@ -719,14 +777,10 @@ async function runFfmpeg(
     ];
     const args = [...commonArgs, ...(variant === "vp8" ? vp8Args : h264Args), outputPath];
 
-    // Hard ceiling so a hung ffmpeg can never permanently occupy one of the
-    // global transcode slots: the child is killed and the slot released via
-    // the caller's finally. Generous because long assets transcode at
-    // roughly real time; a healthy encode of any authoring asset fits.
+    // The running-time ceiling is timeEncoder's; the slot is released via the caller's finally.
     signal.throwIfAborted();
     const proc = spawn(ffmpegPath, args, {
       stdio: ["ignore", "ignore", "pipe"],
-      timeout: TRANSCODE_TIMEOUT_MS,
       killSignal: "SIGKILL",
       signal,
       windowsHide: true,
@@ -873,7 +927,8 @@ export async function resolveProxy(
         return path;
       })
       .catch((err: unknown) => {
-        const stopped = job.replaced || job.abandoned.signal.aborted;
+        // A SIGSTOPped ffmpeg cannot exit by itself, so ending while stopped is a kill, not the source.
+        const stopped = job.replaced || job.abandoned.signal.aborted || job.stopped;
         if (!(err instanceof ProxyDroppedError) && !stopped) rememberFailure(cachePath, err);
         throw err;
       })

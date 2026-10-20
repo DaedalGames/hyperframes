@@ -61,7 +61,12 @@ function createFakeProc(): FakeProc {
   return proc;
 }
 
-type SpawnOptions = { windowsHide?: boolean; signal?: AbortSignal };
+type SpawnOptions = {
+  windowsHide?: boolean;
+  signal?: AbortSignal;
+  timeout?: number;
+  killSignal?: string;
+};
 type SpawnCall = { command: string; args: string[]; options?: SpawnOptions; proc: FakeProc };
 type SpawnImpl = (command: string, args: string[], options?: SpawnOptions) => FakeProc;
 
@@ -383,6 +388,175 @@ describe("resolveProxy", () => {
       transcoder.notePreviewPlaying(false);
       await finish();
       await asked;
+    });
+
+    /** Fake ffmpegs that die on SIGKILL and honour spawn's `timeout` as Node does. */
+    async function dyingCopies() {
+      const { spawn, calls } = createSpawnSpy();
+      const transcoder = await loadModule((command, args, options) => {
+        const proc = spawn(command, args, options);
+        let dead = false;
+        const kill = vi.fn((sig: string) => {
+          if (sig === "SIGKILL" && !dead) {
+            dead = true;
+            proc.emit("close", null, "SIGKILL");
+          }
+          return true;
+        });
+        if (options?.timeout) {
+          const timer = setTimeout(() => kill(options.killSignal ?? "SIGTERM"), options.timeout);
+          proc.once("close", () => clearTimeout(timer));
+        }
+        options?.signal?.addEventListener("abort", () => kill(options.killSignal ?? "SIGTERM"));
+        return Object.assign(proc, { pid: 4242, kill });
+      }, FFMPEG_PATH);
+      const projectDir = tmpProject();
+      const source = (name: string) => {
+        writeFileSync(join(projectDir, name), name);
+        return join(projectDir, name);
+      };
+      const signals = (index: number) =>
+        (calls[index] as Killable).proc.kill.mock.calls.map(([sig]) => sig);
+      return { transcoder, calls, projectDir, source, signals };
+    }
+
+    it("resumes a stopped copy a viewer waits on into the next freed slot, ahead of queued background copies", async () => {
+      vi.useFakeTimers();
+      const { transcoder, calls, projectDir, source, signals } = await dyingCopies();
+      const [a, b] = [source("a.mp4"), source("b.mp4")];
+      const copies = [a, b].map((sourcePath) =>
+        transcoder.resolveProxy(projectDir, sourcePath, "h264", box, { background: true }),
+      );
+      await flush();
+      transcoder.notePreviewPlaying(true);
+      copies.push(
+        ...["c.mov", "d.mov"].map((name) =>
+          transcoder.resolveProxy(projectDir, source(name), "h264", box),
+        ),
+        transcoder.resolveProxy(projectDir, source("e.mp4"), "h264", box, { background: true }),
+      );
+      await flush();
+      expect(calls).toHaveLength(4);
+
+      copies.push(transcoder.resolveProxy(projectDir, a, "h264", box));
+      expect(signals(0)).toEqual(["SIGSTOP"]);
+      succeed(calls[2]!);
+      await flush(50);
+      expect(signals(0)).toEqual(["SIGSTOP", "SIGCONT"]);
+      expect(signals(1)).toEqual(["SIGSTOP"]);
+      expect(calls).toHaveLength(4);
+
+      transcoder.notePreviewPlaying(false);
+      [0, 1, 3].forEach((index) => succeed(calls[index]!));
+      await flush(50);
+      expect(calls).toHaveLength(5);
+      succeed(calls[4]!);
+      await Promise.all(copies);
+    });
+
+    it("drops a stopped copy from the line when its viewers leave, leaking no slot", async () => {
+      vi.useFakeTimers();
+      const { transcoder, calls, projectDir, source, signals } = await dyingCopies();
+      const [a, b] = [source("a.mp4"), source("b.mp4")];
+      const leaving = new AbortController();
+      const copies = [
+        transcoder
+          .resolveProxy(projectDir, a, "h264", box, { background: true, signal: leaving.signal })
+          .catch(() => "left"),
+        transcoder.resolveProxy(projectDir, b, "h264", box, { background: true }),
+      ];
+      await flush();
+      transcoder.notePreviewPlaying(true);
+      copies.push(
+        ...["c.mov", "d.mov"].map((name) =>
+          transcoder.resolveProxy(projectDir, source(name), "h264", box),
+        ),
+        transcoder.resolveProxy(projectDir, source("e.mp4"), "h264", box, { background: true }),
+        transcoder
+          .resolveProxy(projectDir, a, "h264", box, { signal: leaving.signal })
+          .catch(() => "left"),
+      );
+      await flush();
+      leaving.abort();
+      expect(signals(0)).toEqual(["SIGSTOP", "SIGKILL"]);
+
+      succeed(calls[2]!);
+      await flush(50);
+      expect(calls).toHaveLength(5);
+      transcoder.notePreviewPlaying(false);
+      [1, 3, 4].forEach((index) => succeed(calls[index]!));
+      await Promise.all(copies);
+
+      const fresh = ["f.mov", "g.mov", "h.mov"].map((name) =>
+        transcoder.resolveProxy(projectDir, source(name), "h264", box),
+      );
+      await flush(50);
+      expect(calls).toHaveLength(5 + MAX_CONCURRENT);
+      [5, 6].forEach((index) => succeed(calls[index]!));
+      await flush(50);
+      succeed(calls[7]!);
+      await Promise.all(fresh);
+    });
+
+    it("counts only encoding time toward the timeout, not time spent stopped", async () => {
+      vi.useFakeTimers();
+      const { transcoder, projectDir, source, signals } = await dyingCopies();
+      const copy = transcoder.resolveProxy(projectDir, source("a.mp4"), "h264", box, {
+        background: true,
+      });
+      await flush();
+      const exportJob = { status: "rendering" };
+      transcoder.holdBackgroundCopiesDuring(exportJob);
+      await vi.advanceTimersByTimeAsync(20 * 60_000);
+      expect(signals(0)).toEqual(["SIGSTOP"]);
+
+      exportJob.status = "complete";
+      await vi.advanceTimersByTimeAsync(1_000);
+      const killed = expect(copy).rejects.toBeInstanceOf(transcoder.ProxyTranscodeError);
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(signals(0)).toEqual(["SIGSTOP", "SIGCONT"]);
+      // The budget resumes where it paused: 15 minutes of encoding in all.
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      expect(signals(0)).toEqual(["SIGSTOP", "SIGCONT", "SIGKILL"]);
+      await killed;
+    });
+
+    it("does not remember a copy killed while stopped as a failure", async () => {
+      vi.useFakeTimers();
+      const { transcoder, calls, projectDir, source } = await dyingCopies();
+      const sourcePath = source("a.mp4");
+      const copy = transcoder.resolveProxy(projectDir, sourcePath, "h264", box, {
+        background: true,
+      });
+      await flush();
+      transcoder.notePreviewPlaying(true);
+      calls[0]!.proc.emit("close", null, "SIGKILL");
+      await expect(copy).rejects.toBeInstanceOf(transcoder.ProxyTranscodeError);
+
+      const again = transcoder.resolveProxy(projectDir, sourcePath, "h264", box);
+      await flush();
+      expect(calls).toHaveLength(2);
+      succeed(calls[1]!);
+      await expect(again).resolves.toContain(".transcode-cache");
+    });
+
+    it("still fails, and remembers, a running copy that outlasts the timeout", async () => {
+      vi.useFakeTimers();
+      const { transcoder, calls, projectDir, source, signals } = await dyingCopies();
+      const sourcePath = source("a.mp4");
+      const copy = transcoder.resolveProxy(projectDir, sourcePath, "h264", box);
+      const failed = expect(copy).rejects.toBeInstanceOf(transcoder.ProxyTranscodeError);
+      await flush();
+      await vi.advanceTimersByTimeAsync(transcoder.TRANSCODE_TIMEOUT_MS - 1_000);
+      expect(signals(0)).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(signals(0)).toEqual(["SIGKILL"]);
+      await failed;
+
+      await expect(transcoder.resolveProxy(projectDir, sourcePath, "h264", box)).rejects.toThrow(
+        /killed by SIGKILL/,
+      );
+      expect(calls).toHaveLength(1);
     });
 
     it("never signals on Windows, where Node would kill the copy instead", async () => {
