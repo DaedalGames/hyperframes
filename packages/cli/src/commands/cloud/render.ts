@@ -39,7 +39,10 @@ import { errorBox, formatBytes, formatDuration } from "../../ui/format.js";
 import { resolveProject, type ProjectDir } from "../../utils/project.js";
 import { normalizeErrorMessage } from "../../utils/errorMessage.js";
 import {
-  buildPublishFileMap,
+  readStaged,
+  type StagedFile,
+  stagedSize,
+  stagePublishFiles,
   type PublishArchiveResult,
   zipPublishFileMap,
 } from "../../utils/publishProject.js";
@@ -63,6 +66,7 @@ import { reportApiError } from "../../cloud/errors.js";
 import { parseEnumFlag, parseIntFlag, parseNumericFlag } from "../../cloud/parsing.js";
 import { uploadAssetViaDirectUpload, uploadZipViaDirectUpload } from "../../cloud/upload.js";
 import {
+  OFFLOAD_MIN_BYTES,
   offloadHeavyMedia,
   type OffloadedMedia,
   type OffloadOptions,
@@ -579,14 +583,17 @@ export interface ArchiveFileSummary {
 
 interface PreparedLocalArchive {
   project: ProjectDir;
-  archive: PublishArchiveResult;
+  /** Absent when the files left on disk alone are over the upload limit: they are never read. */
+  archive?: PublishArchiveResult;
+  sizeBytes: number;
+  fileCount: number;
   largestFiles: ArchiveFileSummary[];
   offloaded: OffloadedMedia[];
 }
 
-function summarizeLargestFiles(fileMap: Map<string, Buffer>): ArchiveFileSummary[] {
+function summarizeLargestFiles(fileMap: Map<string, StagedFile>): ArchiveFileSummary[] {
   return [...fileMap.entries()]
-    .map(([path, content]) => ({ path, size_bytes: content.byteLength }))
+    .map(([path, content]) => ({ path, size_bytes: stagedSize(content) }))
     .sort((a, b) => b.size_bytes - a.size_bytes || a.path.localeCompare(b.path))
     .slice(0, LARGEST_FILE_COUNT);
 }
@@ -605,13 +612,29 @@ async function prepareLocalArchive(
   const { fileMap, entryPath } = stageProjectFiles(project, composition);
   const offloaded = await offloadMedia(project, fileMap, entryPath, asJson, upload);
 
-  const archive = zipPublishFileMap(fileMap);
+  // Media left on disk barely compresses: past the limit, its size is the report and nothing is read.
+  const onDiskBytes = [...fileMap.values()]
+    .filter((file) => !Buffer.isBuffer(file))
+    .reduce((sum, file) => sum + stagedSize(file), 0);
+  const archive =
+    onDiskBytes > DIRECT_UPLOAD_LIMIT_BYTES
+      ? undefined
+      : zipPublishFileMap(new Map([...fileMap].map(([path, file]) => [path, readStaged(file)])));
+  const sizeBytes = archive?.buffer.byteLength ?? onDiskBytes;
   if (!asJson) {
-    console.log(c.dim(`   ${archive.fileCount} files · ${formatBytes(archive.buffer.byteLength)}`));
+    console.log(c.dim(`   ${fileMap.size} files · ${formatBytes(sizeBytes)}`));
   }
-  const prepared = { project, archive, largestFiles: summarizeLargestFiles(fileMap), offloaded };
-  if (upload) assertArchiveFits(archive.buffer.byteLength, prepared.largestFiles);
-  if (!asJson && archive.buffer.byteLength >= ARCHIVE_DIAGNOSTIC_THRESHOLD_BYTES) {
+  const largestFiles = summarizeLargestFiles(fileMap);
+  const prepared = {
+    project,
+    archive,
+    sizeBytes,
+    fileCount: fileMap.size,
+    largestFiles,
+    offloaded,
+  };
+  if (upload) assertArchiveFits(sizeBytes, largestFiles);
+  if (!asJson && sizeBytes >= ARCHIVE_DIAGNOSTIC_THRESHOLD_BYTES) {
     reportLargestFiles(prepared);
   }
   return prepared;
@@ -620,9 +643,9 @@ async function prepareLocalArchive(
 function stageProjectFiles(
   project: ProjectDir,
   composition: string | undefined,
-): { fileMap: Map<string, Buffer>; entryPath: string } {
+): { fileMap: Map<string, StagedFile>; entryPath: string } {
   try {
-    const fileMap = buildPublishFileMap(project.dir);
+    const fileMap = stagePublishFiles(project.dir, OFFLOAD_MIN_BYTES);
     const entryPath = relative(
       project.dir,
       resolvePath(project.dir, composition ?? "index.html"),
@@ -642,7 +665,7 @@ function stageProjectFiles(
 
 async function offloadMedia(
   project: ProjectDir,
-  fileMap: Map<string, Buffer>,
+  fileMap: Map<string, StagedFile>,
   entryPath: string,
   asJson: boolean,
   upload: OffloadOptions["upload"],
@@ -707,14 +730,14 @@ function reportLargestFiles(prepared: PreparedLocalArchive): void {
 }
 
 function reportDryRun(prepared: PreparedLocalArchive, asJson: boolean): void {
-  const sizeBytes = prepared.archive.buffer.byteLength;
+  const { sizeBytes } = prepared;
   if (asJson) {
     console.log(
       JSON.stringify(
         withMeta({
           archive: {
             project: prepared.project.name,
-            file_count: prepared.archive.fileCount,
+            file_count: prepared.fileCount,
             size_bytes: sizeBytes,
             upload_limit_bytes: DIRECT_UPLOAD_LIMIT_BYTES,
             exceeds_upload_limit: sizeBytes > DIRECT_UPLOAD_LIMIT_BYTES,
@@ -754,6 +777,7 @@ async function maybeUploadProject(
 
   if (!preparedArchive) throw new Error("Local project archive was not prepared");
   const { project, archive } = preparedArchive;
+  if (!archive) throw new Error("Local project archive is over the upload limit");
 
   if (!asJson) {
     console.log("");

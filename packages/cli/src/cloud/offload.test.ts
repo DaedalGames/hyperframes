@@ -1,8 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  truncateSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { buildPublishFileMap } from "../utils/publishProject.js";
+import { buildPublishFileMap, stagePublishFiles } from "../utils/publishProject.js";
 import {
   type GifPrep,
   OFFLOAD_MIN_BYTES,
@@ -382,6 +391,72 @@ describe("offloadHeavyMedia", () => {
     expect(prepared?.equals(nested)).toBe(true);
     expect(fileMap.has("compositions/logo.gif")).toBe(false);
     expect(fileMap.has("logo.gif")).toBe(true);
+  });
+
+  it("hashes and encodes media over 4 GiB from disk, never reading it whole", async () => {
+    const dir = project({ "index.html": html(`<video src="take.mov"></video>`), "take.mov": "" });
+    truncateSync(join(dir, "take.mov"), 2 ** 32 + 1);
+    const fileMap = stagePublishFiles(dir, OFFLOAD_MIN_BYTES);
+    const run = vi.fn(async () => ({
+      bytes: Buffer.from("mp4"),
+      filename: "take.mp4",
+      contentType: "video/mp4",
+    }));
+
+    const [item] = await offloadHeavyMedia(dir, fileMap, {
+      apiBaseUrl: "https://api.example",
+      upload: fakeUpload(),
+      reencoder: { choose: async () => "video", run },
+      cachePath: cachePath(),
+    });
+
+    expect(run).toHaveBeenCalledWith(join(dir, "take.mov"), "video", undefined);
+    expect(item).toMatchObject({ path: "take.mov", action: "reencode", size_bytes: 2 ** 32 + 1 });
+    expect(fileMap.has("take.mov")).toBe(false);
+  }, 60_000);
+
+  it("uploads media staged on disk as a stream of the file", async () => {
+    const dir = project({
+      "index.html": html(`<video src="clip.mp4"></video>`),
+      "clip.mp4": HEAVY,
+    });
+    const upload = fakeUpload();
+
+    await offloadHeavyMedia(dir, stagePublishFiles(dir, OFFLOAD_MIN_BYTES), {
+      apiBaseUrl: "https://api.example",
+      upload,
+      cachePath: cachePath(),
+    });
+
+    expect(upload).toHaveBeenCalledWith({
+      path: join(dir, "clip.mp4"),
+      size: HEAVY.byteLength,
+      filename: "clip.mp4",
+      contentType: "video/mp4",
+    });
+  });
+
+  it("stops without caching when media staged on disk changes during its encode", async () => {
+    const dir = project({
+      "index.html": html(`<audio src="voice.flac"></audio>`),
+      "voice.flac": HEAVY,
+    });
+    const fileMap = stagePublishFiles(dir, OFFLOAD_MIN_BYTES);
+    const cache = cachePath();
+    const run = vi.fn(async (sourcePath: string) => {
+      utimesSync(sourcePath, new Date(), new Date(Date.now() + 5_000));
+      return { bytes: Buffer.from("wav"), filename: "voice.wav", contentType: "audio/wav" };
+    });
+
+    await expect(
+      offloadHeavyMedia(dir, fileMap, {
+        apiBaseUrl: "https://api.example",
+        upload: fakeUpload(),
+        reencoder: { choose: async () => "audio", run },
+        cachePath: cache,
+      }),
+    ).rejects.toThrow(/changed on disk/);
+    expect(existsSync(cache)).toBe(false);
   });
 
   it("re-encodes the staged bytes, not a file saved on disk after staging", async () => {

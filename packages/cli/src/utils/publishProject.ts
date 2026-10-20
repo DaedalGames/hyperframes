@@ -333,9 +333,48 @@ function collectProjectFiles(
 
 const EXT_ASSETS_PREFIX = "_ext";
 
+/** Files whose text a reference rewrite or scan reads; they are always staged in memory. */
+export const TEXT_FILE_EXTS = /\.(html?|css|m?js|cjs|json|svg|xml|txt)$/i;
+
+/** A large non-text project file left on disk; `size` and `mtimeMs` detect an edit after staging. */
+export interface DiskFile {
+  absPath: string;
+  size: number;
+  mtimeMs: number;
+}
+
+export type StagedFile = Buffer | DiskFile;
+
+export function stagedSize(file: StagedFile): number {
+  return Buffer.isBuffer(file) ? file.byteLength : file.size;
+}
+
+export function assertUnchanged(file: DiskFile): void {
+  const now = statSync(file.absPath, { throwIfNoEntry: false });
+  if (now?.size !== file.size || now.mtimeMs !== file.mtimeMs) {
+    throw new Error(`${file.absPath} changed on disk while it was being prepared. Run it again.`);
+  }
+}
+
+/** The staged bytes; a file left on disk is read now and must not have changed since staging. */
+export function readStaged(file: StagedFile): Buffer {
+  if (Buffer.isBuffer(file)) return file;
+  assertUnchanged(file);
+  const bytes = readFileSync(file.absPath);
+  assertUnchanged(file);
+  return bytes;
+}
+
+function stageFile(absPath: string, onDiskMinBytes: number): StagedFile {
+  const { size, mtimeMs } = statSync(absPath);
+  if (size < onDiskMinBytes || TEXT_FILE_EXTS.test(absPath)) return readFileSync(absPath);
+  return { absPath, size, mtimeMs };
+}
+
 interface ExternalAssetContext {
   absProjectDir: string;
-  fileContents: Map<string, Buffer>;
+  fileContents: Map<string, StagedFile>;
+  onDiskMinBytes: number;
   externalMap: Map<string, string>;
   usedArchivePaths: Set<string>;
 }
@@ -356,7 +395,7 @@ function addExternalAsset(ctx: ExternalAssetContext, absPath: string): string {
     archivePath = `${base}_${i}${ext}`;
   }
 
-  ctx.fileContents.set(archivePath, readFileSync(absPath));
+  ctx.fileContents.set(archivePath, stageFile(absPath, ctx.onDiskMinBytes));
   ctx.externalMap.set(absPath, archivePath);
   ctx.usedArchivePaths.add(archivePath);
   return archivePath;
@@ -502,17 +541,19 @@ function localizeCssEntry(ctx: ExternalAssetContext, entryPath: string, content:
  */
 export function localizeExternalAssets(
   absProjectDir: string,
-  fileContents: Map<string, Buffer>,
+  fileContents: Map<string, StagedFile>,
+  onDiskMinBytes = Infinity,
 ): number {
   const ctx: ExternalAssetContext = {
     absProjectDir,
     fileContents,
+    onDiskMinBytes,
     externalMap: new Map(),
     usedArchivePaths: new Set(),
   };
 
   for (const [entryPath, content] of [...fileContents.entries()]) {
-    if (entryPath.startsWith(EXT_ASSETS_PREFIX + "/")) continue;
+    if (entryPath.startsWith(EXT_ASSETS_PREFIX + "/") || !Buffer.isBuffer(content)) continue;
     if (entryPath.endsWith(".html") || entryPath.endsWith(".htm")) {
       localizeHtmlEntry(ctx, entryPath, content);
     } else if (entryPath.endsWith(".css")) {
@@ -531,6 +572,14 @@ export function localizeExternalAssets(
  * keeps calling `createPublishArchive` directly.
  */
 export function buildPublishFileMap(projectDir: string): Map<string, Buffer> {
+  return stagePublishFiles(projectDir, Infinity) as Map<string, Buffer>;
+}
+
+/** {@link buildPublishFileMap}, but non-text files of `onDiskMinBytes` or more stay on disk. */
+export function stagePublishFiles(
+  projectDir: string,
+  onDiskMinBytes: number,
+): Map<string, StagedFile> {
   const absProjectDir = resolve(projectDir);
   const filePaths: string[] = [];
   collectProjectFiles(absProjectDir, absProjectDir, filePaths, createProjectIgnore(absProjectDir));
@@ -540,12 +589,12 @@ export function buildPublishFileMap(projectDir: string): Map<string, Buffer> {
     );
   }
 
-  const fileContents = new Map<string, Buffer>();
+  const fileContents = new Map<string, StagedFile>();
   for (const filePath of filePaths) {
-    fileContents.set(filePath, readFileSync(join(absProjectDir, filePath)));
+    fileContents.set(filePath, stageFile(join(absProjectDir, filePath), onDiskMinBytes));
   }
 
-  localizeExternalAssets(absProjectDir, fileContents);
+  localizeExternalAssets(absProjectDir, fileContents, onDiskMinBytes);
   return fileContents;
 }
 

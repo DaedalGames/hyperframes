@@ -30,6 +30,14 @@ const ERROR_CODE_HINTS: Record<string, string> = {
   rate_limit_exceeded: "Retry after the duration in the Retry-After header.",
 };
 
+// The asset upload API reports an over-limit file as invalid_parameter; only its message says why.
+function hintCode(err: HyperframesApiError): string | undefined {
+  if (err.code === "invalid_parameter" && /^File too large\b/.test(err.message)) {
+    return "hyperframes_project_too_large";
+  }
+  return err.code;
+}
+
 /**
  * Print an errorBox and `process.exit(1)` for any unknown error from
  * the cloud subverbs. The `stage` is the human-readable name of the
@@ -64,7 +72,8 @@ export function reportApiError(
       errorBox("Not found", options.notFound);
       failCommand();
     }
-    const hint = err.code ? hints[err.code] : undefined;
+    const code = hintCode(err);
+    const hint = code ? hints[code] : undefined;
     const title = `${stage} (HTTP ${err.status})`;
     // Priority: code-specific hint > caller suggestion > bare code
     // label > no third line. Code-specific hints win because they

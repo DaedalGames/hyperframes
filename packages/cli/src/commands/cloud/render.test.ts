@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -155,6 +155,40 @@ describe("cloud render --dry-run with heavy media", () => {
     ]);
     expect(archive.file_count).toBe(1);
     expect(archive.size_bytes).toBeLessThan(64 * 1024);
+  });
+});
+
+describe("cloud render --dry-run with a file over 4 GiB left in the zip", () => {
+  it("reports it as over the limit without reading it", () => {
+    const dir = writeComposition(1920, 1080);
+    mkdirSync(join(dir, "raw"));
+    writeFileSync(join(dir, "raw", "take.mov"), "");
+    truncateSync(join(dir, "raw", "take.mov"), 2 ** 32 + 1);
+    const result = spawnSync(
+      "bun",
+      ["run", cliEntry, "cloud", "render", dir, "--dry-run", "--json"],
+      {
+        encoding: "utf-8",
+        timeout: 60_000,
+        env: {
+          ...process.env,
+          CI: "1",
+          HEYGEN_API_URL: "http://127.0.0.1:1",
+          HYPERFRAMES_NO_UPDATE_CHECK: "1",
+          HOME: dir,
+        },
+      },
+    );
+
+    expect(result.status).toBe(0);
+    const { archive } = JSON.parse(result.stdout) as {
+      archive: {
+        exceeds_upload_limit: boolean;
+        largest_files: Array<{ path: string; size_bytes: number }>;
+      };
+    };
+    expect(archive.exceeds_upload_limit).toBe(true);
+    expect(archive.largest_files[0]).toEqual({ path: "raw/take.mov", size_bytes: 2 ** 32 + 1 });
   });
 });
 

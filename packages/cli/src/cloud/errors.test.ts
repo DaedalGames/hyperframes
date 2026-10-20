@@ -53,6 +53,20 @@ describe("cloud/errors reportApiError", () => {
     );
   });
 
+  it("points an upload the server refuses as too large to dry-run, not to --help", () => {
+    const err = new HyperframesApiError({
+      status: 400,
+      message: "File too large. Maximum is 200 MiB.",
+      code: "invalid_parameter",
+    });
+    expect(() => reportApiError("Upload failed", err)).toThrow(CliRuntimeError);
+    expect(errorBox).toHaveBeenCalledWith(
+      "Upload failed (HTTP 400)",
+      "File too large. Maximum is 200 MiB.",
+      expect.stringContaining("hyperframes cloud render --dry-run"),
+    );
+  });
+
   it("prefers the code-specific hint over a caller suggestion", () => {
     const err = new HyperframesApiError({
       status: 400,

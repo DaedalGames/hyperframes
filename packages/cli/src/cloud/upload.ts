@@ -24,6 +24,10 @@
  */
 
 import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { type IncomingMessage, request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
+import { pipeline } from "node:stream/promises";
 import type { HyperframesCloudClient } from "./_gen/client.js";
 import { HyperframesApiError } from "./_gen/client.js";
 
@@ -38,6 +42,12 @@ export type UploadProgressEvent =
   | { phase: "initialize" }
   | { phase: "upload"; percent: number }
   | { phase: "complete" };
+
+/** A file on disk, hashed and uploaded as a stream so it is never held in memory. */
+export interface UploadFileSource {
+  path: string;
+  size: number;
+}
 
 export interface UploadZipViaDirectOptions {
   client: HyperframesCloudClient;
@@ -57,6 +67,12 @@ const CONTENT_TYPE_ZIP = "application/zip";
 
 function sha256Hex(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
+}
+
+async function sha256OfFile(path: string): Promise<string> {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(path)) hash.update(chunk as Buffer);
+  return hash.digest("hex");
 }
 
 function sleep(ms: number): Promise<void> {
@@ -85,25 +101,65 @@ async function putBytesToPresignedUrl(
   fetchImpl: typeof fetch,
   uploadUrl: string,
   uploadHeaders: Record<string, unknown>,
-  bytes: Uint8Array,
+  body: Uint8Array | UploadFileSource,
   contentType: string,
 ): Promise<void> {
   const headers: Record<string, string> = {
     "content-type": contentType,
     ...normalizeUploadHeaders(uploadHeaders),
   };
+  if (!(body instanceof Uint8Array)) return putFileToPresignedUrl(uploadUrl, headers, body);
   // `Uint8Array<ArrayBufferLike>` is a valid `BodyInit` at runtime but
   // not strictly assignable per lib.dom.d.ts — cast rather than copy,
   // since a 200MB buffer copy would be wasteful.
   const res = await fetchImpl(uploadUrl, {
     method: "PUT",
     headers,
-    body: bytes as unknown as BodyInit,
+    body: body as unknown as BodyInit,
   });
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new Error(
       `Direct upload PUT failed: ${res.status} ${res.statusText}${
+        detail ? ` — ${detail.slice(0, 300)}` : ""
+      }`,
+    );
+  }
+}
+
+// fetch holds a streamed request body in memory whole, so a file is piped through node:http(s).
+async function putFileToPresignedUrl(
+  uploadUrl: string,
+  headers: Record<string, string>,
+  file: UploadFileSource,
+): Promise<void> {
+  const send = new URL(uploadUrl).protocol === "https:" ? httpsRequest : httpRequest;
+  const req = send(uploadUrl, {
+    method: "PUT",
+    headers: { ...headers, "content-length": String(file.size) },
+  });
+  const response = new Promise<IncomingMessage>((resolve, reject) => {
+    req.once("response", resolve).once("error", reject);
+  });
+  const sent = pipeline(createReadStream(file.path), req);
+  let res: IncomingMessage;
+  try {
+    res = await response;
+  } catch (err) {
+    await sent.catch(() => undefined);
+    throw err;
+  }
+  const status = res.statusCode ?? 0;
+  const ok = status >= 200 && status < 300;
+  // A refused upload can close the connection mid-body; its status explains that write error.
+  await sent.catch((err: unknown) => {
+    if (ok) throw err;
+  });
+  let detail = "";
+  for await (const chunk of res) detail += String(chunk);
+  if (!ok) {
+    throw new Error(
+      `Direct upload PUT failed: ${status} ${res.statusMessage ?? ""}${
         detail ? ` — ${detail.slice(0, 300)}` : ""
       }`,
     );
@@ -139,12 +195,17 @@ async function completeWithRetry(
 }
 
 export async function uploadAssetViaDirectUpload(
-  opts: UploadZipViaDirectOptions & { contentType: string },
+  opts: Omit<UploadZipViaDirectOptions, "bytes"> & { contentType: string } & (
+      | { bytes: Uint8Array }
+      | UploadFileSource
+    ),
 ): Promise<UploadZipViaDirectResult> {
   const start = Date.now();
-  const { bytes, filename, idempotencyKey } = opts;
-  const size_bytes = bytes.byteLength;
-  const checksum_sha256 = sha256Hex(bytes);
+  const { filename, idempotencyKey } = opts;
+  const body = "bytes" in opts ? opts.bytes : { path: opts.path, size: opts.size };
+  const size_bytes = body instanceof Uint8Array ? body.byteLength : body.size;
+  const checksum_sha256 =
+    body instanceof Uint8Array ? sha256Hex(body) : await sha256OfFile(body.path);
   const fetchImpl = opts.fetchImpl ?? fetch;
 
   opts.onProgress?.({ phase: "initialize" });
@@ -158,7 +219,7 @@ export async function uploadAssetViaDirectUpload(
     fetchImpl,
     initialize.upload_url,
     initialize.upload_headers,
-    bytes,
+    body,
     opts.contentType,
   );
   opts.onProgress?.({ phase: "upload", percent: 100 });

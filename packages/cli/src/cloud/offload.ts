@@ -5,7 +5,16 @@
 
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  createReadStream,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, extname, join, posix, relative, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -21,10 +30,14 @@ import { findFFmpeg, findFFprobe, getFFmpegInstallHint } from "../browser/ffmpeg
 import { formatBytes } from "../ui/format.js";
 import { type PlayedSegment, planTrim } from "./offloadTrim.js";
 import {
+  assertUnchanged,
   type HtmlAttributeResolver,
   rewriteCssUrls,
   rewriteHtmlAttributes,
   rewriteStyleBlocks,
+  type StagedFile,
+  stagedSize,
+  TEXT_FILE_EXTS,
 } from "../utils/publishProject.js";
 
 const execFileAsync = promisify(execFile);
@@ -130,11 +143,11 @@ export interface OffloadedMedia {
   kept_in_archive?: boolean;
 }
 
-export interface UploadableFile {
-  bytes: Uint8Array;
-  filename: string;
-  contentType: string;
-}
+/** In memory, or a file on disk that the upload streams. */
+export type UploadableFile = { filename: string; contentType: string } & (
+  | { bytes: Uint8Array }
+  | { path: string; size: number }
+);
 
 export interface OffloadOptions {
   /** Cache key namespace, so assets from one API host are never reused on another. */
@@ -360,6 +373,8 @@ async function ffmpegReencode(
       ],
       { maxBuffer: 16 * MiB },
     );
+    // Never read an output the asset API would refuse: it can exceed what one read can hold.
+    assertFitsAsset(sourcePath, outPath, statSync(outPath).size);
     return {
       bytes: readFileSync(outPath),
       filename: basename(outPath),
@@ -430,17 +445,39 @@ async function trimGrid(sourcePath: string, kind: MediaKind): Promise<number | n
 
 const ffmpegReencoder: Reencoder = { choose: choosePreset, trimGrid, run: ffmpegReencode };
 
-function sha256Hex(bytes: Uint8Array): string {
-  return createHash("sha256").update(bytes).digest("hex");
+async function stagedSha256(file: StagedFile): Promise<string> {
+  if (Buffer.isBuffer(file)) return createHash("sha256").update(file).digest("hex");
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(file.absPath)) hash.update(chunk as Buffer);
+  assertUnchanged(file);
+  return hash.digest("hex");
 }
 
-/** A temp copy of the staged bytes, so an encode reads the same snapshot its cache key hashes. */
-function snapshotPath(path: string, bytes: Buffer, tempFiles: string[]): string {
+/**
+ * A path holding the staged bytes, so an encode reads what its cache key hashed: a file left on disk
+ * is used in place (checked unchanged after use), one staged in memory gets a temp copy.
+ */
+function snapshotPath(path: string, file: StagedFile, tempFiles: string[]): string {
+  if (!Buffer.isBuffer(file)) return file.absPath;
   const dir = mkdtempSync(join(tmpdir(), "hf-offload-src-"));
   tempFiles.push(dir);
   const copy = join(dir, basename(path));
-  writeFileSync(copy, bytes);
+  writeFileSync(copy, file);
   return copy;
+}
+
+/** A text file's contents; media is never decoded, since it can exceed the longest string V8 allows. */
+function textOf(path: string, file: StagedFile | undefined): string | undefined {
+  return TEXT_FILE_EXTS.test(path) && Buffer.isBuffer(file) ? file.toString("utf-8") : undefined;
+}
+
+function assertFitsAsset(path: string, filename: string, size: number): void {
+  const maxBytes = ACCEPTED[extname(filename).toLowerCase()]?.maxBytes ?? 0;
+  if (size > maxBytes) {
+    throw new Error(
+      `${path} is ${formatBytes(size)} after re-encoding at visually lossless quality, over the ${formatBytes(maxBytes)} a HeyGen asset can hold.`,
+    );
+  }
 }
 
 interface OffloadContext {
@@ -453,7 +490,7 @@ interface OffloadContext {
   tempFiles: string[];
   /** Staged GIFs the entry composition no longer shows as images. */
   preparedGifSources: string[];
-  fileMap: Map<string, Buffer>;
+  fileMap: Map<string, StagedFile>;
 }
 
 interface FilePlan {
@@ -467,16 +504,18 @@ interface FilePlan {
 async function planFile(
   ctx: OffloadContext,
   path: string,
-  bytes: Buffer,
+  file: StagedFile,
 ): Promise<FilePlan | null> {
   const kind = mediaKind(path);
-  if (!kind || bytes.byteLength < OFFLOAD_MIN_BYTES) return null;
-  const keyFor = (variant: string) => `${ctx.opts.apiBaseUrl} ${sha256Hex(bytes)} ${variant}`;
+  const size = stagedSize(file);
+  if (!kind || size < OFFLOAD_MIN_BYTES) return null;
+  const sha256 = await stagedSha256(file);
+  const keyFor = (variant: string) => `${ctx.opts.apiBaseUrl} ${sha256} ${variant}`;
   const accepted = ACCEPTED[extname(path).toLowerCase()];
-  if (accepted && bytes.byteLength <= accepted.maxBytes) {
+  if (accepted && size <= accepted.maxBytes) {
     return { key: keyFor("as-is"), sourcePath: "", contentType: accepted.contentType };
   }
-  const sourcePath = snapshotPath(path, bytes, ctx.tempFiles);
+  const sourcePath = snapshotPath(path, file, ctx.tempFiles);
   const preset = await ctx.reencoder.choose(sourcePath, kind);
   // Files left as authored stay in the zip; the archive size check names them.
   if (!preset) return null;
@@ -494,7 +533,7 @@ async function planFileTrim(
   kind: MediaKind,
 ): Promise<PlayedSegment[] | null> {
   const entryPath = ctx.opts.entryPath ?? "index.html";
-  const entryHtml = ctx.fileMap.get(entryPath)?.toString("utf-8");
+  const entryHtml = textOf(entryPath, ctx.fileMap.get(entryPath));
   const gridPerSecond = entryHtml ? await ctx.reencoder.trimGrid?.(sourcePath, kind) : null;
   if (!entryHtml || !gridPerSecond) return null;
   const name = basename(path);
@@ -505,7 +544,7 @@ async function planFileTrim(
     resolveKey: (raw) => htmlSrcKey(ctx.absDir, entryPath, raw, ctx.fileMap),
     mentionedElsewhere: [...ctx.fileMap].some(
       ([other, content]) =>
-        other !== entryPath && other !== path && TEXT_EXTS.test(other) && content.includes(name),
+        other !== entryPath && other !== path && !!textOf(other, content)?.includes(name),
     ),
   });
   if (!plan) return null;
@@ -516,13 +555,13 @@ async function planFileTrim(
 async function offloadFile(
   ctx: OffloadContext,
   path: string,
-  bytes: Buffer,
+  file: StagedFile,
 ): Promise<OffloadedMedia | null> {
-  const plan = await planFile(ctx, path, bytes);
+  const plan = await planFile(ctx, path, file);
   if (!plan) return null;
   const item: OffloadedMedia = {
     path,
-    size_bytes: bytes.byteLength,
+    size_bytes: stagedSize(file),
     action: plan.preset ? "reencode" : "upload",
     ...(plan.segments && {
       trimmed_to_seconds: plan.segments.reduce((sum, s) => sum + s.end - s.start, 0),
@@ -533,30 +572,31 @@ async function offloadFile(
     return { ...item, action: "cached", url: hit.url };
   }
   if (!ctx.opts.upload) return item;
-  return { ...item, url: await uploadPlanned(ctx, ctx.opts.upload, path, bytes, plan) };
+  return { ...item, url: await uploadPlanned(ctx, ctx.opts.upload, path, file, plan) };
 }
 
 async function uploadPlanned(
   ctx: OffloadContext,
   upload: NonNullable<OffloadOptions["upload"]>,
   path: string,
-  bytes: Buffer,
+  staged: StagedFile,
   plan: FilePlan,
 ): Promise<string> {
-  const file = plan.preset
+  const filename = basename(path);
+  const file: UploadableFile = plan.preset
     ? await ctx.reencoder.run(plan.sourcePath, plan.preset, plan.segments)
-    : { bytes, filename: basename(path), contentType: plan.contentType! };
-  const maxBytes = ACCEPTED[extname(file.filename).toLowerCase()]?.maxBytes ?? 0;
-  if (file.bytes.byteLength > maxBytes) {
-    throw new Error(
-      `${path} is ${formatBytes(file.bytes.byteLength)} after re-encoding at visually lossless quality, over the ${formatBytes(maxBytes)} a HeyGen asset can hold.`,
-    );
-  }
+    : Buffer.isBuffer(staged)
+      ? { bytes: staged, filename, contentType: plan.contentType! }
+      : { path: staged.absPath, size: staged.size, filename, contentType: plan.contentType! };
+  if (plan.preset && !Buffer.isBuffer(staged)) assertUnchanged(staged);
+  const size = "bytes" in file ? file.bytes.byteLength : file.size;
+  assertFitsAsset(path, file.filename, size);
   const asset = await upload(file);
+  if (!Buffer.isBuffer(staged)) assertUnchanged(staged);
   ctx.cache[plan.key] = {
     asset_id: asset.asset_id,
     url: asset.url,
-    size_bytes: file.bytes.byteLength,
+    size_bytes: size,
   };
   writeCache(ctx.cachePath, ctx.cache);
   return asset.url;
@@ -566,9 +606,12 @@ const GIF_PREFIX = "_animated_gif";
 
 // The renderer's own GIF prep turns each animated <img> into a seek-synced WebM <video>, which then
 // offloads like any video. Sub-compositions are prepared by the renderer after inlining, so not here.
-async function prepareEntryGifs(ctx: OffloadContext, fileMap: Map<string, Buffer>): Promise<void> {
+async function prepareEntryGifs(
+  ctx: OffloadContext,
+  fileMap: Map<string, StagedFile>,
+): Promise<void> {
   const entryPath = ctx.opts.entryPath ?? "index.html";
-  const html = fileMap.get(entryPath)?.toString("utf-8");
+  const html = textOf(entryPath, fileMap.get(entryPath));
   if (!html || !/\.gif\b/i.test(html)) return;
   const sourceAssets = entryGifSources(ctx, entryPath, html);
   if (!sourceAssets) return;
@@ -607,9 +650,9 @@ function entryGifSources(
     const src = img.getAttribute("src")!.trim();
     const key = htmlSrcKey(ctx.absDir, entryPath, src, ctx.fileMap);
     if (!key?.toLowerCase().endsWith(".gif")) continue;
-    const bytes = ctx.fileMap.get(key)!;
-    sourceAssets.set(src, snapshotPath(key, bytes, ctx.tempFiles));
-    heavy ||= bytes.byteLength >= OFFLOAD_MIN_BYTES;
+    const file = ctx.fileMap.get(key)!;
+    sourceAssets.set(src, snapshotPath(key, file, ctx.tempFiles));
+    heavy ||= stagedSize(file) >= OFFLOAD_MIN_BYTES;
   }
   return heavy ? sourceAssets : null;
 }
@@ -620,7 +663,7 @@ function entryGifSources(
  */
 export async function offloadHeavyMedia(
   projectDir: string,
-  fileMap: Map<string, Buffer>,
+  fileMap: Map<string, StagedFile>,
   opts: OffloadOptions,
 ): Promise<OffloadedMedia[]> {
   const cachePath = opts.cachePath ?? defaultOffloadCachePath();
@@ -641,9 +684,9 @@ export async function offloadHeavyMedia(
     await prepareEntryGifs(ctx, fileMap);
     // Only files a reference points at: one used through render-time --variables must stay in the zip.
     const referenced = referencedFiles(ctx.absDir, fileMap);
-    for (const [path, bytes] of [...fileMap].sort(([a], [b]) => a.localeCompare(b))) {
+    for (const [path, file] of [...fileMap].sort(([a], [b]) => a.localeCompare(b))) {
       if (!referenced.has(path)) continue;
-      const item = await offloadFile(ctx, path, bytes);
+      const item = await offloadFile(ctx, path, file);
       if (!item) continue;
       // A dry run rewrites to a stand-in URL so the reported archive size matches the real one.
       urls.set(path, item.url ?? `https://assets.invalid/${report.length}`);
@@ -660,7 +703,7 @@ export async function offloadHeavyMedia(
 }
 
 function dropReplacedFiles(
-  fileMap: Map<string, Buffer>,
+  fileMap: Map<string, StagedFile>,
   report: OffloadedMedia[],
   preparedGifSources: string[],
   assetUrls: string[],
@@ -674,19 +717,18 @@ function dropReplacedFiles(
   }
 }
 
-const TEXT_EXTS = /\.(html?|css|m?js|cjs|json|svg|xml|txt)$/i;
-
 // A file still named after rewriting (say, built by string concatenation) keeps a zip copy.
 function isStillMentioned(
-  fileMap: Map<string, Buffer>,
+  fileMap: Map<string, StagedFile>,
   path: string,
   assetUrls: string[],
 ): boolean {
   const name = basename(path);
   for (const [entryPath, content] of fileMap) {
-    if (entryPath === path || !TEXT_EXTS.test(entryPath) || !content.includes(name)) continue;
+    const contentText = textOf(entryPath, content);
+    if (entryPath === path || !contentText?.includes(name)) continue;
     // Asset URLs end in names like original.mp4 that can collide with a project file's name.
-    const text = assetUrls.reduce((acc, url) => acc.replaceAll(url, ""), content.toString("utf-8"));
+    const text = assetUrls.reduce((acc, url) => acc.replaceAll(url, ""), contentText);
     if (text.includes(name)) return true;
   }
   return false;
@@ -697,7 +739,7 @@ function htmlSrcKey(
   absDir: string,
   entryPath: string,
   raw: string,
-  fileMap: Map<string, Buffer>,
+  fileMap: Map<string, StagedFile>,
 ): string | null {
   const clean = cleanAssetUrl(raw);
   if (!clean || isRemoteOrInlineUrl(clean)) return null;
@@ -714,7 +756,7 @@ function htmlSrcKey(
 type UrlFor = (rootRelative: string) => string | null;
 
 /** The staged files that references rewriteReferences would replace point at. */
-function referencedFiles(absDir: string, fileMap: Map<string, Buffer>): Set<string> {
+function referencedFiles(absDir: string, fileMap: Map<string, StagedFile>): Set<string> {
   const keys = new Set<string>();
   rewriteReferences(absDir, fileMap, (key) => {
     if (fileMap.has(key)) keys.add(key);
@@ -725,7 +767,7 @@ function referencedFiles(absDir: string, fileMap: Map<string, Buffer>): Set<stri
 
 function rewriteReferences(
   absDir: string,
-  fileMap: Map<string, Buffer>,
+  fileMap: Map<string, StagedFile>,
   urlForKey: (key: string) => string | null,
 ): void {
   const urlFor: UrlFor = (rootRelative) => {
@@ -737,17 +779,25 @@ function rewriteReferences(
   };
 
   for (const [entryPath, content] of [...fileMap]) {
-    // Decode text entries only: a media file can be larger than the longest string V8 allows.
-    const rewrite: ((text: string) => string | null) | null = /\.html?$/i.test(entryPath)
-      ? (text) => rewriteHtmlEntry(absDir, entryPath, text, urlFor, fileMap)
-      : /\.css$/i.test(entryPath)
-        ? (text) => rewriteCssEntry(absDir, entryPath, text, urlFor)
-        : /\.(m?js|cjs|json)$/i.test(entryPath)
-          ? (text) => rewriteStringLiterals(text, urlFor)
-          : null;
-    const next = rewrite?.(content.toString("utf-8")) ?? null;
+    const rewrite = rewriterFor(absDir, entryPath, urlFor, fileMap);
+    const text = rewrite ? textOf(entryPath, content) : undefined;
+    const next = rewrite && text !== undefined ? rewrite(text) : null;
     if (next !== null) fileMap.set(entryPath, Buffer.from(next, "utf-8"));
   }
+}
+
+function rewriterFor(
+  absDir: string,
+  entryPath: string,
+  urlFor: UrlFor,
+  fileMap: Map<string, StagedFile>,
+): ((text: string) => string | null) | null {
+  if (/\.html?$/i.test(entryPath)) {
+    return (text) => rewriteHtmlEntry(absDir, entryPath, text, urlFor, fileMap);
+  }
+  if (/\.css$/i.test(entryPath)) return (text) => rewriteCssEntry(absDir, entryPath, text, urlFor);
+  if (/\.(m?js|cjs|json)$/i.test(entryPath)) return (text) => rewriteStringLiterals(text, urlFor);
+  return null;
 }
 
 function localTarget(raw: string, toRootRelative: (clean: string) => string, urlFor: UrlFor) {
@@ -771,7 +821,7 @@ function rewriteHtmlEntry(
   entryPath: string,
   html: string,
   urlFor: UrlFor,
-  fileMap: Map<string, Buffer>,
+  fileMap: Map<string, StagedFile>,
 ): string | null {
   const referrerAbsDir = resolve(absDir, dirname(entryPath));
   // Sub-composition srcs resolve the way the renderer inlines them.
