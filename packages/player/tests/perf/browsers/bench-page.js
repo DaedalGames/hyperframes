@@ -48,13 +48,32 @@ export async function bench(cfg) {
     host.play();
     await until(() => runtime.isPlaying(), 5_000, "isPlaying");
     const before = decoded();
+    const quality = (v) => v.getVideoPlaybackQuality();
+    const startQuality = new Map(videos().map((v) => [v, quality(v)]));
+    const steeredTicks = new Map(videos().map((v) => [v, 0]));
+    let ticks = 0;
+    const rateSampler = setInterval(() => {
+      ticks++;
+      for (const v of videos())
+        if (Math.abs(v.playbackRate - 1) > 1e-6) steeredTicks.set(v, steeredTicks.get(v) + 1);
+    }, 100);
     await sleep(cfg.playMs);
+    clearInterval(rateSampler);
     const after = decoded();
     host.pause();
     return {
       countersOnly: true,
       videoCount: videos().length,
       decoded: { dropped: after.dropped - before.dropped, total: after.total - before.total },
+      perVideo: videos().map((v) => {
+        const a = startQuality.get(v);
+        const b = quality(v);
+        return {
+          dropped: b.droppedVideoFrames - a.droppedVideoFrames,
+          total: b.totalVideoFrames - a.totalVideoFrames,
+          steeredFraction: ticks ? steeredTicks.get(v) / ticks : 0,
+        };
+      }),
     };
   }
 

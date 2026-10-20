@@ -21,7 +21,8 @@
       // ?media=<key>&n=&rate=, &tick=1 (per-frame media writes),
       // &animate=scale|translate|css (ancestor transform every frame; css runs on the compositor),
       // &frame=plain|scaled (inside an iframe, scaled as the player scales it), &tiles=1 (the grid's tile styling),
-      // &reads=1 (reads every media state property of every video each frame), &probe=1 (the bench's rAF probe).
+      // &reads=1 (reads every media state property of every video each frame), &probe=1 (the bench's rAF probe),
+      // &mixrate=<r> (odd-numbered videos play at r, so one page compares both rates under the same load).
       (async function () {
         var q = new URLSearchParams(location.search);
         var MEDIA = {
@@ -37,7 +38,7 @@
             media: q.get("media"),
             n: String(Number(q.get("n") || 1)),
           });
-          for (var key of ["rate", "tick", "animate", "tiles", "reads", "probe"]) {
+          for (var key of ["rate", "tick", "animate", "tiles", "reads", "probe", "mixrate"]) {
             if (q.get(key)) child.set(key, q.get(key));
           }
           var f = document.createElement("iframe");
@@ -89,6 +90,9 @@
           );
         await Promise.all(videos.map((v) => v.play()));
         videos.forEach((v) => (v.playbackRate = Number(q.get("rate") || 1)));
+        var mixrate = Number(q.get("mixrate"));
+        if (mixrate > 0) videos.forEach((v, i) => i % 2 && (v.playbackRate = mixrate));
+        var startQuality = videos.map((v) => v.getVideoPlaybackQuality());
         if (q.get("probe")) {
           var channel = new MessageChannel();
           channel.port1.onmessage = function () {};
@@ -149,6 +153,14 @@
         await new Promise((r) => setTimeout(r, 8000));
         var after = decoded();
         window.__control = {
+          perVideo: videos.map((v, i) => {
+            var b = v.getVideoPlaybackQuality();
+            return {
+              dropped: b.droppedVideoFrames - startQuality[i].droppedVideoFrames,
+              total: b.totalVideoFrames - startQuality[i].totalVideoFrames,
+              rate: v.playbackRate,
+            };
+          }),
           dropped: after.dropped - before.dropped,
           total: after.total - before.total,
           presentedFps:

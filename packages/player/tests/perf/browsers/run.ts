@@ -202,12 +202,43 @@ function score(page: PageResult) {
   };
 }
 
+type PerVideo = { dropped: number; total: number; steeredFraction?: number; rate?: number };
+
+/** Decoder drops of rate-steered videos against the rest of the same page, so runner noise hits both alike. */
+function dropsBySteering(perVideo: PerVideo[] | undefined) {
+  const sums = { steered: [0, 0, 0], unsteered: [0, 0, 0] };
+  for (const v of perVideo ?? []) {
+    const steered =
+      v.steeredFraction !== undefined
+        ? v.steeredFraction > 0.5
+        : Math.abs((num(v.rate) ?? 1) - 1) > 1e-6;
+    const sum = steered ? sums.steered : sums.unsteered;
+    sum[0] += num(v.dropped) ?? 0;
+    sum[1] += num(v.total) ?? 0;
+    sum[2] += 1;
+  }
+  const pct = ([dropped, total]: number[]) => (total ? num((dropped! / total) * 100) : null);
+  return {
+    steeredVideos: sums.steered[2],
+    steeredDropPct: pct(sums.steered),
+    unsteeredDropPct: pct(sums.unsteered),
+  };
+}
+
 // The player with no per-frame probe: its decoder drops are the player's alone.
 const COUNTERS_ONLY_FILMS = ["10-video-grid", "heavy-16x1080"];
 
 // The same media played natively, without the player: separates browser decoder drops from runtime-caused ones.
 const CONTROLS = [
   { name: "grid-native", media: "grid-sample", n: 10, rate: 1 },
+  { name: "grid-native-mixrate", media: "grid-sample", n: 10, rate: 1, extra: "&mixrate=1.03" },
+  {
+    name: "grid-scaled-tiles-animated-mixrate",
+    media: "grid-sample",
+    n: 10,
+    rate: 1,
+    extra: "&frame=scaled&tiles=1&animate=scale&mixrate=1.03",
+  },
   { name: "grid-in-iframe", media: "grid-sample", n: 10, rate: 1, extra: "&frame=plain" },
   { name: "grid-in-scaled-iframe", media: "grid-sample", n: 10, rate: 1, extra: "&frame=scaled" },
   {
@@ -405,6 +436,7 @@ try {
               decoderDropped: dropped,
               decoderFrames: total,
               presentedFps: videos ? num((total - dropped) / videos / (PLAY_MS / 1000)) : null,
+              ...dropsBySteering((page as { perVideo?: PerVideo[] }).perVideo),
             });
             console.log(JSON.stringify(rows[rows.length - 1]));
           } catch (e) {
@@ -415,7 +447,12 @@ try {
       }
       for (const c of CONTROLS) {
         try {
-          const r = await readPage<{ dropped: number; total: number; presentedFps: number }>(
+          const r = await readPage<{
+            dropped: number;
+            total: number;
+            presentedFps: number;
+            perVideo: PerVideo[];
+          }>(
             `http://127.0.0.1:${port}`,
             browser,
             `${server.origin}/fixtures/_control/index.html?media=${c.media}&n=${c.n}&rate=${c.rate}${c.extra ?? ""}`,
@@ -428,6 +465,7 @@ try {
             decoderDropped: num(r.dropped),
             presentedFps: num(r.presentedFps),
             decoderFrames: num(r.total),
+            ...dropsBySteering(r.perVideo),
           });
           console.log(JSON.stringify(rows[rows.length - 1]));
         } catch (e) {
@@ -464,6 +502,9 @@ const cols = [
   "decoderDropped",
   "decoderFrames",
   "presentedFps",
+  "steeredVideos",
+  "steeredDropPct",
+  "unsteeredDropPct",
   "mediaSeeks",
   "rateWrites",
   "seekP50Ms",
