@@ -41,8 +41,12 @@ export function applyFileMutations(
   }));
   const results: AppliedFileMutation[] = [];
   const attempted: AttemptedMutation[] = [];
-  for (const mutation of prepared)
-    assertExpectedVersion(mutation, readFileSync(mutation.absPath, "utf-8"));
+  for (const mutation of prepared) {
+    const current = readFileSync(mutation.absPath, "utf-8");
+    assertExpectedVersion(mutation, current);
+    if (rootCompositionRefusal(mutation.sourceFile, current, mutation.after))
+      throw new RootCompositionRemovedError(mutation.sourceFile);
+  }
   try {
     for (const mutation of prepared) {
       results.push(applyOneMutation(projectDir, mutation, requestToken, writeFile, attempted));
@@ -102,8 +106,6 @@ function applyOneMutation(
       writeToken: null,
     };
   }
-  if (rootCompositionRefusal(mutation.sourceFile, current, mutation.after))
-    throw new RootCompositionRemovedError(mutation.sourceFile);
   const backup = snapshotBeforeWrite(projectDir, mutation.absPath);
   if (backup.error) throw new Error(`backup failed: ${backup.error}`);
   assertExpectedVersion(mutation, readFileSync(mutation.absPath, "utf-8"));
