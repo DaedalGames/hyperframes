@@ -38,7 +38,13 @@ function hasTimedAncestor(el: Element): boolean {
 }
 
 function playedWindow(el: Element): PlayedSegment | null {
-  if (el.hasAttribute("loop") || el.hasAttribute("data-automation") || hasTimedAncestor(el)) {
+  // A data-var-src clip's source is only known at render time, so neither a cut nor a shift holds.
+  if (
+    el.hasAttribute("loop") ||
+    el.hasAttribute("data-automation") ||
+    el.hasAttribute("data-var-src") ||
+    hasTimedAncestor(el)
+  ) {
     return null;
   }
   const get: AttrReader = (name) => el.getAttribute(name);
@@ -97,10 +103,12 @@ export function planTrim(input: {
   const uses: Element[] = [];
   let sources = 0;
   for (const el of document.querySelectorAll("video, audio")) {
-    const matching = mediaSources(el).filter((src) => input.resolveKey(src) === input.path).length;
-    if (matching === 0) continue;
+    const matching = mediaSources(el).filter((src) => input.resolveKey(src) === input.path);
+    if (matching.length === 0) continue;
+    // A media fragment (#t=) names times in the uncut file.
+    if (matching.some((src) => src.includes("#"))) return null;
     uses.push(el);
-    sources += matching;
+    sources += matching.length;
   }
   // Every mention of the file in the page must be one of these clips' sources.
   if (uses.length === 0 || input.entryHtml.split(basename(input.path)).length - 1 !== sources) {

@@ -1797,20 +1797,22 @@ match. Those rules use gitignore syntax and apply to `hyperframes publish` too.
 Keep them narrow — a dynamically selected asset may have no static reference to
 protect it.
 
-Media files of 5 MB or more go up as HeyGen assets before zipping, and the
-zip's copy of each HTML, CSS, script and JSON file points at the asset URL
-instead; your project files are not changed. Uploads are cached by content, so
-a re-render uploads only what changed. Media the asset API does not take as is
-is converted on your machine first, which needs ffmpeg: video (for example MKV,
-or over 200 MB) and audio (for example FLAC or M4A) at visually lossless
-quality, still images such as AVIF to PNG, and animated GIFs in the entry
-composition to the same seekable video the renderer makes from them. A video or audio file that has to be re-encoded is first cut to the
-parts the entry composition plays (plus half a second either side), and the
-composition's media starts shift to match, so a long source fits. Media inside
-sub-compositions, looping clips and files a script names keep their full
-length. A file a
-script reaches by building its path, rather than naming it in a plain string,
-also stays in the zip, as do animated GIFs inside sub-compositions.
+Media files of 5 MB or more that the project names by path go up as HeyGen
+assets before zipping, and the zip's copy of each HTML, CSS, script and JSON
+file points at the asset URL instead; your project files are not changed.
+Asset URLs are public and unsigned: anyone who has one can fetch the
+media. Uploads are cached by content, so a re-render uploads only what changed.
+Media the asset API does not take as is is converted on your machine first,
+which needs ffmpeg: video (for example MKV, or over 200 MB) and audio (for
+example FLAC or M4A) at visually lossless quality, still images such as AVIF to
+PNG, and animated GIFs of 5 MB or more in the entry composition to the same
+seekable video the renderer makes from them. A video or audio file that has to
+be re-encoded is first cut to the parts the entry composition plays (plus half
+a second either side), and the composition's media starts shift to match, so a
+long source fits. Media inside sub-compositions, looping clips, clips with
+`data-var-src` and files a script names keep their full length. A file no
+plain string names, such as one a script builds a path to or one picked through
+`--variables`, stays in the zip, as do animated GIFs inside sub-compositions.
 
 The zip has to come in under 200 MB — the direct-upload cap — or the command
 stops before uploading it and names the largest files left. Use `--dry-run`

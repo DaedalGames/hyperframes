@@ -49,6 +49,10 @@ function fakeHead(status: number, size: number): typeof fetch {
   ) as unknown as typeof fetch;
 }
 
+// Encoders read a temp snapshot of the staged bytes, never the project file.
+const staged = (name: string) =>
+  expect.stringMatching(new RegExp(`hf-offload-src-[^/\\\\]+[/\\\\]${name}$`));
+
 const html = (body: string) => `<!doctype html><html><head></head><body>${body}</body></html>`;
 
 describe("offloadHeavyMedia", () => {
@@ -58,7 +62,7 @@ describe("offloadHeavyMedia", () => {
         `<video src="media/clip.mp4" poster="media/bg.png"><source src="./media/clip.mp4" /></video>` +
         `<img srcset="media/bg.png 1x, media/small.png 2x" />` +
         `<div style="background-image: url(media/bg.png)"></div>` +
-        `<audio src="/media/voice.mp3"></audio>` +
+        `<audio src="/media/voice.mp3#t=2"></audio>` +
         `<div data-composition-src="compositions/scene.html"></div>`,
     );
     const dir = project({
@@ -94,7 +98,7 @@ describe("offloadHeavyMedia", () => {
     expect(index).toContain(`<source src="${url("media/clip.mp4")}"`);
     expect(index).toContain(`srcset="${url("media/bg.png")} 1x, media/small.png 2x"`);
     expect(index).toContain(`url(${url("media/bg.png")})`);
-    expect(index).toContain(`<audio src="${url("media/voice.mp3")}"`);
+    expect(index).toContain(`<audio src="${url("media/voice.mp3")}#t=2"`);
     const scene = fileMap.get("compositions/scene.html")!.toString();
     expect(scene).toContain(`<video src="${url("media/clip.mp4")}"`);
     expect(scene).toContain(`<img src="${url("media/bg.png")}"`);
@@ -135,6 +139,23 @@ describe("offloadHeavyMedia", () => {
     expect(second.get("index.html")!.toString()).toContain("https://assets.example/1/clip.mp4");
   });
 
+  it("treats a cache file holding null as empty", async () => {
+    const dir = project({
+      "index.html": html(`<video src="clip.mp4"></video>`),
+      "clip.mp4": HEAVY,
+    });
+    const cache = cachePath();
+    writeFileSync(cache, "null");
+
+    await expect(
+      offloadHeavyMedia(dir, buildPublishFileMap(dir), {
+        apiBaseUrl: "https://api.example",
+        upload: fakeUpload(),
+        cachePath: cache,
+      }),
+    ).resolves.toHaveLength(1);
+  });
+
   it("uploads again when the cached asset URL no longer serves the file", async () => {
     const dir = project({
       "index.html": html(`<video src="clip.mp4"></video>`),
@@ -151,8 +172,13 @@ describe("offloadHeavyMedia", () => {
       ...opts,
       fetchImpl: fakeHead(404, 0),
     });
+    // Served, but not the size uploaded: the asset was replaced.
+    await offloadHeavyMedia(dir, buildPublishFileMap(dir), {
+      ...opts,
+      fetchImpl: fakeHead(200, HEAVY.byteLength - 1),
+    });
 
-    expect(opts.upload).toHaveBeenCalledTimes(2);
+    expect(opts.upload).toHaveBeenCalledTimes(3);
     expect(report[0]).toMatchObject({ action: "upload", url: "https://assets.example/2/clip.mp4" });
   });
 
@@ -179,7 +205,7 @@ describe("offloadHeavyMedia", () => {
       cachePath: cachePath(),
     });
 
-    expect(reencoder.run).toHaveBeenCalledWith(join(dir, "take.mkv"), "video", undefined);
+    expect(reencoder.run).toHaveBeenCalledWith(staged("take.mkv"), "video", undefined);
     expect(upload.mock.calls[0]![0]).toMatchObject({
       filename: "take.mp4",
       contentType: "video/mp4",
@@ -241,9 +267,7 @@ describe("offloadHeavyMedia", () => {
     expect(index).toContain(`video.src = \`${url("media/clip.mp4")}\``);
     expect(fileMap.get("main.js")!.toString()).toContain(`new Audio("${url("music.mp3")}")`);
     expect(fileMap.get("data/cues.json")!.toString()).toBe(`{"track": "${url("music.mp3")}"}`);
-    expect(report.find((item) => item.path === "voice.mp3")).toMatchObject({
-      kept_in_archive: true,
-    });
+    expect(report.find((item) => item.path === "voice.mp3")).toBeUndefined();
     expect(fileMap.has("voice.mp3")).toBe(true);
     expect(fileMap.has("music.mp3")).toBe(false);
     expect(fileMap.has("media/clip.mp4")).toBe(false);
@@ -324,6 +348,65 @@ describe("offloadHeavyMedia", () => {
     expect(fileMap.has("media/other.gif")).toBe(true);
   });
 
+  it("prepares a nested entry's GIF from the file next to it, as the renderer resolves it", async () => {
+    const nested = Buffer.alloc(OFFLOAD_MIN_BYTES, 2);
+    const dir = project({
+      "index.html": html(""),
+      "compositions/scene.html": html(`<img src="logo.gif" />`),
+      "compositions/logo.gif": nested,
+      "logo.gif": HEAVY,
+    });
+    let prepared: Buffer | undefined;
+    const gifPrep = vi.fn<GifPrep>(async (input, options) => {
+      prepared = readFileSync(options.sourceAssets!.get("logo.gif")!);
+      const outputPath = join(options.outputDir, "hfgif-v1-abc.webm");
+      writeFileSync(outputPath, HEAVY);
+      return {
+        html: input.replace(
+          `<img src="logo.gif" />`,
+          `<video src="../_animated_gif/hfgif-v1-abc.webm"></video>`,
+        ),
+        preparedGifs: [{ sourceSrc: "logo.gif", outputPath }],
+      };
+    });
+    const fileMap = buildPublishFileMap(dir);
+
+    await offloadHeavyMedia(dir, fileMap, {
+      apiBaseUrl: "https://api.example",
+      entryPath: "compositions/scene.html",
+      upload: fakeUpload(),
+      gifPrep,
+      cachePath: cachePath(),
+    });
+
+    expect(prepared?.equals(nested)).toBe(true);
+    expect(fileMap.has("compositions/logo.gif")).toBe(false);
+    expect(fileMap.has("logo.gif")).toBe(true);
+  });
+
+  it("re-encodes the staged bytes, not a file saved on disk after staging", async () => {
+    const dir = project({
+      "index.html": html(`<audio src="voice.flac"></audio>`),
+      "voice.flac": HEAVY,
+    });
+    const fileMap = buildPublishFileMap(dir);
+    writeFileSync(join(dir, "voice.flac"), Buffer.alloc(OFFLOAD_MIN_BYTES, 9));
+    let encoded: Buffer | undefined;
+    const run = vi.fn(async (sourcePath: string) => {
+      encoded = readFileSync(sourcePath);
+      return { bytes: Buffer.from("wav"), filename: "voice.wav", contentType: "audio/wav" };
+    });
+
+    await offloadHeavyMedia(dir, fileMap, {
+      apiBaseUrl: "https://api.example",
+      upload: fakeUpload(),
+      reencoder: { choose: async () => "audio", run },
+      cachePath: cachePath(),
+    });
+
+    expect(encoded?.equals(HEAVY)).toBe(true);
+  });
+
   it("cuts a re-encoded video to the windows its clips play and shifts their starts to match", async () => {
     const dir = project({
       "index.html": html(
@@ -346,7 +429,7 @@ describe("offloadHeavyMedia", () => {
       cachePath: cachePath(),
     });
 
-    expect(run).toHaveBeenCalledWith(join(dir, "long.mkv"), "video", [
+    expect(run).toHaveBeenCalledWith(staged("long.mkv"), "video", [
       { start: 9.5, end: 12.5 },
       { start: 100, end: 105 },
     ]);
@@ -354,6 +437,38 @@ describe("offloadHeavyMedia", () => {
     const index = fileMap.get("index.html")!.toString();
     expect(index).toMatch(/id="a"[^>]*data-media-start="0.5"/);
     expect(index).toMatch(/id="b"[^>]*data-media-start="3.5"/);
+  });
+
+  it("cuts on the source's own frames at 29.97 fps and re-encodes when the cut changes", async () => {
+    const clip = (start: number) =>
+      html(`<video src="long.mkv" data-duration="2" data-media-start="${start}"></video>`);
+    const dir = project({ "index.html": clip(10), "long.mkv": HEAVY });
+    const fps = 30000 / 1001;
+    const run = vi.fn(async () => ({
+      bytes: Buffer.from("cut"),
+      filename: "long.mp4",
+      contentType: "video/mp4",
+    }));
+    const opts = {
+      apiBaseUrl: "https://api.example",
+      upload: fakeUpload(),
+      reencoder: { choose: async () => "video" as const, trimGrid: async () => fps, run },
+      // Any cached URL is still served, so only the key decides reuse.
+      fetchImpl: fakeHead(200, 3),
+      cachePath: cachePath(),
+    };
+
+    await offloadHeavyMedia(dir, buildPublishFileMap(dir), opts);
+    writeFileSync(join(dir, "index.html"), clip(20));
+    await offloadHeavyMedia(dir, buildPublishFileMap(dir), opts);
+    await offloadHeavyMedia(dir, buildPublishFileMap(dir), opts);
+
+    expect(run).toHaveBeenCalledTimes(2);
+    const calls = run.mock.calls as unknown as Array<[string, string, Array<{ start: number }>]>;
+    for (const [, , segments] of calls) {
+      const frames = segments[0]!.start * fps;
+      expect(Math.abs(frames - Math.round(frames))).toBeLessThan(1e-6);
+    }
   });
 
   it("keeps the whole file when a use is not a bounded clip or a script names it", async () => {
@@ -368,7 +483,53 @@ describe("offloadHeavyMedia", () => {
       "main.js": "const name = `long.mkv`.replace('.mkv', '');",
       "long.mkv": HEAVY,
     });
-    for (const dir of [looped, scripted]) {
+    const variableBound = project({
+      "index.html": html(
+        `<video data-var-src="clip" src="long.mkv" data-duration="2" data-media-start="10"></video>`,
+      ),
+      "long.mkv": HEAVY,
+    });
+    const fragment = project({
+      "index.html": html(
+        `<video src="long.mkv#t=10,12" data-duration="2" data-media-start="10"></video>`,
+      ),
+      "long.mkv": HEAVY,
+    });
+    const automated = project({
+      "index.html": html(
+        `<video src="long.mkv" data-duration="2" data-media-start="10" data-automation="x"></video>`,
+      ),
+      "long.mkv": HEAVY,
+    });
+    const offsetParent = project({
+      "index.html": html(
+        `<div data-media-start="3"><video src="long.mkv" data-duration="2" data-media-start="10"></video></div>`,
+      ),
+      "long.mkv": HEAVY,
+    });
+    const nested = project({
+      "index.html": html(
+        `<div data-composition-id="root"><div data-composition-id="inner">` +
+          `<video src="long.mkv" data-duration="2" data-media-start="10"></video></div></div>`,
+      ),
+      "long.mkv": HEAVY,
+    });
+    const namedInPage = project({
+      "index.html": html(
+        `<video src="long.mkv" data-duration="2" data-media-start="10"></video><p data-note="long.mkv"></p>`,
+      ),
+      "long.mkv": HEAVY,
+    });
+    for (const dir of [
+      looped,
+      scripted,
+      variableBound,
+      fragment,
+      automated,
+      offsetParent,
+      nested,
+      namedInPage,
+    ]) {
       const run = vi.fn(async () => ({
         bytes: Buffer.from("full"),
         filename: "long.mp4",
@@ -381,9 +542,29 @@ describe("offloadHeavyMedia", () => {
         reencoder: { choose: async () => "video", trimGrid: async () => 30, run },
         cachePath: cachePath(),
       });
-      expect(run).toHaveBeenCalledWith(join(dir, "long.mkv"), "video", undefined);
+      expect(run).toHaveBeenCalledWith(staged("long.mkv"), "video", undefined);
       expect(fileMap.get("index.html")!.toString()).toContain(`data-media-start="10"`);
     }
+  });
+
+  it("keeps a heavy file no reference names in the zip, since --variables can pick it at render time", async () => {
+    const dir = project({
+      "index.html": html(`<video data-var-src="clip" src="media/a.mp4"></video>`),
+      "media/a.mp4": HEAVY,
+      "media/b.mp4": HEAVY,
+    });
+    const fileMap = buildPublishFileMap(dir);
+    const upload = fakeUpload();
+
+    const report = await offloadHeavyMedia(dir, fileMap, {
+      apiBaseUrl: "https://api.example",
+      upload,
+      cachePath: cachePath(),
+    });
+
+    expect(report.map((item) => item.path)).toEqual(["media/a.mp4"]);
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(fileMap.has("media/b.mp4")).toBe(true);
   });
 
   it("never decodes a media file as text, since one can exceed the longest string allowed", async () => {
@@ -409,20 +590,26 @@ describe("offloadHeavyMedia", () => {
 
   it("leaves small media and remote URLs alone", async () => {
     const dir = project({
-      "index.html": html(`<img src="logo.png" /><video src="https://cdn.example/a.mp4"></video>`),
+      "index.html": html(
+        `<img src="logo.png" /><img src="spin.gif" /><video src="https://cdn.example/a.mp4"></video>`,
+      ),
       "logo.png": "small",
+      "spin.gif": "small",
     });
     const fileMap = buildPublishFileMap(dir);
     const upload = fakeUpload();
+    const gifPrep = vi.fn<GifPrep>();
 
     const report = await offloadHeavyMedia(dir, fileMap, {
       apiBaseUrl: "https://api.example",
       upload,
+      gifPrep,
       cachePath: cachePath(),
     });
 
     expect(report).toEqual([]);
     expect(upload).not.toHaveBeenCalled();
+    expect(gifPrep).not.toHaveBeenCalled();
     expect(fileMap.has("logo.png")).toBe(true);
   });
 });

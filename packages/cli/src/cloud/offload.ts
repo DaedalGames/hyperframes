@@ -5,15 +5,7 @@
 
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, extname, join, posix, relative, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -182,6 +174,7 @@ export type GifPrep = (
     outputDir: string;
     outputSrcPrefix: string;
     cacheDir: string;
+    sourceAssets: Map<string, string>;
   },
 ) => Promise<{ html: string; preparedGifs: Array<{ sourceSrc: string; outputPath: string }> }>;
 
@@ -197,7 +190,7 @@ function defaultOffloadCachePath(): string {
 
 function readCache(path: string): Record<string, CacheEntry> {
   try {
-    return JSON.parse(readFileSync(path, "utf-8")) as Record<string, CacheEntry>;
+    return (JSON.parse(readFileSync(path, "utf-8")) as Record<string, CacheEntry> | null) ?? {};
   } catch {
     return {};
   }
@@ -441,10 +434,8 @@ function sha256Hex(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-/** Where a staged file's bytes live on disk, writing a temp copy only for files outside the project. */
-function sourcePathFor(absDir: string, path: string, bytes: Buffer, tempFiles: string[]): string {
-  const onDisk = join(absDir, path);
-  if (existsSync(onDisk)) return onDisk;
+/** A temp copy of the staged bytes, so an encode reads the same snapshot its cache key hashes. */
+function snapshotPath(path: string, bytes: Buffer, tempFiles: string[]): string {
   const dir = mkdtempSync(join(tmpdir(), "hf-offload-src-"));
   tempFiles.push(dir);
   const copy = join(dir, basename(path));
@@ -485,7 +476,7 @@ async function planFile(
   if (accepted && bytes.byteLength <= accepted.maxBytes) {
     return { key: keyFor("as-is"), sourcePath: "", contentType: accepted.contentType };
   }
-  const sourcePath = sourcePathFor(ctx.absDir, path, bytes, ctx.tempFiles);
+  const sourcePath = snapshotPath(path, bytes, ctx.tempFiles);
   const preset = await ctx.reencoder.choose(sourcePath, kind);
   // Files left as authored stay in the zip; the archive size check names them.
   if (!preset) return null;
@@ -579,6 +570,8 @@ async function prepareEntryGifs(ctx: OffloadContext, fileMap: Map<string, Buffer
   const entryPath = ctx.opts.entryPath ?? "index.html";
   const html = fileMap.get(entryPath)?.toString("utf-8");
   if (!html || !/\.gif\b/i.test(html)) return;
+  const sourceAssets = entryGifSources(ctx, entryPath, html);
+  if (!sourceAssets) return;
   const prep = ctx.opts.gifPrep ?? (await import("@hyperframes/producer")).prepareAnimatedGifInputs;
   const outputDir = mkdtempSync(join(tmpdir(), "hf-offload-gif-"));
   ctx.tempFiles.push(outputDir);
@@ -588,14 +581,37 @@ async function prepareEntryGifs(ctx: OffloadContext, fileMap: Map<string, Buffer
     outputDir,
     outputSrcPrefix: posix.relative(posix.dirname(entryPath), GIF_PREFIX),
     cacheDir: join(homedir(), ".cache", "hyperframes", "animated-gif"),
+    sourceAssets,
   });
   if (result.preparedGifs.length === 0) return;
   fileMap.set(entryPath, Buffer.from(result.html, "utf-8"));
   for (const gif of result.preparedGifs) {
     fileMap.set(`${GIF_PREFIX}/${basename(gif.outputPath)}`, readFileSync(gif.outputPath));
-    const source = resolveLocalAssetCandidates(ctx.absDir, cleanAssetUrl(gif.sourceSrc))[0];
-    if (source) ctx.preparedGifSources.push(relative(ctx.absDir, source).replaceAll("\\", "/"));
+    const source = htmlSrcKey(ctx.absDir, entryPath, gif.sourceSrc.trim(), fileMap);
+    if (source) ctx.preparedGifSources.push(source);
   }
+}
+
+/**
+ * Each entry GIF's staged bytes, resolved the way the renderer rebases a nested entry; `null` when none
+ * is heavy, since the renderer's own GIF prep then suffices and needs no local ffmpeg.
+ */
+function entryGifSources(
+  ctx: OffloadContext,
+  entryPath: string,
+  html: string,
+): Map<string, string> | null {
+  const sourceAssets = new Map<string, string>();
+  let heavy = false;
+  for (const img of parseHTML(html).document.querySelectorAll("img[src]")) {
+    const src = img.getAttribute("src")!.trim();
+    const key = htmlSrcKey(ctx.absDir, entryPath, src, ctx.fileMap);
+    if (!key?.toLowerCase().endsWith(".gif")) continue;
+    const bytes = ctx.fileMap.get(key)!;
+    sourceAssets.set(src, snapshotPath(key, bytes, ctx.tempFiles));
+    heavy ||= bytes.byteLength >= OFFLOAD_MIN_BYTES;
+  }
+  return heavy ? sourceAssets : null;
 }
 
 /**
@@ -623,7 +639,10 @@ export async function offloadHeavyMedia(
   const report: OffloadedMedia[] = [];
   try {
     await prepareEntryGifs(ctx, fileMap);
+    // Only files a reference points at: one used through render-time --variables must stay in the zip.
+    const referenced = referencedFiles(ctx.absDir, fileMap);
     for (const [path, bytes] of [...fileMap].sort(([a], [b]) => a.localeCompare(b))) {
+      if (!referenced.has(path)) continue;
       const item = await offloadFile(ctx, path, bytes);
       if (!item) continue;
       // A dry run rewrites to a stand-in URL so the reported archive size matches the real one.
@@ -635,7 +654,7 @@ export async function offloadHeavyMedia(
     for (const dir of ctx.tempFiles) rmSync(dir, { recursive: true, force: true });
   }
 
-  if (urls.size > 0) rewriteReferences(ctx.absDir, fileMap, urls);
+  if (urls.size > 0) rewriteReferences(ctx.absDir, fileMap, (key) => urls.get(key) ?? null);
   dropReplacedFiles(fileMap, report, ctx.preparedGifSources, [...urls.values()]);
   return report;
 }
@@ -694,14 +713,24 @@ function htmlSrcKey(
 
 type UrlFor = (rootRelative: string) => string | null;
 
+/** The staged files that references rewriteReferences would replace point at. */
+function referencedFiles(absDir: string, fileMap: Map<string, Buffer>): Set<string> {
+  const keys = new Set<string>();
+  rewriteReferences(absDir, fileMap, (key) => {
+    if (fileMap.has(key)) keys.add(key);
+    return null;
+  });
+  return keys;
+}
+
 function rewriteReferences(
   absDir: string,
   fileMap: Map<string, Buffer>,
-  urls: Map<string, string>,
+  urlForKey: (key: string) => string | null,
 ): void {
   const urlFor: UrlFor = (rootRelative) => {
     for (const candidate of resolveLocalAssetCandidates(absDir, rootRelative)) {
-      const url = urls.get(relative(absDir, candidate).replaceAll("\\", "/"));
+      const url = urlForKey(relative(absDir, candidate).replaceAll("\\", "/"));
       if (url) return url;
     }
     return null;
@@ -724,7 +753,9 @@ function rewriteReferences(
 function localTarget(raw: string, toRootRelative: (clean: string) => string, urlFor: UrlFor) {
   const clean = cleanAssetUrl(raw);
   if (!clean || isRemoteOrInlineUrl(clean)) return null;
-  return urlFor(clean.startsWith("/") ? clean : toRootRelative(clean));
+  const url = urlFor(clean.startsWith("/") ? clean : toRootRelative(clean));
+  // Keep a query or media fragment such as #t=5,8.
+  return url && url + raw.trim().slice(clean.length);
 }
 
 function rewriteCssEntry(absDir: string, entryPath: string, css: string, urlFor: UrlFor) {
