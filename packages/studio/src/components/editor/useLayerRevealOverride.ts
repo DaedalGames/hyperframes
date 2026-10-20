@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import { liftClipHiddenMark } from "@hyperframes/core/runtime/clip-reveal";
+import { revealClip } from "@hyperframes/core/runtime/clip-reveal";
 import {
   LAYER_REVEAL_PRIOR_POSITION_ATTR,
   LAYER_REVEAL_PRIOR_Z_ATTR,
@@ -199,9 +199,8 @@ function revealNode(
     applied.display = el.style.display;
   }
   if (needs.visibility) {
-    el.style.visibility = "visible";
+    putMarkBack = revealClip(el);
     applied.visibility = "visible";
-    putMarkBack = liftClipHiddenMark(el);
   }
   if (needs.opacity) {
     el.style.opacity = "1";

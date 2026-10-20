@@ -1,4 +1,4 @@
-import { CLIP_HIDDEN_ATTR, liftClipHiddenMark } from "./clipReveal";
+import { CLIP_HIDDEN_ATTR, revealClip } from "./clipReveal";
 import {
   RUNTIME_STAMPED_ATTR,
   STUDIO_PREVIEW_MARK_META,
@@ -18,16 +18,14 @@ export const SKIPPED_CLIP = `[data-start]:not(video, audio, img, [${STUDIO_PREVI
 const SKIP_HIDDEN_IMAGES = `${SKIPPED_CLIP} img { display: none !important; }`;
 const STUDIO_PREVIEW_MARK = `meta[name="${STUDIO_PREVIEW_MARK_META}"]`;
 const CONTENTS_ATTR = "data-hf-hidden-clip-contents";
-const HIDDEN_CLIP = `[${CLIP_HIDDEN_ATTR}]`;
+// Doubled to keep the weight the rule had when it also matched the inline hide.
+const HIDDEN_CLIP = `[${CLIP_HIDDEN_ATTR}][${CLIP_HIDDEN_ATTR}]`;
 const HIDE_HIDDEN_CLIP_CONTENTS = `${HIDDEN_CLIP} * { visibility: hidden !important; }`;
 const HIDE_SVG_GENERATED_FILTER_OUTPUT = `svg${HIDDEN_CLIP}, svg${HIDDEN_CLIP} *, ${HIDDEN_CLIP} svg, ${HIDDEN_CLIP} svg * { filter: none !important; }`;
 
 export function showHiddenClips(): () => void {
   const hidden = Array.from(document.querySelectorAll<HTMLElement>(`[${CLIP_HIDDEN_ATTR}]`));
-  const putMarksBack = hidden.map((el) => {
-    el.style.visibility = "visible";
-    return liftClipHiddenMark(el);
-  });
+  const putMarksBack = hidden.map((el) => revealClip(el));
   return () => {
     for (const el of hidden) el.style.visibility = "hidden";
     for (const putMarkBack of putMarksBack) putMarkBack();

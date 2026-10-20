@@ -1,4 +1,4 @@
-import { liftClipHiddenMark } from "@hyperframes/core/runtime/clip-reveal";
+import { revealClip } from "@hyperframes/core/runtime/clip-reveal";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePlayerStore, liveTime } from "../player/store/playerStore";
 import { frameToSeconds, secondsToFrame } from "../player/lib/time";
@@ -127,8 +127,8 @@ function applyRuntimePreview(
   runtime.timeline.seek(seekTime);
   runtime.element.style.setProperty("translate", "none");
   runtime.gsap.set(runtime.element, { ...properties });
-  runtime.element.style.visibility = "visible";
-  runtime.putMarkBack ??= liftClipHiddenMark(runtime.element);
+  const putMarkBack = revealClip(runtime.element);
+  runtime.putMarkBack ??= putMarkBack;
   liveTime.notify(seekTime);
   usePlayerStore.getState().setCurrentTime(seekTime);
 }
