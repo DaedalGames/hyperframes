@@ -3,15 +3,15 @@
 // Needs safaridriver (`sudo safaridriver --enable`) or chromedriver, and the media from make-media.sh.
 // bun run tests/perf/browsers/run.ts --browsers safari,chrome --runs 2 [--fixtures a,b]
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
-import { mkdirSync, readFileSync, readdirSync, writeFileSync, appendFileSync } from "node:fs";
+import { mkdirSync, readdirSync, writeFileSync, appendFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { percentile } from "../runner.ts";
+import { bench } from "./bench-page.js";
 import { startServer } from "../server.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const RESULTS_DIR = resolve(HERE, "../results");
-const PAGE_SCRIPT = readFileSync(resolve(HERE, "bench-page.js"), "utf-8");
 const PLAY_MS = 8_000;
 const SEEK_FRACTIONS = [0.1, 0.7, 0.2, 0.8, 0.3, 0.9, 0.4, 0.6, 0.5, 0.05];
 const WORK_BUDGET_MS = 8;
@@ -105,6 +105,38 @@ type PageResult = {
   seeks: Array<{ target: number; ms: number; timedOut: boolean }>;
 };
 
+// Only finite numbers and explicit booleans from the browser reach disk; strings it reports go to the log.
+const num = (v: unknown) =>
+  typeof v === "number" && Number.isFinite(v) ? Math.round(v * 1000) / 1000 : null;
+
+function pageDetail(page: PageResult) {
+  return {
+    videos: num(page.videoCount),
+    mediaErrorCount: num(page.mediaErrors.length),
+    droppedTimeline: page.droppedTimeline.map(num),
+    mediaOps: {
+      seek: num(page.mediaOps.seek),
+      rate: num(page.mediaOps.rate),
+      play: num(page.mediaOps.play),
+      pause: num(page.mediaOps.pause),
+      load: num(page.mediaOps.load),
+    },
+    videoStates: page.videoStates.map((v) => ({
+      readyState: num(v.readyState),
+      networkState: num(v.networkState),
+      paused: v.paused === true,
+      advanced: num(v.advanced),
+      bufferedEnd: num(v.bufferedEnd),
+      shown: v.shown === true,
+    })),
+    seeks: page.seeks.map((x) => ({
+      target: num(x.target),
+      ms: num(x.ms),
+      timedOut: x.timedOut === true,
+    })),
+  };
+}
+
 function score(page: PageResult) {
   const idleIntervals = page.idle.slice(1).map((t, i) => t - page.idle[i]!);
   const vsync = percentile(idleIntervals, 50);
@@ -117,34 +149,35 @@ function score(page: PageResult) {
   const first = page.frames[0]!;
   const last = page.frames[page.frames.length - 1]!;
   const seekMs = page.seeks.map((s) => s.ms);
-  const round = (n: number) => Math.round(n * 10) / 10;
+  const round = (n: number) => num(Math.round(n * 10) / 10);
   return {
     vsyncMs: round(vsync),
-    frames: page.frames.length,
-    droppedFrames: dropped,
+    frames: num(page.frames.length),
+    droppedFrames: num(dropped),
     longestFrameMs: round(Math.max(...intervals)),
     p95FrameMs: round(percentile(intervals, 95)),
     maxWorkMs: round(Math.max(...work)),
     p95WorkMs: round(percentile(work, 95)),
-    framesOverBudget: work.filter((w) => w > WORK_BUDGET_MS).length,
+    framesOverBudget: num(work.filter((w) => w > WORK_BUDGET_MS).length),
     p95ScriptMs: round(
       percentile(
         page.frames.map((f) => f.script ?? 0),
         95,
       ),
     ),
-    clockRatio:
+    clockRatio: num(
       Math.round((((last.comp - first.comp) * 1000) / (last.ts - first.ts)) * 1000) / 1000,
-    decoderDropped: page.decoded.dropped,
-    decoderFrames: page.decoded.total,
-    mediaSeeks: page.mediaOps.seek,
-    rateWrites: page.mediaOps.rate,
+    ),
+    decoderDropped: num(page.decoded.dropped),
+    decoderFrames: num(page.decoded.total),
+    mediaSeeks: num(page.mediaOps.seek),
+    rateWrites: num(page.mediaOps.rate),
     presentedFps: page.videoCount
       ? round((page.decoded.total - page.decoded.dropped) / page.videoCount / (PLAY_MS / 1000))
       : null,
     seekP50Ms: round(percentile(seekMs, 50)),
     seekP95Ms: round(percentile(seekMs, 95)),
-    seekTimeouts: page.seeks.filter((s) => s.timedOut).length,
+    seekTimeouts: num(page.seeks.filter((s) => s.timedOut === true).length),
   };
 }
 
@@ -226,7 +259,7 @@ async function runFilm(base: string, browser: Browser, origin: string, fixture: 
       url: `${origin}/host.html?fixture=${fixture}&width=1280&height=720`,
     });
     await wd(base, "POST", `${s}/execute/sync`, {
-      script: `${PAGE_SCRIPT}
+      script: `window.__hfBench = ${bench.toString()};
         window.__bench = null;
         window.__hfBench(arguments[0]).then(
         (r) => { window.__bench = { ok: r }; },
@@ -283,17 +316,16 @@ try {
               run,
               ...score(page),
               peakRssMb,
-              videos: page.videoCount,
-              mediaErrors: page.mediaErrors,
-              userAgent: page.userAgent,
-              raw: page,
+              detail: pageDetail(page),
             };
             rows.push(row);
-            const { raw: _raw, userAgent: _ua, ...brief } = row;
-            console.log(JSON.stringify(brief));
+            console.log(JSON.stringify({ ...row, detail: undefined }));
+            console.log(
+              `[browsers] ${browser} ${page.userAgent}; media errors: ${page.mediaErrors.join(", ") || "none"}`,
+            );
           } catch (e) {
             failed = true;
-            rows.push({ browser, fixture, run, error: String(e) });
+            rows.push({ browser, fixture, run, error: "failed, see the job log" });
             console.error(`[browsers] ${browser} ${fixture} run ${run} failed: ${e}`);
           }
         }
@@ -305,13 +337,19 @@ try {
             browser,
             fixture: `control:${c.name}`,
             run: 1,
-            decoderDropped: r.dropped,
-            presentedFps: r.presentedFps,
-            decoderFrames: r.total,
+            decoderDropped: num(r.dropped),
+            presentedFps: num(r.presentedFps),
+            decoderFrames: num(r.total),
           });
           console.log(JSON.stringify(rows[rows.length - 1]));
         } catch (e) {
-          rows.push({ browser, fixture: `control:${c.name}`, run: 1, error: String(e) });
+          rows.push({
+            browser,
+            fixture: `control:${c.name}`,
+            run: 1,
+            error: "failed, see the job log",
+          });
+          console.error(`[browsers] ${browser} control ${c.name} failed: ${e}`);
         }
       }
     } finally {

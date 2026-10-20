@@ -1,6 +1,6 @@
-// Runs inside the perf server's host page in any browser; the driver only needs "execute script".
+// Runs inside the perf server's host page in any browser; run.ts sends this function's source over WebDriver.
 // Resolves with raw per-frame samples so every browser is scored by the same code in run.ts.
-window.__hfBench = async function bench(cfg) {
+export async function bench(cfg) {
   const now = () => performance.now();
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const nextFrame = () => new Promise((r) => requestAnimationFrame(r));
@@ -193,4 +193,4 @@ window.__hfBench = async function bench(cfg) {
     rateLog,
     seeks,
   };
-};
+}
