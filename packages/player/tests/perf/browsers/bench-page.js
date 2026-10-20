@@ -112,6 +112,41 @@ export async function bench(cfg) {
       return original.apply(this, args);
     };
   }
+  const mediaReads = {};
+  for (const prop of [
+    "currentTime",
+    "buffered",
+    "played",
+    "seekable",
+    "readyState",
+    "paused",
+    "duration",
+    "seeking",
+    "ended",
+    "volume",
+    "muted",
+    "playbackRate",
+    "networkState",
+    "error",
+  ]) {
+    const d = Object.getOwnPropertyDescriptor(proto, prop);
+    Object.defineProperty(proto, prop, {
+      ...d,
+      get() {
+        if (countOps) mediaReads[prop] = (mediaReads[prop] ?? 0) + 1;
+        return d.get.call(this);
+      },
+    });
+  }
+  let audioCaptures = 0;
+  const AudioCtx = win.AudioContext || win.webkitAudioContext;
+  if (AudioCtx) {
+    const capture = AudioCtx.prototype.createMediaElementSource;
+    AudioCtx.prototype.createMediaElementSource = function (el) {
+      audioCaptures++;
+      return capture.call(this, el);
+    };
+  }
 
   const idle = await recordFrames(1000);
 
@@ -190,6 +225,8 @@ export async function bench(cfg) {
     droppedTimeline,
     videoStates,
     mediaOps,
+    mediaReads,
+    audioCaptures,
     rateLog,
     seeks,
   };

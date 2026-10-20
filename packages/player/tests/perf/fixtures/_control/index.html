@@ -20,7 +20,8 @@
     <script>
       // ?media=<key>&n=&rate=, &tick=1 (per-frame media writes),
       // &animate=scale|translate|css (ancestor transform every frame; css runs on the compositor),
-      // &frame=plain|scaled (inside an iframe, scaled as the player scales it), &tiles=1 (the grid's tile styling).
+      // &frame=plain|scaled (inside an iframe, scaled as the player scales it), &tiles=1 (the grid's tile styling),
+      // &reads=1 (reads every media state property of every video each frame).
       (async function () {
         var q = new URLSearchParams(location.search);
         var MEDIA = {
@@ -36,7 +37,7 @@
             media: q.get("media"),
             n: String(Number(q.get("n") || 1)),
           });
-          for (var key of ["rate", "tick", "animate", "tiles"]) {
+          for (var key of ["rate", "tick", "animate", "tiles", "reads"]) {
             if (q.get(key)) child.set(key, q.get(key));
           }
           var f = document.createElement("iframe");
@@ -88,6 +89,27 @@
           );
         await Promise.all(videos.map((v) => v.play()));
         videos.forEach((v) => (v.playbackRate = Number(q.get("rate") || 1)));
+        if (q.get("reads")) {
+          (function read() {
+            videos.forEach((v) => {
+              void [
+                v.currentTime,
+                v.readyState,
+                v.paused,
+                v.duration,
+                v.seeking,
+                v.ended,
+                v.networkState,
+              ];
+              void [
+                v.buffered.length && v.buffered.end(0),
+                v.played.length && v.played.end(0),
+                v.seekable.length,
+              ];
+            });
+            requestAnimationFrame(read);
+          })();
+        }
         if (q.get("tick")) {
           (function tick() {
             videos.forEach((v) => {

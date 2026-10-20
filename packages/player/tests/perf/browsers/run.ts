@@ -207,6 +207,13 @@ const CONTROLS = [
     rate: 1.03,
     extra: "&frame=scaled&tiles=1&animate=scale&tick=1",
   },
+  {
+    name: "grid-scaled-tiles-reads",
+    media: "grid-sample",
+    n: 10,
+    rate: 1,
+    extra: "&frame=scaled&tiles=1&reads=1",
+  },
   { name: "16x1080-native", media: "h264-1080", n: 16, rate: 1 },
   { name: "16x1080-in-scaled-iframe", media: "h264-1080", n: 16, rate: 1, extra: "&frame=scaled" },
 ];
