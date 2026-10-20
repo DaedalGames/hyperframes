@@ -218,21 +218,13 @@ function useNearScreen(element: Element | null): boolean {
   return near;
 }
 
-export const AudioWaveform = memo(function AudioWaveform({
+function useWaveformPeaks({
   audioUrl,
   waveformUrl,
-  label,
-  labelColor,
-  trimStartFraction,
-  trimEndFraction,
   projectId,
   sessionEpoch,
   priority,
-  muted = false,
-  labelInset = 16,
 }: AudioWaveformProps) {
-  const [root, setRoot] = useState<HTMLDivElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const cacheKey = waveformUrl ?? audioUrl;
   const request = useMemo(
     () => ({
@@ -255,7 +247,15 @@ export const AudioWaveform = memo(function AudioWaveform({
   const snapshot = useThumbnailLease(cacheKey ? request : null);
   const peaks =
     snapshot.status === "ready" && snapshot.value.kind === "waveform" ? snapshot.value.peaks : null;
+  return { snapshot, peaks };
+}
 
+function useWaveformCanvas(
+  { trimStartFraction, trimEndFraction, muted = false, labelInset = 16 }: AudioWaveformProps,
+  peaks: readonly number[] | null,
+) {
+  const [root, setRoot] = useState<HTMLDivElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fades = useContext(ClipFadesContext);
   const [strip, setStripRef, watchGap] = useThumbnailStripSize();
   const from = strip.width > 0 ? strip.inViewStart / strip.width : 0;
@@ -300,6 +300,16 @@ export const AudioWaveform = memo(function AudioWaveform({
   }, [draw, near, strip.width, strip.height]);
 
   useEffect(() => (near ? onThemeChange(draw) : undefined), [draw, near]);
+  return { setRoot, canvasRef, setStripRef, watchGap, from, to, labelInset };
+}
+
+export const AudioWaveform = memo(function AudioWaveform(props: AudioWaveformProps) {
+  const { label, labelColor } = props;
+  const { snapshot, peaks } = useWaveformPeaks(props);
+  const { setRoot, canvasRef, setStripRef, watchGap, from, to, labelInset } = useWaveformCanvas(
+    props,
+    peaks,
+  );
 
   return (
     <div ref={setRoot} className="absolute inset-0">
