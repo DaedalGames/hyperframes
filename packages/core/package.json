@@ -1,7 +1,14 @@
 {
   "name": "@hyperframes/core",
   "version": "0.8.181",
-  "description": "",
+  "description": "Core of the HyperFrames HTML-to-video framework: types, parsers, compiler, linter and runtime",
+  "keywords": [
+    "animation",
+    "gsap",
+    "html-to-video",
+    "hyperframes",
+    "video"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/heygen-com/hyperframes",

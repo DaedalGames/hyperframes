@@ -2,6 +2,13 @@
   "name": "@hyperframes/player",
   "version": "0.8.181",
   "description": "Embeddable web component for HyperFrames compositions",
+  "keywords": [
+    "html-to-video",
+    "hyperframes",
+    "video",
+    "video-player",
+    "web-component"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/heygen-com/hyperframes",
