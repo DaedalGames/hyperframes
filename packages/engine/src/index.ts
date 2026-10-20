@@ -49,6 +49,7 @@ export type {
 // ── Configuration ──────────────────────────────────────────────────────────────
 export {
   resolveConfig,
+  resolvePageNavigationTimeout,
   validateEngineConfigSnapshot,
   DEFAULT_CONFIG,
   scaleProtocolTimeoutForComposition,
@@ -359,6 +360,7 @@ export {
   type RunFfmpegOptions,
   type RunFfmpegResult,
 } from "./utils/runFfmpeg.js";
+export { aacSegmentCount } from "./services/aacEncode.js";
 export {
   ManagedChildProcess,
   type ManagedChildProcessOptions,

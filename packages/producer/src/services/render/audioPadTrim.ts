@@ -33,6 +33,7 @@ import {
   type AudioMetadata,
 } from "@hyperframes/engine";
 import { redactKnownPaths, redactTelemetryString } from "@hyperframes/core";
+import { measureTruePeakDbfs } from "./audioTruePeak.js";
 
 /**
  * Tolerance used to decide whether an audio file is already short enough to
@@ -77,8 +78,8 @@ export interface PadTrimAudioInput {
   /** Deadline for each ffmpeg process; defaults to the engine's `ffmpegProcessTimeout`. */
   timeoutMs?: number;
   /**
-   * Optional injectables for unit tests. Production callers omit them and
-   * get the real `ffprobe`/`ffmpeg`-backed implementations.
+   * Optional injectables. Tests stub them; the distributed assembler supplies
+   * the frame probe because its video is still separate chunks.
    */
   probeVideoFrameInfo?: (videoPath: string) => Promise<ProbeVideoFrameInfo>;
   probeAudioInfo?: (audioPath: string, signal?: AbortSignal) => Promise<AudioProbeInfo>;
@@ -280,7 +281,8 @@ function sanitizeProbeFailure(reason: unknown, paths: readonly string[]): string
   // turned a returned failure result into a rejected promise, which is a
   // behaviour regression the cast introduced.
   const message = reason instanceof Error ? reason.message : String(reason);
-  return redactTelemetryString(redactKnownPaths(message, paths));
+  const keepFfmpegsLastLineUncapped = Number.POSITIVE_INFINITY;
+  return redactTelemetryString(redactKnownPaths(message, paths), keepFfmpegsLastLineUncapped);
 }
 
 /**
@@ -305,7 +307,7 @@ export async function padOrTrimAudioToVideoFrameCount(
     (input.runFfmpeg
       ? undefined
       : (audioPath: string, signal?: AbortSignal) =>
-          defaultProbeAudioTruePeakDbfs(audioPath, timeoutMs, signal));
+          measureTruePeakDbfs(audioPath, { timeoutMs, signal }));
 
   // Probe video and audio in parallel — the two ffprobe invocations are
   // independent and account for most of this function's wall-clock time.
@@ -427,6 +429,35 @@ export async function padOrTrimAudioToVideoFrameCount(
   };
 }
 
+/**
+ * The true-peak half of {@link padOrTrimAudioToVideoFrameCount}, for AAC already encoded at its
+ * exact length: measures once and re-encodes only when the peak is over the ceiling.
+ */
+export async function constrainAacTruePeak(input: {
+  audioPath: string;
+  targetDurationSeconds: number;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}): Promise<{
+  success: boolean;
+  error?: string;
+  failureReason?: "external_interruption";
+  loweredDb?: number;
+}> {
+  const timeoutMs = input.timeoutMs ?? DEFAULT_CONFIG.ffmpegProcessTimeout;
+  return enforceAacTruePeak({
+    audioPath: input.audioPath,
+    targetDurationSeconds: input.targetDurationSeconds,
+    signal: input.signal,
+    probeTruePeak: async (audioPath, signal) => {
+      const { sampleRate } = await extractAudioMetadata(audioPath, { signal });
+      const segments = { durationSeconds: input.targetDurationSeconds, sampleRate };
+      return measureTruePeakDbfs(audioPath, { timeoutMs, signal, segments });
+    },
+    runner: (args) => defaultRunFfmpeg(args, timeoutMs, input.signal),
+  });
+}
+
 interface EnforceAacTruePeakInput {
   audioPath: string;
   targetDurationSeconds: number;
@@ -536,7 +567,7 @@ interface FfprobeOutput {
   streams?: FfprobeStreamInfo[];
 }
 
-async function defaultProbeVideoFrameInfo(
+export async function defaultProbeVideoFrameInfo(
   videoPath: string,
   signal?: AbortSignal,
 ): Promise<ProbeVideoFrameInfo> {
@@ -614,27 +645,6 @@ async function defaultProbeAudioInfo(
   };
 }
 
-async function defaultProbeAudioTruePeakDbfs(
-  audioPath: string,
-  timeoutMs: number,
-  signal?: AbortSignal,
-): Promise<number> {
-  const result = await runFfmpeg(
-    ["-i", audioPath, "-map", "0:a:0", "-vn", "-af", "ebur128=peak=true", "-f", "null", "-"],
-    { signal, timeout: timeoutMs },
-  );
-  if (!result.success) {
-    throw new Error(`[audioPadTrim] ${describeFfmpegFailure(result, timeoutMs)}`);
-  }
-  const matches = [...result.stderr.matchAll(/^\s*Peak:\s*([+-]?(?:[\d.]+|inf)) dBFS$/gim)];
-  const token = matches.at(-1)?.[1]?.toLowerCase();
-  const value = token === "-inf" ? Number.NEGATIVE_INFINITY : Number(token);
-  if (Number.isNaN(value) || value === Number.POSITIVE_INFINITY) {
-    throw new Error("[audioPadTrim] FFmpeg did not report AAC true peak");
-  }
-  return value;
-}
-
 async function defaultRunFfmpeg(
   args: string[],
   timeoutMs: number,
@@ -655,7 +665,7 @@ async function defaultRunFfmpeg(
 
 // ── ffprobe JSON runner (shared between fast/slow video probe paths) ─────
 
-async function runFfprobeJson<T>(args: string[], signal?: AbortSignal): Promise<T> {
+export async function runFfprobeJson<T>(args: string[], signal?: AbortSignal): Promise<T> {
   // Callers bake the input path into `args` (terminated with "--"), so this
   // helper cannot add the terminator itself — assert they did rather than
   // let a dash-prefixed path silently reach ffprobe as an option.

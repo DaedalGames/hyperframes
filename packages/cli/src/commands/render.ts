@@ -118,6 +118,7 @@ import {
 import { chromeLaunchRemediation } from "../browser/linuxDeps.js";
 import { macosOldChromeCrashRemediation } from "../browser/macosOldChromeCrash.js";
 import { windowsChromeCrashRemediation } from "../browser/windowsCrash.js";
+import { sandboxDeniedRemediation } from "../browser/sandboxDenied.js";
 import { killOrphanedProcessesForRender } from "../utils/orphanCleanup.js";
 import { createRenderCancellationScope } from "../utils/renderCancellation.js";
 import {
@@ -1007,21 +1008,22 @@ async function executeLocalRender(
   // HLS shares the H.264 encode path but cannot take the GPU fallback below:
   // its fixed-length segments need the software encoder's forced-keyframe lock.
   const isHls = options.format === "hls";
-  if (!options.gpu && (options.format === "mp4" || isHls) && preflight.ffmpegPath) {
-    let encoderMode: H264EncoderMode = "software";
+  if ((options.format === "mp4" || isHls) && preflight.ffmpegPath) {
+    const gpuRequested = options.gpu && !isHls;
+    let encoderMode: H264EncoderMode = gpuRequested ? "gpu" : "software";
     try {
       encoderMode = await detectH264EncoderModeForRender(
         preflight.ffmpegPath,
-        false,
+        gpuRequested,
         cancellation.signal,
       );
     } catch (error) {
       if (cancellation.signal.aborted) cancellation.signal.throwIfAborted();
-      // HDR MP4 uses HEVC; auto mode cannot resolve the codec until sources
-      // have been inspected. Forced SDR and HLS are definitely H.264 here.
+      // HDR MP4 uses HEVC; auto mode cannot resolve the codec until sources are
+      // inspected. Forced SDR, HLS, or no libx265 either: nothing here can encode.
       if (
         error instanceof H264EncoderUnavailableError &&
-        (options.hdrMode === "force-sdr" || isHls)
+        (options.hdrMode === "force-sdr" || isHls || !error.hevcEncoderAvailable)
       ) {
         errorBox(
           `${isHls ? "HLS" : "MP4"} H.264 encoder unavailable`,
@@ -1048,11 +1050,14 @@ async function executeLocalRender(
       );
       failCommand();
     }
-    if (encoderMode === "gpu") {
+    if (encoderMode === "gpu" && !gpuRequested) {
       console.warn(
-        c.warn("  FFmpeg does not include libx264; falling back to VideoToolbox H.264 encoding."),
+        c.warn("  FFmpeg does not include libx264; falling back to GPU H.264 encoding."),
       );
       options = { ...options, gpu: true };
+    }
+    if (encoderMode === "software" && gpuRequested && !options.quiet) {
+      console.warn(c.warn("  No GPU encoder works on this machine; encoding with libx264."));
     }
   }
 
@@ -1759,6 +1764,11 @@ function handleRenderError(
   // failure on Linux/WSL is an environment problem, not a composition bug.
   // Replace the generic "Try --docker" hint with the exact per-distro
   // remediation and a pointer at `doctor`.
+  const sandboxRemediation = sandboxDeniedRemediation(message);
+  if (sandboxRemediation) {
+    errorBox("Render failed — Chrome could not launch", message, sandboxRemediation);
+    failCommand();
+  }
   const remediation = chromeLaunchRemediation(message);
   if (remediation) {
     errorBox("Render failed — Chrome could not launch", message, remediation);

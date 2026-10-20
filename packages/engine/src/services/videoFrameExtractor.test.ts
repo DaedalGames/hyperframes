@@ -1653,6 +1653,101 @@ describe.skipIf(!HAS_FFMPEG)("video frame extraction format", () => {
     60_000,
   );
 
+  it("samples a 29.97 fps source with millisecond timestamps at 30 fps without skipping a frame", async () => {
+    // Each frame writes its index as eight black or white blocks; the mp4 keeps 1/1000 s ticks.
+    const fixture = join(FIXTURE_DIR, "ntsc-ms-ticks.mp4");
+    const synth = await runFfmpeg([
+      ...["-y", "-v", "error", "-f", "lavfi", "-i"],
+      "color=c=black:s=64x8:r=30000/1001:d=2,format=yuv420p,geq=lum='if(mod(floor(N/pow(2\\,floor(X/8)))\\,2)\\,235\\,16)':cb=128:cr=128",
+      ...["-c:v", "libx264", "-qp", "0", "-g", "30", "-bf", "0", "-video_track_timescale", "1000"],
+      fixture,
+    ]);
+    if (!synth.success) throw new Error(`fixture synthesis failed: ${synth.stderr.slice(-400)}`);
+
+    const result = await extractVideoFramesRange(fixture, "ntsc-ms-ticks", 0, 1.5, {
+      fps: 30,
+      outputDir: join(FIXTURE_DIR, "out-ntsc-ms"),
+      format: "png",
+    });
+    const indexOf = (file: string): number => {
+      const row = spawnSync("ffmpeg", [
+        "-v",
+        "error",
+        "-i",
+        file,
+        "-vf",
+        "format=gray,crop=64:1:0:4",
+        "-f",
+        "rawvideo",
+        "-",
+      ]).stdout;
+      return [...Array(8).keys()].reduce(
+        (n, bit) => n + (row[bit * 8 + 4]! > 128 ? 1 << bit : 0),
+        0,
+      );
+    };
+    const shown = [...result.framePaths.keys()]
+      .sort((a, b) => a - b)
+      .map((i) => indexOf(result.framePaths.get(i)!));
+    const steps = shown.slice(1).map((n, i) => n - shown[i]!);
+
+    expect(shown.length).toBeGreaterThanOrEqual(44);
+    expect(
+      steps.filter((step) => step > 1),
+      `source frames ${shown.join(",")}`,
+    ).toEqual([]);
+    expect(steps.filter((step) => step === 0).length).toBeLessThanOrEqual(1);
+  }, 60_000);
+
+  it("samples a millisecond-tick 29.97 fps source the same in segments as in one pass", async () => {
+    const fixture = join(FIXTURE_DIR, "ntsc-ms-ticks-8s.mp4");
+    const synth = await runFfmpeg([
+      ...["-y", "-v", "error", "-f", "lavfi", "-i"],
+      "color=c=black:s=64x8:r=30000/1001:d=8,format=yuv420p,geq=lum='if(mod(floor(N/pow(2\\,floor(X/8)))\\,2)\\,235\\,16)':cb=128:cr=128",
+      ...["-c:v", "libx264", "-qp", "0", "-g", "30", "-bf", "0", "-video_track_timescale", "1000"],
+      fixture,
+    ]);
+    if (!synth.success) throw new Error(`fixture synthesis failed: ${synth.stderr.slice(-400)}`);
+    const indexOf = (file: string): number => {
+      const row = spawnSync("ffmpeg", [
+        "-v",
+        "error",
+        "-i",
+        file,
+        "-vf",
+        "format=gray,crop=64:1:0:4",
+        "-f",
+        "rawvideo",
+        "-",
+      ]).stdout;
+      return [...Array(8).keys()].reduce(
+        (n, bit) => n + (row[bit * 8 + 4]! > 128 ? 1 << bit : 0),
+        0,
+      );
+    };
+    const options = {
+      fps: 30,
+      outputDir: join(FIXTURE_DIR, "out-ntsc-seams"),
+      format: "png" as const,
+    };
+    const single = await extractVideoFramesRange(fixture, "ntsc-single", 0, 7.5, options);
+
+    const seams = [4, 17, 29, 41, 58, 73, 90, 107, 121, 139, 156, 170, 188, 201];
+    const differing: string[] = [];
+    for (const firstFrame of seams) {
+      const segment = await extractVideoFramesRange(fixture, `ntsc-seam-${firstFrame}`, 0, 7.5, {
+        ...options,
+        frameRanges: [{ firstFrame, frames: 12 }],
+      });
+      for (const [slot, path] of segment.framePaths) {
+        const expected = indexOf(single.framePaths.get(slot)!);
+        const shown = indexOf(path);
+        if (shown !== expected) differing.push(`slot ${slot}: ${shown} vs ${expected}`);
+      }
+    }
+    expect(differing).toEqual([]);
+  }, 120_000);
+
   // ffmpeg < 6.1 drops frame durations from CFR resampling once any -vf is set, so the colour
   // filters would cut the still that ends this window short.
   it.each([
@@ -1986,6 +2081,44 @@ describe.skipIf(!HAS_FFMPEG)("frame sampling at the output frame rate", () => {
     },
     60_000,
   );
+
+  it("keeps a run that outlasts the timeout while it still writes frames", async () => {
+    const source = join(FIXTURE_DIR, "paced-5s.mp4");
+    const synth = await runFfmpeg([
+      ...["-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi"],
+      ...["-i", `testsrc=s=${WIDTH}x${HEIGHT}:r=30:d=5`, "-pix_fmt", "yuv420p", source],
+    ]);
+    if (!synth.success) throw new Error(`paced fixture synthesis failed: ${synth.stderr}`);
+    const { runFfmpeg: real } =
+      await vi.importActual<typeof import("../utils/runFfmpeg.js")>("../utils/runFfmpeg.js");
+    // Real-time pacing makes 5 s of source take 5 s against a 2 s timeout.
+    vi.mocked(runFfmpeg).mockImplementation((args, opts) =>
+      real(["-stats_period", "0.1", "-re", ...args], opts),
+    );
+    try {
+      const extracted = await extractVideoFramesRange(
+        source,
+        "paced-past-timeout",
+        0,
+        5,
+        { fps: 10, outputDir: FIXTURE_DIR, format: "png" },
+        undefined,
+        { ffmpegProcessTimeout: 2000 },
+      );
+      expect(extracted.totalFrames).toBe(50);
+    } finally {
+      vi.mocked(runFfmpeg).mockImplementation(real);
+    }
+  }, 30_000);
+
+  it("stops a run that writes no new frame for the stall timeout", async () => {
+    // stdin stays open and empty, so ffmpeg waits for its first frame forever.
+    const stalled = await runFfmpeg(
+      ["-f", "rawvideo", "-pix_fmt", "gray", "-s", "2x2", "-i", "pipe:0", "-f", "null", "-"],
+      { stallTimeout: 500 },
+    );
+    expect(stalled.terminationReason).toBe("inactivity");
+  }, 30_000);
 
   // A distributed chunk extracts only the frames it renders; they must be the full extraction's.
   describe("partial extraction", () => {
@@ -3532,6 +3665,60 @@ describe.skipIf(!HAS_ZSCALE)("forced-SDR HDR extraction", () => {
     },
     60_000,
   );
+
+  it("probes each source's first frame once, however many cuts of it extract together", async () => {
+    const sources = ["a", "b"].map((name) => join(fixtureDir, `cuts-${name}.mp4`));
+    for (const source of sources) await synthesizeHlgClip(source);
+    const probes = () =>
+      vi.mocked(runFfmpeg).mock.calls.filter(([args]) => args.includes("showinfo")).length;
+    const before = probes();
+    await Promise.all(
+      Array.from({ length: 12 }, (_, cut) =>
+        extractVideoFramesRange(sources[cut % 2]!, `cut-${cut}`, 0, 1, {
+          fps: 1,
+          outputDir: join(fixtureDir, "cuts"),
+          format: "png",
+          toneMapHdrToSdr: true,
+        }),
+      ),
+    );
+    expect(probes() - before).toBe(2);
+  }, 60_000);
+
+  it("probes a source again after its first-frame probe failed", async () => {
+    const source = join(fixtureDir, "probe-retry.mp4");
+    await synthesizeHlgClip(source);
+    const probes = () =>
+      vi.mocked(runFfmpeg).mock.calls.filter(([args]) => args.includes("showinfo")).length;
+    const { runFfmpeg: real } =
+      await vi.importActual<typeof import("../utils/runFfmpeg.js")>("../utils/runFfmpeg.js");
+    vi.mocked(runFfmpeg).mockImplementation((args, opts) =>
+      args.includes("showinfo")
+        ? Promise.resolve({
+            success: false,
+            exitCode: 1,
+            stderr: "",
+            durationMs: 0,
+            terminationReason: "exit",
+          })
+        : real(args, opts),
+    );
+    const extract = (id: string) =>
+      extractVideoFramesRange(source, id, 0, 1, {
+        fps: 1,
+        outputDir: join(fixtureDir, "retry"),
+        format: "png",
+        toneMapHdrToSdr: true,
+      });
+    const before = probes();
+    try {
+      await extract("retry-failed");
+    } finally {
+      vi.mocked(runFfmpeg).mockImplementation(real);
+    }
+    await extract("retry-again");
+    expect(probes() - before).toBe(2);
+  }, 60_000);
 
   // One stream with HLG frames, then PQ frames: each is tone-mapped with its own transfer.
   it("tone-maps each frame of a mixed HLG and PQ stream with its own transfer", async () => {

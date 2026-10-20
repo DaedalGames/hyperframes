@@ -163,8 +163,9 @@ interface PlanLambdaResultBase {
   Action: "plan";
   PlanHash: string;
   ChunkCount: number;
+  MaxChunkConcurrency: number;
   TotalFrames: number;
-  Fps: 24 | 30 | 60;
+  Fps: SerializableDistributedRenderConfig["fps"];
   Width: number;
   Height: number;
   Format: DistributedFormat;

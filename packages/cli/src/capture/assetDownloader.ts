@@ -6,6 +6,7 @@
  */
 
 import { isBlockedNetworkHost } from "@hyperframes/engine";
+import { publicRequest } from "./publicNetwork.js";
 import { ensureCaptureDirSync, writeCaptureFileSync } from "./captureFile.js";
 import { join, extname } from "node:path";
 import { createHash } from "node:crypto";
@@ -670,10 +671,11 @@ export async function safeFetch(url: string, init?: RequestInit): Promise<Respon
   let current = url;
   for (let hop = 0; hop <= MAX_FETCH_REDIRECTS; hop++) {
     if (isPrivateUrl(current)) return null;
-    const res = await fetch(current, { ...init, redirect: "manual" });
+    const res = await publicRequest(current, { ...init, redirect: "manual" });
     if (res.status >= 300 && res.status < 400) {
       const loc = res.headers.get("location");
       if (!loc) return res;
+      await res.body?.cancel().catch(() => {});
       try {
         current = new URL(loc, current).toString();
       } catch {

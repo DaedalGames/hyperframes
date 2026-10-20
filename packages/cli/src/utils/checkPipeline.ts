@@ -7,6 +7,8 @@ import {
 } from "./checkSnapshotDirectory.js";
 import { findingElementKey, groupSampledFindings } from "./checkFindings.js";
 import { mkdirSync, writeFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import type { PrelaunchedBrowser } from "../capture/captureCompositionFrame.js";
 import { join, relative } from "node:path";
 import { trackCheckReport, trackCommandFailure } from "../telemetry/events.js";
 import { trackLintRun } from "../telemetry/lintRun.js";
@@ -17,6 +19,7 @@ import {
   buildLayoutSampleTimes,
   buildTransitionSampleTimes,
   collapseStaticLayoutIssues,
+  CONTENT_OVERLAP_HELD_ERROR_MS,
   longestContiguousRunMs,
   dedupeLayoutIssues,
   limitLayoutIssues,
@@ -421,18 +424,8 @@ async function collectGeometryAt(
   return issues;
 }
 
-async function collectGridSamples(
-  driver: CheckAuditDriver,
-  options: CheckOptions,
-  grid: SampleGrid,
-  motion: MotionPlan,
-): Promise<GridSamples> {
-  const layoutSet = new Set(grid.layoutSamples);
-  const motionSet = new Set(motion.times);
-  const contrastSet = new Set(grid.contrastSamples);
-  const geometryEnabled = grid.captionSamples.length > 0 || grid.frameSamples.length > 0;
-  const canvas = geometryEnabled ? await driver.getCanvas() : null;
-  const collected: GridSamples = {
+function emptyGridSamples(): GridSamples {
+  return {
     layoutIssues: [],
     motionFrames: [],
     contrastEntries: [],
@@ -442,66 +435,222 @@ async function collectGridSamples(
     rotationSamples: [],
     indicatorFrames: [],
   };
-  for (const time of mergeSampleTimes(grid.layoutSamples, motion.times)) {
-    await driver.seek(time);
-    // Findings collected for THIS sample time, so the overview overlay (below)
-    // only ever annotates a frame with defects that are actually valid at
-    // that render time — never a stale bbox from an earlier/later sample.
-    const issuesAtTime: AnchoredLayoutIssue[] = [];
-    if (layoutSet.has(time)) {
-      const layoutIssues = await driver.collectLayout(time, options.tolerance, options.layout);
-      collected.layoutIssues.push(...layoutIssues);
-      issuesAtTime.push(...layoutIssues);
-      collected.layoutStateSignatures.push({
-        time,
-        signature: await driver.collectLayoutGeometry(),
-        clock: await driver.collectSeekClock(),
-      });
-      collected.rotationSamples.push(...(await driver.collectRotationSample(time)));
-      collected.indicatorFrames.push(await driver.collectOffPivotRotationSample(time));
-    }
-    if (canvas) {
-      const geometryIssues = await collectGeometryAt(driver, options, grid, canvas, time);
-      collected.layoutIssues.push(...geometryIssues);
-      issuesAtTime.push(...geometryIssues);
-    }
-    if (motionSet.has(time)) {
-      collected.motionFrames.push(
-        await driver.collectMotionFrame(time, motion.selectors, motion.livenessScopes),
-      );
-    }
-    if (contrastSet.has(time)) {
-      const contrastStart = Date.now();
-      // Annotation is a --snapshots-only nicety — skip building it (and the
-      // driver's extra overlay screenshot) when nothing will use it; the call
-      // shape without --snapshots stays exactly what it was before this existed.
-      const capture = options.snapshots
-        ? await driver.collectContrast(time, annotationBoxesFrom(issuesAtTime))
-        : await driver.collectContrast(time);
-      collected.contrastMs += Date.now() - contrastStart;
-      collected.contrastEntries.push(...capture.entries);
-      collected.screenshots.push({ time, pngBase64: capture.pngBase64 });
-    }
+}
+
+function appendGridSamples(into: GridSamples, from: GridSamples): void {
+  into.layoutIssues.push(...from.layoutIssues);
+  into.motionFrames.push(...from.motionFrames);
+  into.contrastEntries.push(...from.contrastEntries);
+  into.screenshots.push(...from.screenshots);
+  // Summed over pages, so with a helper it can exceed the wall time.
+  into.contrastMs += from.contrastMs;
+  into.layoutStateSignatures.push(...from.layoutStateSignatures);
+  into.rotationSamples.push(...from.rotationSamples);
+  into.indicatorFrames.push(...from.indicatorFrames);
+}
+
+interface SampleSets {
+  layout: Set<number>;
+  motion: Set<number>;
+  contrast: Set<number>;
+  canvas: Canvas | null;
+}
+
+async function collectSampleAt(
+  driver: CheckAuditDriver,
+  options: CheckOptions,
+  grid: SampleGrid,
+  motion: MotionPlan,
+  sets: SampleSets,
+  time: number,
+): Promise<GridSamples> {
+  const collected = emptyGridSamples();
+  await driver.seek(time, sets.contrast.has(time));
+  // Findings collected for THIS sample time, so the overview overlay (below)
+  // only ever annotates a frame with defects that are actually valid at
+  // that render time — never a stale bbox from an earlier/later sample.
+  const issuesAtTime: AnchoredLayoutIssue[] = [];
+  if (sets.layout.has(time)) {
+    const layoutIssues = await driver.collectLayout(time, options.tolerance, options.layout);
+    collected.layoutIssues.push(...layoutIssues);
+    issuesAtTime.push(...layoutIssues);
+    collected.layoutStateSignatures.push({
+      time,
+      signature: await driver.collectLayoutGeometry(),
+      clock: await driver.collectSeekClock(),
+    });
+    collected.rotationSamples.push(...(await driver.collectRotationSample(time)));
+    collected.indicatorFrames.push(await driver.collectOffPivotRotationSample(time));
   }
+  if (sets.canvas) {
+    const geometryIssues = await collectGeometryAt(driver, options, grid, sets.canvas, time);
+    collected.layoutIssues.push(...geometryIssues);
+    issuesAtTime.push(...geometryIssues);
+  }
+  if (sets.motion.has(time)) {
+    collected.motionFrames.push(
+      await driver.collectMotionFrame(time, motion.selectors, motion.livenessScopes),
+    );
+  }
+  if (sets.contrast.has(time))
+    await collectContrastAt(driver, options, time, issuesAtTime, collected);
+  return collected;
+}
+
+// Frames are a function of time, so a helper page that is ready takes the next unclaimed sample
+// and the merge keeps the serial order. A helper only adds speed: one that fails hands its samples back.
+async function collectGridSamples(
+  driver: CheckAuditDriver,
+  options: CheckOptions,
+  grid: SampleGrid,
+  motion: MotionPlan,
+  helpers: Promise<CheckAuditDriver[]>,
+): Promise<GridSamples> {
+  const geometryEnabled = grid.captionSamples.length > 0 || grid.frameSamples.length > 0;
+  const sets: SampleSets = {
+    layout: new Set(grid.layoutSamples),
+    motion: new Set(motion.times),
+    contrast: new Set(grid.contrastSamples),
+    canvas: geometryEnabled ? await driver.getCanvas() : null,
+  };
+  const times = mergeSampleTimes(grid.layoutSamples, motion.times);
+  const pending = times.map((_, index) => index);
+  const perTime: GridSamples[] = [];
+  const work = async (worker: CheckAuditDriver, taken: number[] = []) => {
+    for (let index = pending.shift(); index !== undefined; index = pending.shift()) {
+      taken.push(index);
+      const time = times[index] ?? 0;
+      perTime[index] = await collectSampleAt(worker, options, grid, motion, sets, time);
+    }
+  };
+  const helpWith = async (helper: CheckAuditDriver) => {
+    const taken: number[] = [];
+    try {
+      await helper.initialize(options.contrast);
+      helper.markSamples?.("start");
+      await work(helper, taken);
+      helper.markSamples?.("end");
+    } catch {
+      helper.markSamples?.("drop");
+      for (const index of taken) delete perTime[index];
+      pending.push(...taken);
+    }
+  };
+  let firstPageDone = false;
+  const running: Promise<void>[] = [];
+  void helpers.then((ready) => {
+    for (const helper of ready) if (!firstPageDone) running.push(helpWith(helper));
+  });
+  driver.markSamples?.("start");
+  await work(driver);
+  // A helper still opening is never waited for; one mid-sample may yet hand samples back.
+  firstPageDone = true;
+  await Promise.all(running);
+  await work(driver);
+  driver.markSamples?.("end");
+  const collected = emptyGridSamples();
+  for (const samples of perTime) appendGridSamples(collected, samples);
   await collectMotionOverlapSamples(driver, grid, collected, options.range);
   return collected;
 }
 
+async function collectContrastAt(
+  driver: CheckAuditDriver,
+  options: CheckOptions,
+  time: number,
+  issuesAtTime: AnchoredLayoutIssue[],
+  collected: GridSamples,
+): Promise<void> {
+  const contrastStart = Date.now();
+  const capture = options.snapshots
+    ? await driver.collectContrast(time, annotationBoxesFrom(issuesAtTime))
+    : await driver.collectContrast(time);
+  collected.contrastMs += Date.now() - contrastStart;
+  collected.contrastEntries.push(...capture.entries);
+  if (capture.pngBase64) collected.screenshots.push({ time, pngBase64: capture.pngBase64 });
+}
+
 // Dense grid catches mid-motion text collisions the sparse layout grid seeks past; text-only overlap collection is cheap enough to afford it.
 const OVERLAP_SAMPLE_FPS = 8;
-// Ceiling that bounds dense seeks; past ~75s the grid degrades below 8fps rather than growing the seek budget without limit.
-const OVERLAP_MAX_SAMPLES = 600;
+// A fixed ceiling, so check's work does not grow with film length: half uniform, half in clip windows it misses.
+const OVERLAP_MAX_SAMPLES = 240;
+// Part of it re-looks at an overlap half a second on where the grid is too sparse to show it held.
+const OVERLAP_HOLD_PROBES = 60;
 
-function buildOverlapSampleTimes(duration: number): number[] {
+function evenlyPicked(times: number[], count: number): number[] {
+  if (times.length <= count) return times;
+  const last = Math.max(1, count - 1);
+  return Array.from(
+    { length: count },
+    (_, i) => times[Math.floor((i * (times.length - 1)) / last)] ?? 0,
+  );
+}
+
+function uniformTimes(duration: number, fill: number): number[] {
+  const step = duration / Math.max(1, fill - 1);
+  return Array.from({ length: fill }, (_, i) => i * step);
+}
+
+function buildOverlapSampleTimes(duration: number, clipEdges: number[]): number[] {
   if (!Number.isFinite(duration) || duration <= 0) return [];
   const count = Math.min(
-    OVERLAP_MAX_SAMPLES,
+    OVERLAP_MAX_SAMPLES - OVERLAP_HOLD_PROBES,
     Math.max(2, Math.ceil(duration * OVERLAP_SAMPLE_FPS) + 1),
   );
-  const step = duration / (count - 1);
+  const cuts: number[] = [];
+  for (const time of mergeSampleTimes(
+    [0, duration],
+    clipEdges.filter((t) => t > 0 && t < duration),
+  ))
+    if (time - (cuts.at(-1) ?? -Infinity) >= CONTENT_OVERLAP_HELD_ERROR_MS / 1000) cuts.push(time);
+  // A stretch where the visible clips stay the same, and that the uniform half steps over, gets one sample.
+  const uncovered = (fill: number): number[] => {
+    const step = duration / Math.max(1, fill - 1);
+    return cuts.slice(1).flatMap((end, i) => {
+      const start = cuts[i] ?? 0;
+      return Math.floor(start / step) === Math.floor(end / step) ? [(start + end) / 2] : [];
+    });
+  };
+  let fill = count - Math.floor(count / 2);
+  let windows = uncovered(fill);
+  if (windows.length < count - fill) {
+    fill = count - windows.length;
+    windows = uncovered(fill);
+  }
+  const picked = evenlyPicked(windows, count - fill);
   return mergeSampleTimes(
-    Array.from({ length: count }, (_, index) => Math.round(index * step * 1000) / 1000),
+    [...picked, ...uniformTimes(duration, fill)].map((t) => Math.round(t * 1000) / 1000),
   );
+}
+
+/** Looks once more half a second on, where the grid is too sparse to show an overlap is held; each overlap once. */
+function holdProber(driver: CheckAuditDriver, collected: GridSamples, end: number) {
+  const holdS = CONTENT_OVERLAP_HELD_ERROR_MS / 1000;
+  const held = new Set<string>();
+  const keyOf = (issue: AnchoredLayoutIssue) => `${issue.code} ${issue.selector}`;
+  let probes = 0;
+  return async (time: number, next: number, issues: AnchoredLayoutIssue[]): Promise<void> => {
+    const unproven = new Set(issues.map(keyOf).filter((key) => !held.has(key)));
+    const probe = Math.round((time + holdS) * 1000) / 1000;
+    const sparse = next - time > 2 * holdS && probe <= end;
+    if (!unproven.size || !sparse || probes >= OVERLAP_HOLD_PROBES) return;
+    probes += 1;
+    await driver.seekGeometry(probe);
+    const later = await driver.collectOverlap(probe);
+    collected.layoutIssues.push(...later);
+    for (const key of later.map(keyOf)) if (unproven.has(key)) held.add(key);
+  };
+}
+
+async function denseOverlapTimes(
+  driver: CheckAuditDriver,
+  grid: SampleGrid,
+  range?: [number, number],
+): Promise<number[]> {
+  const offset = range?.[0] ?? 0;
+  const edges = (await driver.getClipEdges()).map((time) => time - offset);
+  const overlapTimes = buildOverlapSampleTimes(range ? range[1] - range[0] : grid.duration, edges);
+  return range ? mergeSampleTimes(overlapTimes.map((time) => time + range[0])) : overlapTimes;
 }
 
 /** Reruns content_overlap on a fine grid, unconditionally rather than gated on fingerprint change, since an animation aliased to the sparse grid collides between identical-fingerprint samples. */
@@ -512,15 +661,15 @@ async function collectMotionOverlapSamples(
   range?: [number, number],
 ): Promise<void> {
   const baseTimes = new Set(grid.layoutSamples);
-  const overlapTimes = buildOverlapSampleTimes(range ? range[1] - range[0] : grid.duration);
-  const shiftedTimes = range
-    ? mergeSampleTimes(overlapTimes.map((time) => time + range[0]))
-    : overlapTimes;
-  for (const time of shiftedTimes) {
+  const shiftedTimes = await denseOverlapTimes(driver, grid, range);
+  const probeHold = holdProber(driver, collected, range ? range[1] : grid.duration);
+  const gridIssues = await driver.collectOverlapGrid(shiftedTimes.filter((t) => !baseTimes.has(t)));
+  let sample = 0;
+  for (const [index, time] of shiftedTimes.entries()) {
     if (baseTimes.has(time)) continue;
-    // Settle-free seek: collectOverlap reads getBoundingClientRect geometry, valid synchronously after setTime, so the dense pass skips the per-seek paint settle.
-    await driver.seekGeometry(time);
-    collected.layoutIssues.push(...(await driver.collectOverlap(time)));
+    const issues = gridIssues[sample++] ?? [];
+    collected.layoutIssues.push(...issues);
+    await probeHold(time, shiftedTimes[index + 1] ?? Number.POSITIVE_INFINITY, issues);
   }
 }
 
@@ -1150,6 +1299,7 @@ export async function runAuditGrid(
   driver: CheckAuditDriver,
   options: CheckOptions,
   motion: MotionSpecResolution,
+  helpers: Promise<CheckAuditDriver[]> = Promise.resolve([]),
 ): Promise<CheckBrowserResult> {
   await driver.initialize(options.contrast);
   const grid = await buildSampleGrid(driver, options);
@@ -1159,7 +1309,7 @@ export async function runAuditGrid(
     grid.duration,
   );
   const seekLoopStart = Date.now();
-  const collected = await collectGridSamples(driver, options, grid, plan);
+  const collected = await collectGridSamples(driver, options, grid, plan, helpers);
   const seekLoopMs = Date.now() - seekLoopStart;
 
   let motionIssues = plan.preflightIssues;
@@ -1232,6 +1382,7 @@ export async function runCheckPipeline(
   dependencies: CheckDependencies = DEFAULT_DEPENDENCIES,
 ): Promise<CheckReport> {
   beginCheckSnapshots(project.dir);
+  const prelaunched = dependencies.prelaunchBrowser?.(project, options).catch(() => undefined);
   try {
     let lintResult: ProjectLintResult;
     const lintStartedAt = Date.now();
@@ -1290,8 +1441,9 @@ export async function runCheckPipeline(
     try {
       let browser: CheckBrowserResult;
       try {
+        const browserAhead = await prelaunched;
         browser = await deadline.run(() =>
-          dependencies.runBrowserCheck(project, options, motion, deadline),
+          dependencies.runBrowserCheck(project, options, motion, deadline, browserAhead),
         );
       } catch (error) {
         browser = emptyBrowserResult();
@@ -1342,6 +1494,7 @@ export async function runCheckPipeline(
     if (outcome.kind === "failed") throw outcome.error;
     return outcome.report;
   } finally {
+    await (await prelaunched)?.discard();
     await finishCheckSnapshots(project.dir).catch(() => undefined);
   }
 }
@@ -1795,11 +1948,23 @@ async function runBrowserCheck(
   options: CheckOptions,
   motion: MotionSpecResolution,
   deadline?: CheckDeadline,
+  prelaunched?: PrelaunchedBrowser,
 ): Promise<CheckBrowserResult> {
   const module = await import("./checkBrowser.js");
   // runAuditGrid is handed over as a callback so checkBrowser never imports
   // this module back (no import cycle).
-  return module.runBrowserCheck(project, options, motion, runAuditGrid, deadline);
+  return module.runBrowserCheck(project, options, motion, runAuditGrid, deadline, prelaunched);
+}
+
+// Chrome boots while lint, hdr and bundling run; the source index guesses the bundle's launch arguments.
+async function prelaunchBrowser(
+  project: ProjectDir,
+  options: CheckOptions,
+): Promise<PrelaunchedBrowser | undefined> {
+  const html = await readFile(project.indexPath, "utf8").catch(() => undefined);
+  if (html === undefined) return undefined;
+  const { prelaunchCompositionBrowser } = await import("../capture/captureCompositionFrame.js");
+  return prelaunchCompositionBrowser(html, options.browserGpuMode);
 }
 
 async function writeSnapshot(
@@ -1831,6 +1996,7 @@ const DEFAULT_DEPENDENCIES: CheckDependencies = {
   lintProject,
   resolveMotionSpec,
   runBrowserCheck,
+  prelaunchBrowser,
   writeSnapshot,
   captureFindingCrops,
   inspectHdrAutoPromotion,

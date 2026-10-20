@@ -30,6 +30,8 @@ vi.mock("@hyperframes/engine", () => ({
   assertWebGpuAdapterAvailable: mocks.assertWebGpuAdapterAvailable,
   resolveConfig: mocks.resolveConfig,
   usesSoftwareWebGpu: mocks.usesSoftwareWebGpu,
+  DEFAULT_CONFIG: { pageNavigationTimeout: 60_000 },
+  resolvePageNavigationTimeout: () => 60_000,
 }));
 
 import { openSettledCompositionPage } from "./captureCompositionFrame.js";
@@ -57,6 +59,11 @@ function fakeBrowser() {
     evaluateOnNewDocument: vi.fn(async () => undefined),
     setViewport: vi.fn(async () => undefined),
     goto: vi.fn(async () => undefined),
+    createCDPSession: async () => ({
+      send: async () => undefined,
+      on: () => undefined,
+      detach: async () => undefined,
+    }),
     waitForFunction: vi.fn(async () => undefined),
     evaluate: vi.fn(async () => undefined),
     setRequestInterception: vi.fn(async (_on: boolean) => undefined),
@@ -216,7 +223,11 @@ describe("openSettledCompositionPage when nothing may listen", () => {
       await openSettledCompositionPage(HTML, server.url, OPTIONS);
 
       expect(launched().pipe).toBe(true);
-      expect(launched().args).toEqual(["--headless", "--single-process"]);
+      expect(launched().args).toEqual([
+        "--headless",
+        "--single-process",
+        "--disable-gpu-compositing",
+      ]);
       expect(opened.page.setRequestInterception).toHaveBeenCalledWith(true);
       const onRequest = opened.page.on.mock.calls.find(([event]) => event === "request")![1];
       const respond = vi.fn(async (_response: { status: number; body: Buffer }) => undefined);
