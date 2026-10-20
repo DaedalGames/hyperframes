@@ -561,7 +561,7 @@ export function buildPublishFileMap(projectDir: string): Map<string, Buffer> {
  * rather than of its contents, which is the opposite of what a
  * content-addressed artifact needs.
  *
- * Built from local components on purpose: `fromDate2DOS` reads `getFullYear`,
+ * Built from local components on purpose: adm-zip's DOS date encoding reads `getFullYear`,
  * `getMonth`, `getHours` and friends, so a fixed *instant* would still encode
  * differently in different timezones. Fixing the wall-clock reading is what
  * makes the bytes match across machines. 1980-01-01 is the earliest a DOS

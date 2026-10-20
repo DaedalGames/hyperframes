@@ -25,7 +25,7 @@ import { failCommand } from "../../utils/commandResult.js";
  *
  * Auth comes from the existing `cli/src/auth/` chain via `cloud/auth.ts`.
  * The cloud HTTP client (`cloud/_gen/client.ts`) is generated from
- * `experiment-framework/openapi/external-api.json`; never hand-edit it.
+ * HeyGen's external API OpenAPI spec; never hand-edit it.
  */
 
 import { defineCommand } from "citty";

@@ -172,7 +172,7 @@ describe("offloadHeavyMedia", () => {
       ...opts,
       fetchImpl: fakeHead(404, 0),
     });
-    // Served, but not the size uploaded: the asset was replaced.
+    // Served, but at a size other than the one uploaded.
     await offloadHeavyMedia(dir, buildPublishFileMap(dir), {
       ...opts,
       fetchImpl: fakeHead(200, HEAVY.byteLength - 1),
