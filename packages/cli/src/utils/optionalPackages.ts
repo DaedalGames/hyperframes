@@ -122,10 +122,15 @@ export async function loadSharpInBackground(
 ): Promise<Sharp> {
   const present = loadInstalledSharp(feature, deps, besideCli);
   if (present !== null) return present;
-  backgroundSharpInstall ??= loadOrInstall("sharp", feature, deps).catch((err: unknown) =>
-    deps.log((err as Error).message),
-  );
-  throw new Error(`sharp is not installed yet; installing it once for ${feature}`);
+  const install = loadOrInstall("sharp", feature, deps);
+  if (backgroundSharpInstall !== install) {
+    backgroundSharpInstall = install;
+    install.catch((err: unknown) => deps.log((err as Error).message));
+  }
+  const notYet = Symbol("installing");
+  const settled = await Promise.race([install, notYet]);
+  if (settled === notYet) throw new Error(`sharp is not installed yet; installing it once for ${feature}`);
+  return sharpExport(settled);
 }
 
 function loadInstalledSharp(
@@ -161,19 +166,40 @@ function sharpExport(module: unknown): Sharp {
   return m.default ?? m;
 }
 
-async function loadOrInstall(
+/** `1` turns off every first-use install; a comma-separated list turns off just those packages. */
+function installTurnedOff(name: FirstUsePackage): boolean {
+  const value = process.env["HYPERFRAMES_NO_OPTIONAL_INSTALL"]?.trim() ?? "";
+  return value === "1" || value.split(",").some((entry) => entry.trim() === name);
+}
+
+const installs = new WeakMap<OptionalPackageDeps, Map<FirstUsePackage, Promise<unknown>>>();
+
+/** One install per package per process: concurrent and later callers share its result, failure included. */
+function loadOrInstall(
   name: FirstUsePackage,
   feature: string,
   deps: OptionalPackageDeps,
 ): Promise<unknown> {
   const present = loadPresent(name, deps);
-  if (present !== null) return present;
+  if (present !== null) return Promise.resolve(present);
+  let pending = installs.get(deps);
+  if (!pending) installs.set(deps, (pending = new Map()));
+  let install = pending.get(name);
+  if (!install) pending.set(name, (install = installAndLoad(name, feature, deps)));
+  return install;
+}
+
+async function installAndLoad(
+  name: FirstUsePackage,
+  feature: string,
+  deps: OptionalPackageDeps,
+): Promise<unknown> {
   const dir = optionalPackageDir(name, deps.cacheDir);
 
   const version = versionOf(name);
-  if (process.env["HYPERFRAMES_NO_OPTIONAL_INSTALL"] === "1") {
+  if (installTurnedOff(name)) {
     throw new Error(
-      `${name} is not installed and HYPERFRAMES_NO_OPTIONAL_INSTALL=1 turns off installing it; ${feature} needs it.`,
+      `${name} is not installed, and HYPERFRAMES_NO_OPTIONAL_INSTALL turns off installing it; ${feature} needs it.`,
     );
   }
   deps.log(`installing ${name} for ${feature}, once`);

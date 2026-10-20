@@ -163,6 +163,21 @@ describe("loadSharp", () => {
     expect(log.mock.calls).toEqual([["installing sharp for compare, once"]]);
   });
 
+  it("runs one install for concurrent callers, and does not retry a failed one", async () => {
+    const { deps, install } = fakeDeps();
+    const loaded = await Promise.all([1, 2, 3].map(() => loadSharp("compare", deps, absent)));
+    expect(new Set(loaded).size).toBe(1);
+    expect(install).toHaveBeenCalledTimes(1);
+
+    const offline = vi.fn(async () => {
+      throw new Error("npm error code ENOTFOUND");
+    });
+    const failing = fakeDeps({ install: offline }).deps;
+    await expect(loadSharp("compare", failing, absent)).rejects.toThrow(/ENOTFOUND/);
+    await expect(loadSharp("compare", failing, absent)).rejects.toThrow(/ENOTFOUND/);
+    expect(offline).toHaveBeenCalledTimes(1);
+  });
+
   it("offline with no cached copy, fails with the command to run", async () => {
     const { deps } = fakeDeps({
       install: async () => {
@@ -177,19 +192,42 @@ describe("loadSharp", () => {
     );
   });
 
-  it("with HYPERFRAMES_NO_OPTIONAL_INSTALL=1, fails fast with a stable message instead of installing", async () => {
-    vi.stubEnv("HYPERFRAMES_NO_OPTIONAL_INSTALL", "1");
+  it.each(["1", " sharp , onnxruntime-node "])(
+    "with HYPERFRAMES_NO_OPTIONAL_INSTALL=%s, fails fast with a stable message instead of installing",
+    async (value) => {
+      vi.stubEnv("HYPERFRAMES_NO_OPTIONAL_INSTALL", value);
+      try {
+        const { deps, install, log } = fakeDeps();
+
+        await expect(loadSharp("compare", deps, absent)).rejects.toThrow(
+          "sharp is not installed, and HYPERFRAMES_NO_OPTIONAL_INSTALL turns off installing it; compare needs it.",
+        );
+        await expect(
+          loadOptionalPackage("onnxruntime-node", "background removal", deps),
+        ).rejects.toThrow("onnxruntime-node is not installed, and HYPERFRAMES_NO_OPTIONAL_INSTALL");
+        expect(install).not.toHaveBeenCalled();
+        expect(log).not.toHaveBeenCalled();
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    },
+  );
+
+  it("with a package list, still installs the packages it does not name", async () => {
+    vi.stubEnv("HYPERFRAMES_NO_OPTIONAL_INSTALL", "sharp");
     try {
-      const { deps, install, log } = fakeDeps();
+      const { deps, install } = fakeDeps();
 
       await expect(loadSharp("compare", deps, absent)).rejects.toThrow(
-        "sharp is not installed and HYPERFRAMES_NO_OPTIONAL_INSTALL=1 turns off installing it; compare needs it.",
+        "HYPERFRAMES_NO_OPTIONAL_INSTALL turns off installing it",
       );
-      await expect(
-        loadOptionalPackage("onnxruntime-node", "background removal", deps),
-      ).rejects.toThrow("onnxruntime-node is not installed and HYPERFRAMES_NO_OPTIONAL_INSTALL=1");
-      expect(install).not.toHaveBeenCalled();
-      expect(log).not.toHaveBeenCalled();
+      await loadOptionalPackage("@google/genai", "--describe", deps);
+      expect(install).toHaveBeenCalledTimes(1);
+      expect(install).toHaveBeenCalledWith(
+        optionalPackageDir("@google/genai", "/cache"),
+        "@google/genai",
+        OPTIONAL_PACKAGES["@google/genai"],
+      );
     } finally {
       vi.unstubAllEnvs();
     }
@@ -226,6 +264,21 @@ describe("loadSharpInBackground", () => {
 
     finish();
     expect(await load()).toBe(sharp);
+  });
+
+  it("says why when installing is off, instead of promising an install", async () => {
+    vi.stubEnv("HYPERFRAMES_NO_OPTIONAL_INSTALL", "1");
+    try {
+      const { deps, install, log } = fakeDeps();
+      const load = () => loadSharpInBackground("image thumbnails", deps, () => null);
+
+      await expect(load()).rejects.toThrow("HYPERFRAMES_NO_OPTIONAL_INSTALL turns off installing it");
+      await expect(load()).rejects.toThrow("HYPERFRAMES_NO_OPTIONAL_INSTALL turns off installing it");
+      expect(install).not.toHaveBeenCalled();
+      expect(log).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 

@@ -22,7 +22,7 @@ function errorMessage(err: unknown): string {
 }
 
 function isPuppeteerTimeoutError(err: unknown): err is Error {
-  return err instanceof Error && !(err instanceof DOMException) && err.name === "TimeoutError";
+  return err instanceof Error && err.constructor.name === "TimeoutError";
 }
 
 function hasNavigationTimeoutMessage(msg: string): boolean {

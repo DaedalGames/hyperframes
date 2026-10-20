@@ -60,7 +60,7 @@ function shotFailure(err: unknown, file: string, scrollY: number | null): Screen
   const message = normalizeErrorMessage(err);
   // puppeteer-core 25 exports no class for a closed page or session, only these messages.
   const closed =
-    (err instanceof Error && err.name === "ConnectionClosedError") ||
+    (err instanceof Error && err.constructor.name === "ConnectionClosedError") ||
     /\b(target|session) closed\b/i.test(message);
   if (closed || err instanceof CaptureDirRefusedError || isDegradableEvaluateTimeoutError(err))
     throw err;
