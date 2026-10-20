@@ -183,38 +183,32 @@ function score(page: PageResult) {
 
 // The same media played natively, without the player: separates browser decoder drops from runtime-caused ones.
 const CONTROLS = [
-  { name: "grid-sample", media: "grid-sample", n: 10, rate: 1 },
-  { name: "grid-sample-rate-1.03", media: "grid-sample", n: 10, rate: 1.03 },
+  { name: "grid-native", media: "grid-sample", n: 10, rate: 1 },
+  { name: "grid-in-iframe", media: "grid-sample", n: 10, rate: 1, extra: "&frame=plain" },
+  { name: "grid-in-scaled-iframe", media: "grid-sample", n: 10, rate: 1, extra: "&frame=scaled" },
   {
-    name: "grid-sample-tick",
+    name: "grid-scaled-tiles",
     media: "grid-sample",
     n: 10,
     rate: 1,
-    extra: "&tick=1",
+    extra: "&frame=scaled&tiles=1",
   },
   {
-    name: "grid-sample-animate",
+    name: "grid-scaled-tiles-animated",
     media: "grid-sample",
     n: 10,
     rate: 1,
-    extra: "&animate=scale",
+    extra: "&frame=scaled&tiles=1&animate=scale",
   },
   {
-    name: "grid-sample-translate",
+    name: "grid-scaled-tiles-animated-steered",
     media: "grid-sample",
     n: 10,
-    rate: 1,
-    extra: "&animate=translate",
+    rate: 1.03,
+    extra: "&frame=scaled&tiles=1&animate=scale&tick=1",
   },
-  {
-    name: "grid-sample-css",
-    media: "grid-sample",
-    n: 10,
-    rate: 1,
-    extra: "&animate=css",
-  },
-  { name: "16x1080", media: "h264-1080", n: 16, rate: 1 },
-  { name: "alpha-webm", media: "alpha-vp9", n: 6, rate: 1 },
+  { name: "16x1080-native", media: "h264-1080", n: 16, rate: 1 },
+  { name: "16x1080-in-scaled-iframe", media: "h264-1080", n: 16, rate: 1, extra: "&frame=scaled" },
 ];
 
 // Opens a page and returns the value it publishes on window[global] once it has one.
