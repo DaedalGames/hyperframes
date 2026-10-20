@@ -642,6 +642,27 @@ describe("offloadHeavyMedia", () => {
     expect(fileMap.has("media/b.mp4")).toBe(true);
   });
 
+  it("keeps a heavy file a script builds from split strings in the zip", async () => {
+    const dir = project({
+      "index.html": html(
+        `<video id="v" data-start="0" data-duration="2"></video><script>v.src = "media/" + "clip" + ".mp4";</script>`,
+      ),
+      "media/clip.mp4": HEAVY,
+    });
+    const fileMap = buildPublishFileMap(dir);
+    const upload = fakeUpload();
+
+    const report = await offloadHeavyMedia(dir, fileMap, {
+      apiBaseUrl: "https://api.example",
+      upload,
+      cachePath: cachePath(),
+    });
+
+    expect(report).toEqual([]);
+    expect(upload).not.toHaveBeenCalled();
+    expect(fileMap.has("media/clip.mp4")).toBe(true);
+  });
+
   it("never decodes a media file as text, since one can exceed the longest string allowed", async () => {
     const dir = project({
       "index.html": html(`<video src="clip.mp4"></video>`),
