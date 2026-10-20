@@ -1,8 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { realpathSync } from "node:fs";
 
-const WATCHDOG_PROFILE_ENV = "HF_CHROME_PROFILE";
-
-const SWEEP = `$p=$env:${WATCHDOG_PROFILE_ENV}; Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine.Contains($p) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
+const SWEEP = `$b=[int]$env:HF_CHROME_PID; $x=$env:HF_CHROME_EXE; Get-CimInstance Win32_Process | Where-Object { ($_.ProcessId -eq $b -or $_.ParentProcessId -eq $b) -and $_.ExecutablePath -eq $x } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
 
 const WATCHDOG = `let clean = false;
 const done = () => {
@@ -17,18 +16,21 @@ export interface ChromeWatchdog {
   release(clean: boolean): void;
 }
 
-function profileOf(chrome: ChildProcess): string | undefined {
-  const arg = chrome.spawnargs.find((value) => value.startsWith("--user-data-dir="));
-  return arg?.slice("--user-data-dir=".length).replace(/^"|"$/g, "") || undefined;
+function executableOf(chrome: ChildProcess): string | undefined {
+  try {
+    return realpathSync.native(chrome.spawnfile);
+  } catch {
+    return undefined;
+  }
 }
 
-/** Windows does not end a process's children with it: this sweeps the profile's processes once the CLI is gone. */
+/** Windows does not end a process's children with it, so Chrome's children outlive a killed CLI without this. */
 export function watchChromeTree(chrome: ChildProcess): ChromeWatchdog | undefined {
-  const profile = profileOf(chrome);
-  if (process.platform !== "win32" || !profile) return undefined;
+  const executable = process.platform === "win32" ? executableOf(chrome) : undefined;
+  if (!executable || chrome.pid === undefined) return undefined;
   const watchdog = spawn(process.execPath, ["-e", WATCHDOG], {
     detached: true,
-    env: { ...process.env, [WATCHDOG_PROFILE_ENV]: profile },
+    env: { ...process.env, HF_CHROME_PID: String(chrome.pid), HF_CHROME_EXE: executable },
     stdio: ["pipe", "ignore", "ignore"],
     windowsHide: true,
   });
