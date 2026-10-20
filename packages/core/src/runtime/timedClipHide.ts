@@ -1,3 +1,4 @@
+import { CLIP_HIDDEN_ATTR, liftClipHiddenMark } from "./clipReveal";
 import {
   RUNTIME_STAMPED_ATTR,
   STUDIO_PREVIEW_MARK_META,
@@ -12,20 +13,26 @@ const HIDE_UNTIL_FIRST_PASS =
   "[data-start]:not(video, audio, img) { visibility: hidden !important; }";
 const PREVIEW_HIDE_UNTIL_FIRST_PASS = 'img[loading="lazy"] { display: none !important; }';
 const SKIP_ATTR = "data-hf-skip-hidden-images";
-export const SKIPPED_CLIP = `[data-start]:not(video, audio, img, [${STUDIO_PREVIEW_UPCOMING_ATTR}], [${RUNTIME_STAMPED_ATTR}])[style*="visibility: hidden"]`;
+// Injected rules match the visibility pass's mark, never inline style: a [style] selector above other
+// elements makes WebKit re-serialize an element's whole inline style on every write, as GSAP does per frame.
+export { CLIP_HIDDEN_ATTR };
+export const SKIPPED_CLIP = `[data-start]:not(video, audio, img, [${STUDIO_PREVIEW_UPCOMING_ATTR}], [${RUNTIME_STAMPED_ATTR}])[${CLIP_HIDDEN_ATTR}]`;
 const SKIP_HIDDEN_IMAGES = `${SKIPPED_CLIP} img { display: none !important; }`;
 const STUDIO_PREVIEW_MARK = `meta[name="${STUDIO_PREVIEW_MARK_META}"]`;
-export const CLIP_HIDDEN_ATTR = "data-hf-clip-hidden";
 const CONTENTS_ATTR = "data-hf-hidden-clip-contents";
-const HIDDEN_CLIP = `[${CLIP_HIDDEN_ATTR}][style*="visibility: hidden"]`;
+const HIDDEN_CLIP = `[${CLIP_HIDDEN_ATTR}]`;
 const HIDE_HIDDEN_CLIP_CONTENTS = `${HIDDEN_CLIP} * { visibility: hidden !important; }`;
 const HIDE_SVG_GENERATED_FILTER_OUTPUT = `svg${HIDDEN_CLIP}, svg${HIDDEN_CLIP} *, ${HIDDEN_CLIP} svg, ${HIDDEN_CLIP} svg * { filter: none !important; }`;
 
 export function showHiddenClips(): () => void {
   const hidden = Array.from(document.querySelectorAll<HTMLElement>(`[${CLIP_HIDDEN_ATTR}]`));
-  for (const el of hidden) el.style.visibility = "visible";
+  const putMarksBack = hidden.map((el) => {
+    el.style.visibility = "visible";
+    return liftClipHiddenMark(el);
+  });
   return () => {
     for (const el of hidden) el.style.visibility = "hidden";
+    for (const putMarkBack of putMarksBack) putMarkBack();
   };
 }
 

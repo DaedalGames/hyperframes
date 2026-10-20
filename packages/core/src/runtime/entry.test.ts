@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HF_COLOR_GRADING_ATTR, serializeHfColorGrading } from "../colorGrading";
 import { STUDIO_PREVIEW_LAZY_ATTR, STUDIO_PREVIEW_MARK_META } from "../studioPreviewMark";
+import { liftClipHiddenMark } from "./clipReveal";
 import type { RuntimeTimelineLike } from "./types";
 
 function pausedTimeline(duration: number): RuntimeTimelineLike {
@@ -226,6 +227,7 @@ describe("runtime entry", () => {
     window.__player?.seek(0);
     // How Studio's layer reveal shows a hidden clip.
     later.style.visibility = "visible";
+    liftClipHiddenMark(later);
     expect(imageSkipped(later)).toEqual([false]);
   });
 

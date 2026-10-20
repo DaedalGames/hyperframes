@@ -1,3 +1,4 @@
+import { liftClipHiddenMark } from "@hyperframes/core/runtime/clip-reveal";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePlayerStore, liveTime } from "../player/store/playerStore";
 import { frameToSeconds, secondsToFrame } from "../player/lib/time";
@@ -36,6 +37,8 @@ interface GsapRuntime {
   maxSeekTime: number;
   savedVisibility: string;
   savedTranslate: string;
+  /** Puts back the runtime's hidden-clip mark the preview lifted when it forced the element visible. */
+  putMarkBack: (() => void) | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -107,6 +110,7 @@ function connectGsapRuntime(
           elementEndTime != null && elementEndTime < tlDuration ? elementEndTime : tlDuration,
         savedVisibility: element.style.visibility,
         savedTranslate: element.style.getPropertyValue("translate"),
+        putMarkBack: null,
       };
     }
   } catch {
@@ -125,6 +129,7 @@ function applyRuntimePreview(
   runtime.element.style.setProperty("translate", "none");
   runtime.gsap.set(runtime.element, { ...properties });
   runtime.element.style.visibility = "visible";
+  runtime.putMarkBack ??= liftClipHiddenMark(runtime.element);
   liveTime.notify(seekTime);
   usePlayerStore.getState().setCurrentTime(seekTime);
 }
@@ -251,6 +256,7 @@ function releaseRuntimePreview(r: RecordingRefs): void {
   if (!runtime) return;
   const { element, savedVisibility, savedTranslate } = runtime;
   element.style.visibility = savedVisibility;
+  runtime.putMarkBack?.();
   element.style.setProperty("translate", savedTranslate || "");
   try {
     runtime.gsap.set(runtime.element, {
