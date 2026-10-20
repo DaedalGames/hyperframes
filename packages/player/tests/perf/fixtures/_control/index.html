@@ -18,7 +18,8 @@
   </head>
   <body>
     <script>
-      // ?src=&n=&rate=, plus &tick=1 (the runtime's per-frame media writes) or &animate=1 (transform every frame).
+      // ?src=&n=&rate=, &tick=1 (per-frame media writes),
+      // &animate=scale|translate|css (ancestor transform every frame; css runs on the compositor).
       (async function () {
         var q = new URLSearchParams(location.search);
         var videos = [];
@@ -59,18 +60,40 @@
             requestAnimationFrame(tick);
           })();
         }
-        if (q.get("animate")) {
+        var animate = q.get("animate");
+        if (animate === "css") {
+          document.body.animate([{ transform: "scale(0.85)" }, { transform: "scale(0.95)" }], {
+            duration: 1000,
+            iterations: Infinity,
+            direction: "alternate",
+          });
+        } else if (animate) {
           (function frame(t) {
-            document.body.style.transform = "scale(" + (0.9 + 0.05 * Math.sin(t / 500)) + ")";
+            var k = Math.sin(t / 500);
+            document.body.style.transform =
+              animate === "translate"
+                ? "translateX(" + 40 * k + "px)"
+                : "scale(" + (0.9 + 0.05 * k) + ")";
             requestAnimationFrame(frame);
           })(0);
         }
+        var presented = 0;
+        var counting = true;
+        videos.forEach(function onFrame(v) {
+          v.requestVideoFrameCallback(function again() {
+            if (!counting) return;
+            presented++;
+            v.requestVideoFrameCallback(again);
+          });
+        });
         var before = decoded();
         await new Promise((r) => setTimeout(r, 8000));
+        counting = false;
         var after = decoded();
         window.__control = {
           dropped: after.dropped - before.dropped,
           total: after.total - before.total,
+          presentedFps: Math.round((presented / videos.length / 8) * 10) / 10,
         };
       })().catch((e) => (window.__control = { error: String(e) }));
     </script>

@@ -100,6 +100,7 @@ type PageResult = {
   frames: Array<{ ts: number; work: number | null; script: number | null; comp: number }>;
   decoded: { dropped: number; total: number };
   droppedTimeline: number[];
+  presentedFps: number | null;
   mediaOps: Record<"seek" | "rate" | "play" | "pause" | "load", number>;
   seeks: Array<{ target: number; ms: number; timedOut: boolean }>;
 };
@@ -138,6 +139,7 @@ function score(page: PageResult) {
     decoderFrames: page.decoded.total,
     mediaSeeks: page.mediaOps.seek,
     rateWrites: page.mediaOps.rate,
+    presentedFps: page.presentedFps,
     seekP50Ms: round(percentile(seekMs, 50)),
     seekP95Ms: round(percentile(seekMs, 95)),
     seekTimeouts: page.seeks.filter((s) => s.timedOut).length,
@@ -160,7 +162,21 @@ const CONTROLS = [
     src: "/fixtures/10-video-grid/sample.mp4",
     n: 10,
     rate: 1,
-    extra: "&animate=1",
+    extra: "&animate=scale",
+  },
+  {
+    name: "grid-sample-translate",
+    src: "/fixtures/10-video-grid/sample.mp4",
+    n: 10,
+    rate: 1,
+    extra: "&animate=translate",
+  },
+  {
+    name: "grid-sample-css",
+    src: "/fixtures/10-video-grid/sample.mp4",
+    n: 10,
+    rate: 1,
+    extra: "&animate=css",
   },
   { name: "16x1080", src: "/fixtures/_media/h264-1080.mp4", n: 16, rate: 1 },
   { name: "alpha-webm", src: "/fixtures/_media/alpha-vp9.webm", n: 6, rate: 1 },
@@ -187,7 +203,7 @@ async function runControl(
         args: [],
       });
       if (r?.error) throw new Error(r.error);
-      if (r) return r as { dropped: number; total: number };
+      if (r) return r as { dropped: number; total: number; presentedFps: number };
       await Bun.sleep(500);
     }
     throw new Error("control did not finish within 60 s");
@@ -288,6 +304,7 @@ try {
             fixture: `control:${c.name}`,
             run: 1,
             decoderDropped: r.dropped,
+            presentedFps: r.presentedFps,
             decoderFrames: r.total,
           });
           console.log(JSON.stringify(rows[rows.length - 1]));
@@ -318,6 +335,7 @@ const cols = [
   "clockRatio",
   "decoderDropped",
   "decoderFrames",
+  "presentedFps",
   "mediaSeeks",
   "rateWrites",
   "seekP50Ms",
