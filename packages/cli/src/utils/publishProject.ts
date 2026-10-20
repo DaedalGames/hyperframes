@@ -130,25 +130,20 @@ function getUploadHeaders(
     }
   }
 
-  if (!Object.keys(headers).some((key) => key.toLowerCase() === "content-type")) {
-    headers["content-type"] = contentType;
+  setHeaderIfAbsent(headers, "content-type", contentType);
+  const signedHeaders =
+    new URL(uploadUrl).searchParams.get("X-Amz-SignedHeaders")?.split(";") ?? [];
+  if (signedHeaders.includes("x-amz-server-side-encryption")) {
+    setHeaderIfAbsent(headers, "x-amz-server-side-encryption", "AES256");
   }
-
-  const signedHeaders = new URL(uploadUrl).searchParams.get("X-Amz-SignedHeaders");
-  if (
-    signedHeaders?.split(";").includes("x-amz-server-side-encryption") &&
-    !Object.keys(headers).some((key) => key.toLowerCase() === "x-amz-server-side-encryption")
-  ) {
-    headers["x-amz-server-side-encryption"] = "AES256";
+  if (signedHeaders.includes("content-length")) {
+    setHeaderIfAbsent(headers, "content-length", String(archiveByteLength));
   }
-  if (
-    signedHeaders?.split(";").includes("content-length") &&
-    !Object.keys(headers).some((key) => key.toLowerCase() === "content-length")
-  ) {
-    headers["content-length"] = String(archiveByteLength);
-  }
-
   return headers;
+}
+
+function setHeaderIfAbsent(headers: Record<string, string>, name: string, value: string): void {
+  if (!Object.keys(headers).some((key) => key.toLowerCase() === name)) headers[name] = value;
 }
 
 async function readJson(response: Response): Promise<unknown> {
@@ -383,25 +378,30 @@ function tryResolveExternal(
   return addExternalAsset(ctx, absPath);
 }
 
-function rewriteCssUrls(
-  ctx: ExternalAssetContext,
+/** Resolves a raw attribute or CSS `url()` value (plus the referrer's absolute
+ * directory) to the archive path or absolute URL it should point at, or `null`
+ * to leave it untouched. */
+export type HtmlAttributeResolver = (rawValue: string, referrerAbsDir: string) => string | null;
+
+function referenceFrom(entryPath: string, target: string): string {
+  return isNonRelativeUrl(target) ? target : posix.relative(posix.dirname(entryPath), target);
+}
+
+export function rewriteCssUrls(
   css: string,
   referrerAbsDir: string,
   entryPath: string,
+  resolveTarget: HtmlAttributeResolver,
 ): { css: string; modified: boolean } {
   let modified = false;
   const rewritten = css.replace(CSS_URL_RE, (full, quote: string, rawUrl: string) => {
-    const archivePath = tryResolveExternal(ctx, (rawUrl || "").trim(), referrerAbsDir);
-    if (!archivePath) return full;
+    const target = resolveTarget((rawUrl || "").trim(), referrerAbsDir);
+    if (!target) return full;
     modified = true;
-    return `url(${quote || ""}${posix.relative(posix.dirname(entryPath), archivePath)}${quote || ""})`;
+    return `url(${quote || ""}${referenceFrom(entryPath, target)}${quote || ""})`;
   });
   return { css: rewritten, modified };
 }
-
-/** Resolves a raw attribute value (plus the referrer's absolute directory) to
- * the archive path it should point at, or `null` to leave it untouched. */
-export type HtmlAttributeResolver = (rawValue: string, referrerAbsDir: string) => string | null;
 
 interface RewriteHtmlAttributesOptions {
   /** Attributes to inspect (default: src + href, matching the external-asset
@@ -436,26 +436,26 @@ export function rewriteHtmlAttributes(
     for (const attr of attrs) {
       const val = (el.getAttribute(attr) || "").trim();
       if (!val) continue;
-      const archivePath = resolveTarget(val, referrerAbsDir);
-      if (!archivePath) continue;
-      el.setAttribute(attr, posix.relative(posix.dirname(entryPath), archivePath));
+      const target = resolveTarget(val, referrerAbsDir);
+      if (!target) continue;
+      el.setAttribute(attr, referenceFrom(entryPath, target));
       modified = true;
     }
   }
   return modified;
 }
 
-function rewriteStyleBlocks(
-  ctx: ExternalAssetContext,
+export function rewriteStyleBlocks(
   document: Document,
   referrerAbsDir: string,
   entryPath: string,
+  resolveTarget: HtmlAttributeResolver,
 ): boolean {
   let modified = false;
   for (const styleEl of document.querySelectorAll("style")) {
     const css = styleEl.textContent || "";
     if (!css.includes("url(")) continue;
-    const result = rewriteCssUrls(ctx, css, referrerAbsDir, entryPath);
+    const result = rewriteCssUrls(css, referrerAbsDir, entryPath, resolveTarget);
     if (result.modified) {
       styleEl.textContent = result.css;
       modified = true;
@@ -464,7 +464,7 @@ function rewriteStyleBlocks(
   for (const el of document.querySelectorAll("[style]")) {
     const style = el.getAttribute("style") || "";
     if (!style.includes("url(")) continue;
-    const result = rewriteCssUrls(ctx, style, referrerAbsDir, entryPath);
+    const result = rewriteCssUrls(style, referrerAbsDir, entryPath, resolveTarget);
     if (result.modified) {
       el.setAttribute("style", result.css);
       modified = true;
@@ -476,10 +476,9 @@ function rewriteStyleBlocks(
 function localizeHtmlEntry(ctx: ExternalAssetContext, entryPath: string, content: Buffer): void {
   const referrerAbsDir = resolve(ctx.absProjectDir, dirname(entryPath));
   const { document } = parseHTML(content.toString("utf-8"));
-  const attrsChanged = rewriteHtmlAttributes(document, referrerAbsDir, entryPath, (val, dir) =>
-    tryResolveExternal(ctx, val, dir),
-  );
-  const stylesChanged = rewriteStyleBlocks(ctx, document, referrerAbsDir, entryPath);
+  const resolveTarget: HtmlAttributeResolver = (val, dir) => tryResolveExternal(ctx, val, dir);
+  const attrsChanged = rewriteHtmlAttributes(document, referrerAbsDir, entryPath, resolveTarget);
+  const stylesChanged = rewriteStyleBlocks(document, referrerAbsDir, entryPath, resolveTarget);
   if (attrsChanged || stylesChanged) {
     ctx.fileContents.set(entryPath, Buffer.from(document.toString(), "utf-8"));
   }
@@ -489,7 +488,9 @@ function localizeCssEntry(ctx: ExternalAssetContext, entryPath: string, content:
   const referrerAbsDir = resolve(ctx.absProjectDir, dirname(entryPath));
   const css = content.toString("utf-8");
   if (!css.includes("url(")) return;
-  const result = rewriteCssUrls(ctx, css, referrerAbsDir, entryPath);
+  const result = rewriteCssUrls(css, referrerAbsDir, entryPath, (val, dir) =>
+    tryResolveExternal(ctx, val, dir),
+  );
   if (result.modified) {
     ctx.fileContents.set(entryPath, Buffer.from(result.css, "utf-8"));
   }

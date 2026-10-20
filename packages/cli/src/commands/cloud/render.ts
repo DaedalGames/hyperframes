@@ -61,7 +61,13 @@ import {
 } from "../../cloud/index.js";
 import { reportApiError } from "../../cloud/errors.js";
 import { parseEnumFlag, parseIntFlag, parseNumericFlag } from "../../cloud/parsing.js";
-import { uploadZipViaDirectUpload } from "../../cloud/upload.js";
+import { uploadAssetViaDirectUpload, uploadZipViaDirectUpload } from "../../cloud/upload.js";
+import {
+  offloadHeavyMedia,
+  type OffloadedMedia,
+  type OffloadOptions,
+} from "../../cloud/offload.js";
+import { resolveCloudBaseUrl } from "../../cloud/auth.js";
 import { colorStatus } from "../../cloud/statusColor.js";
 import type {
   CreateHyperframesRenderRequest,
@@ -244,7 +250,7 @@ export default defineCommand({
 
     if (args["dry-run"]) {
       if (project.kind !== "dir") throw new Error("Dry-run project must be a local directory");
-      reportDryRun(prepareLocalArchive(project, args.composition, asJson), asJson);
+      reportDryRun(await prepareLocalArchive(project, args.composition, asJson), asJson);
       return;
     }
 
@@ -257,7 +263,11 @@ export default defineCommand({
 
     const client = await createCloudClient();
     const preparedArchive =
-      project.kind === "dir" ? prepareLocalArchive(project, args.composition, asJson) : undefined;
+      project.kind === "dir"
+        ? await prepareLocalArchive(project, args.composition, asJson, (file) =>
+            uploadAssetViaDirectUpload({ client, ...file }),
+          )
+        : undefined;
 
     const upload = await maybeUploadProject(
       client,
@@ -562,7 +572,7 @@ interface UploadResult {
   projectInput: CreateHyperframesRenderRequest["project"];
 }
 
-interface ArchiveFileSummary {
+export interface ArchiveFileSummary {
   path: string;
   size_bytes: number;
 }
@@ -571,6 +581,7 @@ interface PreparedLocalArchive {
   project: ProjectDir;
   archive: PublishArchiveResult;
   largestFiles: ArchiveFileSummary[];
+  offloaded: OffloadedMedia[];
 }
 
 function summarizeLargestFiles(fileMap: Map<string, Buffer>): ArchiveFileSummary[] {
@@ -580,17 +591,36 @@ function summarizeLargestFiles(fileMap: Map<string, Buffer>): ArchiveFileSummary
     .slice(0, LARGEST_FILE_COUNT);
 }
 
-function prepareLocalArchive(
+async function prepareLocalArchive(
   source: ProjectInputSource,
   composition: string | undefined,
   asJson: boolean,
-): PreparedLocalArchive {
+  upload?: OffloadOptions["upload"],
+): Promise<PreparedLocalArchive> {
   const project = resolveProject(source.dir);
   if (!asJson) {
     console.log("");
     console.log(`${c.accent("◆")}  Zipping ${c.accent(project.name)}`);
   }
+  const fileMap = stageProjectFiles(project, composition);
+  const offloaded = await offloadMedia(project, fileMap, asJson, upload);
 
+  const archive = zipPublishFileMap(fileMap);
+  if (!asJson) {
+    console.log(c.dim(`   ${archive.fileCount} files · ${formatBytes(archive.buffer.byteLength)}`));
+  }
+  const prepared = { project, archive, largestFiles: summarizeLargestFiles(fileMap), offloaded };
+  if (upload) assertArchiveFits(archive.buffer.byteLength, prepared.largestFiles);
+  if (!asJson && archive.buffer.byteLength >= ARCHIVE_DIAGNOSTIC_THRESHOLD_BYTES) {
+    reportLargestFiles(prepared);
+  }
+  return prepared;
+}
+
+function stageProjectFiles(
+  project: ProjectDir,
+  composition: string | undefined,
+): Map<string, Buffer> {
   try {
     const fileMap = buildPublishFileMap(project.dir);
     const entryPath = relative(
@@ -602,22 +632,64 @@ function prepareLocalArchive(
         `Composition "${composition ?? "index.html"}" is excluded from the archive. Check .hyperframesignore.`,
       );
     }
-    const archive = zipPublishFileMap(fileMap);
-    if (!asJson) {
-      console.log(
-        c.dim(`   ${archive.fileCount} files · ${formatBytes(archive.buffer.byteLength)}`),
-      );
-    }
-    const prepared = { project, archive, largestFiles: summarizeLargestFiles(fileMap) };
-    if (!asJson && archive.buffer.byteLength >= ARCHIVE_DIAGNOSTIC_THRESHOLD_BYTES) {
-      reportLargestFiles(prepared);
-    }
-    return prepared;
+    return fileMap;
   } catch (err) {
     const msg = normalizeErrorMessage(err);
     errorBox("Zip failed", msg, "Check the project and .hyperframesignore for missing files.");
     failCommand();
   }
+}
+
+async function offloadMedia(
+  project: ProjectDir,
+  fileMap: Map<string, Buffer>,
+  asJson: boolean,
+  upload: OffloadOptions["upload"],
+): Promise<OffloadedMedia[]> {
+  let offloaded: OffloadedMedia[];
+  try {
+    offloaded = await offloadHeavyMedia(project.dir, fileMap, {
+      apiBaseUrl: resolveCloudBaseUrl(),
+      upload,
+      onFile: asJson
+        ? undefined
+        : (item) => console.log(c.dim(`   ${describeOffload(item, !upload)}`)),
+    });
+  } catch (err) {
+    reportApiError("Media upload failed", err);
+  }
+  if (!asJson) {
+    for (const item of offloaded.filter((entry) => entry.kept_in_archive)) {
+      console.log(c.dim(`   ${item.path} also stays in the zip: a script or data file names it`));
+    }
+  }
+  return offloaded;
+}
+
+export function assertArchiveFits(sizeBytes: number, largestFiles: ArchiveFileSummary[]): void {
+  if (sizeBytes <= DIRECT_UPLOAD_LIMIT_BYTES) return;
+  errorBox(
+    "Project too large for cloud render",
+    `The zip is ${formatBytes(sizeBytes)} after moving media to HeyGen assets, over the ${formatBytes(DIRECT_UPLOAD_LIMIT_BYTES)} upload limit. Largest files left in it:\n${largestFiles
+      .map((file) => `  ${formatBytes(file.size_bytes).padStart(9)}  ${file.path}`)
+      .join("\n")}`,
+    "Exclude files the render does not need with .hyperframesignore.",
+  );
+  failCommand();
+}
+
+function describeOffload(item: OffloadedMedia, dryRun: boolean): string {
+  const verb =
+    item.action === "cached"
+      ? "already uploaded"
+      : item.action === "reencode"
+        ? dryRun
+          ? "would re-encode and upload"
+          : "re-encoded and uploaded"
+        : dryRun
+          ? "would upload"
+          : "uploaded";
+  return `${formatBytes(item.size_bytes).padStart(9)}  ${item.path} · ${verb}`;
 }
 
 function reportLargestFiles(prepared: PreparedLocalArchive): void {
@@ -641,6 +713,7 @@ function reportDryRun(prepared: PreparedLocalArchive, asJson: boolean): void {
             upload_limit_bytes: DIRECT_UPLOAD_LIMIT_BYTES,
             exceeds_upload_limit: sizeBytes > DIRECT_UPLOAD_LIMIT_BYTES,
             largest_files: prepared.largestFiles,
+            offloaded_media: prepared.offloaded,
           },
         }),
         null,

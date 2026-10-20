@@ -49,7 +49,7 @@ describe("cloud/errors reportApiError", () => {
     expect(errorBox).toHaveBeenCalledWith(
       "Upload failed (HTTP 413)",
       "project too large",
-      "The zip exceeded the 200 MB limit. Run `hyperframes cloud render --dry-run`, then add only verified-unneeded paths to `.hyperframesignore` or pre-host required large media.",
+      "The zip exceeded the 200 MB limit. Run `hyperframes cloud render --dry-run` to see what stays in it, then add only verified-unneeded paths to `.hyperframesignore`.",
     );
   });
 

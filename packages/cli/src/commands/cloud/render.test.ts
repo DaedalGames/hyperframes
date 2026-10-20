@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 import {
+  assertArchiveFits,
   resolveAspectRatioForSubmit,
   validateDryRunSource,
   validateResolutionFormatCombo,
@@ -113,6 +114,63 @@ describe("cloud render --dry-run", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("cloud render --dry-run with heavy media", () => {
+  it("plans the media as HeyGen asset uploads and leaves it out of the archive", () => {
+    const dir = writeComposition(1920, 1080);
+    writeFileSync(
+      join(dir, "index.html"),
+      `<!doctype html><html><body><div data-composition-id="main" data-width="1920" data-height="1080"><video src="clip.mp4"></video></div></body></html>`,
+      "utf-8",
+    );
+    writeFileSync(join(dir, "clip.mp4"), Buffer.alloc(6 * 1024 * 1024, 1));
+    const result = spawnSync(
+      "bun",
+      ["run", cliEntry, "cloud", "render", dir, "--dry-run", "--json"],
+      {
+        encoding: "utf-8",
+        timeout: 30_000,
+        env: {
+          ...process.env,
+          CI: "1",
+          HEYGEN_API_URL: "http://127.0.0.1:1",
+          HYPERFRAMES_NO_UPDATE_CHECK: "1",
+          HOME: dir,
+        },
+      },
+    );
+
+    expect(result.status).toBe(0);
+    const { archive } = JSON.parse(result.stdout) as {
+      archive: {
+        file_count: number;
+        size_bytes: number;
+        offloaded_media: Array<{ path: string; action: string; size_bytes: number }>;
+      };
+    };
+    expect(archive.offloaded_media).toEqual([
+      { path: "clip.mp4", action: "upload", size_bytes: 6 * 1024 * 1024 },
+    ]);
+    expect(archive.file_count).toBe(1);
+    expect(archive.size_bytes).toBeLessThan(64 * 1024);
+  });
+});
+
+describe("assertArchiveFits", () => {
+  it("passes an archive at the limit and fails one over it, naming its largest files", () => {
+    expect(() => assertArchiveFits(200 * 1024 * 1024, [])).not.toThrow();
+    const errors = vi.mocked(console.error);
+    const logs = vi.mocked(console.log);
+    expect(() =>
+      assertArchiveFits(200 * 1024 * 1024 + 1, [
+        { path: "data/scan.tiff", size_bytes: 190 * 1024 * 1024 },
+      ]),
+    ).toThrow(CliRuntimeError);
+    expect([...errors.mock.calls, ...logs.mock.calls].flat().join("\n")).toContain(
+      "data/scan.tiff",
+    );
   });
 });
 

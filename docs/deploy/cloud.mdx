@@ -59,7 +59,7 @@ hyperframes cloud render --resolution 4k
 
 ## Check what will upload
 
-Cloud project archives have a 200 MB limit. Inspect the archive before starting a render:
+Media files of 5 MB or more upload as HeyGen assets and are referenced by URL, so large footage and audio do not count against the 200 MB project archive limit. Uploads are cached, so re-rendering uploads only new or changed media. Inspect what will upload before starting a render:
 
 ```bash
 hyperframes cloud render --dry-run

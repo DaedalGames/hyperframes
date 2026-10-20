@@ -687,6 +687,30 @@ describe("publishProjectArchive", () => {
 });
 
 describe("publishProjectArchive", () => {
+  it("keeps server-sent upload headers in any case without adding duplicates", async () => {
+    const dir = makeProjectDir();
+    const serverHeaders = {
+      "Content-Type": "application/zip",
+      "Content-Length": "123",
+      "X-Amz-Server-Side-Encryption": "AES256",
+    };
+    const fetchMock = stagedFetch(
+      { file_count: 1 },
+      { upload_url: signedStagedS3Url, upload_headers: serverHeaders },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      writeFileSync(join(dir, "index.html"), "<html></html>", "utf-8");
+      await publishProjectArchive(dir);
+      expect(fetchMock.mock.calls[1]![1].headers).toEqual(serverHeaders);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("publishProjectArchive", () => {
   it("authenticates staged metadata requests but not the presigned S3 upload", async () => {
     const dir = makeProjectDir();
     const fetchMock = stagedFetch(OWNED);

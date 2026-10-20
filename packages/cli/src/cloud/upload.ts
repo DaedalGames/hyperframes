@@ -29,6 +29,8 @@ import { HyperframesApiError } from "./_gen/client.js";
 
 export interface UploadZipViaDirectResult {
   asset_id: string;
+  /** Public URL of the finalized asset. */
+  url: string;
   size_bytes: number;
   duration_ms: number;
 }
@@ -117,7 +119,7 @@ async function completeWithRetry(
   client: HyperframesCloudClient,
   asset_id: string,
   checksum_sha256: string,
-): Promise<{ asset_id: string }> {
+): Promise<{ asset_id: string; url: string }> {
   let lastErr: unknown;
   for (let attempt = 0; attempt < COMPLETE_MAX_RETRIES; attempt++) {
     try {
@@ -166,6 +168,7 @@ export async function uploadAssetViaDirectUpload(
   const completed = await completeWithRetry(opts.client, initialize.asset_id, checksum_sha256);
   return {
     asset_id: completed.asset_id,
+    url: completed.url,
     size_bytes,
     duration_ms: Date.now() - start,
   };
