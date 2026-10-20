@@ -289,9 +289,8 @@ function videoEncoderOptions(input: EncodeStageInput, engineCfg: Pick<EngineConf
 }
 
 /**
- * Software libx264 from JPEG frames: there the streaming encoder runs the disk
- * encoder's exact arguments, so the output is byte-identical. Needs a core the
- * capture workers leave free, or the encoder only slows capture down.
+ * Software libx264 from JPEG only: the streaming encoder then runs the disk encoder's
+ * arguments (same bytes). Needs a core the capture workers leave free.
  */
 export function canEncodeWhileCapturing(
   input: EncodeStageInput,
@@ -336,9 +335,8 @@ async function readLandedFrame(workerPath: string | undefined, mergedPath: strin
 }
 
 /**
- * Starts the encode now and feeds it frame 0, 1, 2… as each lands on disk.
- * Capture never waits on it. If it fails, `finish` runs `runEncodeStage` on the
- * same frames, so a failure here costs time, never the render.
+ * Feeds frames 0, 1, 2… to the encoder as each lands; capture never waits on it.
+ * On failure `finish` re-runs `runEncodeStage` on the same frames.
  */
 export function encodeWhileCapturing(
   input: EncodeStageInput,
