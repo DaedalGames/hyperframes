@@ -251,10 +251,11 @@ const CONTROLS: Array<{
 }> = [
   { name: "grid-native", media: "grid-sample", n: 10, rate: 1 },
   { name: "grid-runtime-bare", film: "10-video-grid" },
+  { name: "grid-runtime-bare-ticks", film: "10-video-grid", extra: "&ticks=1" },
   { name: "grid-runtime-bare (2)", film: "10-video-grid" },
-  { name: "16x1080-native", media: "h264-1080", n: 16, rate: 1 },
+  { name: "grid-runtime-bare-ticks (2)", film: "10-video-grid", extra: "&ticks=1" },
   { name: "16x1080-runtime-bare", film: "heavy-16x1080" },
-  { name: "16x1080-runtime-bare (2)", film: "heavy-16x1080" },
+  { name: "16x1080-runtime-bare-ticks", film: "heavy-16x1080", extra: "&ticks=1" },
 ];
 
 // Opens a page and returns the value it publishes on window[global] once it has one.
@@ -442,11 +443,12 @@ try {
             total: number;
             presentedFps: number;
             perVideo: PerVideo[];
+            timelineMovesPerSecond?: number;
           }>(
             `http://127.0.0.1:${port}`,
             browser,
             c.film
-              ? `${server.origin}/fixtures/_control/bare.html?film=${c.film}`
+              ? `${server.origin}/fixtures/_control/bare.html?film=${c.film}${c.extra ?? ""}`
               : `${server.origin}/fixtures/_control/index.html?media=${c.media}&n=${c.n}&rate=${c.rate}${c.extra ?? ""}`,
             "__control",
           );
@@ -458,6 +460,7 @@ try {
             presentedFps: num(r.presentedFps),
             decoderFrames: num(r.total),
             ...dropsBySteering(r.perVideo),
+            timelineMovesPerSecond: num(r.timelineMovesPerSecond),
           });
           console.log(JSON.stringify(rows[rows.length - 1]));
         } catch (e) {
@@ -501,6 +504,7 @@ const cols = [
   "unsteeredLagMs",
   "videoFrameCallbacks",
   "videoDraws",
+  "timelineMovesPerSecond",
   "mediaSeeks",
   "rateWrites",
   "seekP50Ms",

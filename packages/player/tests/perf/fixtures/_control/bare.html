@@ -20,13 +20,15 @@
   </head>
   <body>
     <script>
-      // ?film=<key>: the same runtime and film as the bench, driven through the runtime's own API.
+      // ?film=<key>: the same runtime and film as the bench, driven through the runtime's own API;
+      // &ticks=1 adds the player's per-frame "tick" message from the parent.
       (async function () {
         var FILMS = {
           "10-video-grid": "../10-video-grid/index.html",
           "heavy-16x1080": "../heavy-16x1080/index.html",
         };
-        var src = FILMS[new URLSearchParams(location.search).get("film")];
+        var q = new URLSearchParams(location.search);
+        var src = FILMS[q.get("film")];
         if (!src) throw new Error("unknown film");
         var frame = document.createElement("iframe");
         frame.src = src;
@@ -57,13 +59,35 @@
             },
             { dropped: 0, total: 0 },
           );
+        var timelineMoves = 0;
+        var main = frame.contentWindow.__timelines && frame.contentWindow.__timelines.main;
+        ["totalTime", "time", "seek", "progress", "totalProgress"].forEach((method) => {
+          var original = main && main[method];
+          if (!original) return;
+          main[method] = function () {
+            if (arguments.length) timelineMoves++;
+            return original.apply(this, arguments);
+          };
+        });
+        if (q.get("ticks")) {
+          (function tick() {
+            frame.contentWindow.postMessage(
+              { source: "hf-parent", type: "control", action: "tick" },
+              "*",
+            );
+            requestAnimationFrame(tick);
+          })();
+        }
         player.play();
         for (var j = 0; j < 50 && !player.isPlaying(); j++) await sleep(100);
         var before = decoded();
+        var movesBefore = timelineMoves;
         await sleep(8000);
         var after = decoded();
+        var moves = timelineMoves - movesBefore;
         player.pause();
         window.__control = {
+          timelineMovesPerSecond: Math.round(moves / 8),
           dropped: after.dropped - before.dropped,
           total: after.total - before.total,
           presentedFps:
