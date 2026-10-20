@@ -24,7 +24,7 @@ the overlays emerge from what the transcript actually says.
 > Plain subtitles → `embedded-captions`. Build a video from scratch → the creation
 > workflows (`product-launch-video` / `faceless-explainer` / …).
 
-Routed through `/hyperframes`, the intent layer confirms only the input (which clip) and **announces** the render-strategy questions as deferred asks — aspect, layout, style group, and card count stay at Step 7, where the probed footage and transcript ground the recommendations; the layer's run-shape questions don't apply. A `BRIEF.md`, when present, carries the confirmed input and any user notes — read it first.
+Routed through `/hyperframes`, the intent layer confirms only the input (which clip) and **announces** the render-strategy questions as deferred asks — layout, style group, and card count stay at Step 7, where the probed footage and transcript ground the recommendations (the aspect is taken from the footage, never asked); the layer's run-shape questions don't apply. A `BRIEF.md`, when present, carries the confirmed input and any user notes — read it first.
 
 Inspectable intermediate files in the work directory:
 
@@ -258,20 +258,18 @@ shape captures the data. The agent decides the shape per card.
 #### Confirm Visual Direction with User (DO THIS FIRST)
 
 Before you start designing cards or deciding bounds, **ask the user to
-pick the output ratio, the layout, the style, and the card-density
-preset**. Frames are auto-selected from the chosen layout × style
-combination (see "Auto-pick frame" table below). Before sending the
-question, **precompute two things**:
+pick the layout, the style, and the card-density preset**. Do not ask
+for the output ratio: the footage answers it. Frames are auto-selected
+from the chosen layout × style combination (see "Auto-pick frame" table
+below). Before sending the question, **precompute two things**:
 
-1. **`recommendedRatio`** from the source video's aspect ratio
-   (`metadata.json` width / height):
+1. **`ratio`** from the source video's aspect ratio (`metadata.json`
+   width / height, as the clip plays: swap them when the stream carries a
+   90° rotation), unless the request already names a ratio or platform:
    - `sourceAspect = width / height`
-   - `sourceAspect ≥ 1.5` (≥ ~3:2 wide) → recommend **`16:9`**
-   - `sourceAspect ≤ 0.7` (≤ ~9:13 tall) → recommend **`9:16`**
-   - `0.7 < sourceAspect < 1.5` (near-square) → recommend **`4:5`**
-
-   Mark the recommended option's label with " (recommended · matches source video X:Y)"
-   so the user sees why it's recommended.
+   - `sourceAspect ≥ 1.5` (≥ ~3:2 wide) → **`16:9`**
+   - `sourceAspect ≤ 0.7` (≤ ~9:13 tall) → **`9:16`**
+   - `0.7 < sourceAspect < 1.5` (near-square) → **`4:5`**
 
 2. **`autoCount`** from Step 6 (`max(5, round(videoSec / (basePace ×
 densityMultiplier)))`) so the "auto" option's label can show the
@@ -281,27 +279,27 @@ densityMultiplier)))`) so the "auto" option's label can show the
 Not every runtime exposes the same structured-question tool. Apply this
 order:
 
-1. **Native clarification tool** — use the structured 4-question call below.
+1. **Native clarification tool** — use the structured 3-question call below.
 2. **Other native clarification tool** (e.g. `ask_question`,
    `request_user_input`, IDE-specific prompt) — use that tool with the
-   same 4 question texts and option lists. Preserve the recommendation
+   same 3 question texts and option lists. Preserve the recommendation
    markers and the precomputed values.
 3. **No native tool** (Codex CLI, plain text-only runtimes) — **ask
    directly in normal conversation**. Use the plain-text template at the
-   end of this section. Keep it to **one message, 4 numbered questions**
+   end of this section. Keep it to **one message, 3 numbered questions**
    (the global cap is 2–5 questions per round; we stay inside it).
 
 Rules that apply to every channel:
 
-- Ask **at most 2–5 questions per round**. Our 4 here fits.
+- Ask **at most 2–5 questions per round**. Our 3 here fits.
 - Even if missing info doesn't block rendering, **ask once to confirm
-  the parameters that materially affect the final output** (ratio,
-  layout, style, cardCount).
+  the parameters that materially affect the final output** (layout,
+  style, cardCount).
 - If the user has already pre-approved defaults ("just use defaults",
   "no need to ask", "auto-pick everything"), asked you not to ask, or the
   run carries an ongoing autonomous signal ("surprise me" / "decide for me" —
   `../hyperframes/references/brief-contract.md` § 1) — **skip
-  the question entirely** and use: `recommendedRatio`, `layout="stack"`
+  the question entirely** and use: `layout="stack"`
   (safest cross-ratio default), `style` chosen from transcript tone in
   the most neutral group (editorial/data), `autoCount`. Tell the user
   what you picked in one sentence and continue.
@@ -310,23 +308,10 @@ Rules that apply to every channel:
 
 ```
 // Precompute before the call:
-//   recommendedRatio = "16:9" | "9:16" | "4:5"
-//   autoCount        = integer (from Step 6)
+//   autoCount = integer (from Step 6)
 
 AskUserQuestion({
   questions: [
-    {
-      question: "Output video aspect ratio (canvas):",
-      header: "Aspect ratio",
-      multiSelect: false,
-      // Reorder so the recommended option appears FIRST (per AskUserQuestion convention).
-      // Append " (recommended · matches source video W×H)" to the recommended option's label.
-      options: [
-        { label: "16:9 (1920×1080) landscape", description: "TV / YouTube / desktop playback. Most natural when the source video is already landscape; widest canvas." },
-        { label: "9:16 (1080×1920) portrait", description: "TikTok / Reels / short-form mobile. Most natural for portrait source; native mobile experience." },
-        { label: "4:5 (1080×1350) near-portrait", description: "Instagram feed / WeChat Moments. Best when source is near-square or you want to cover both platforms." }
-      ]
-    },
     {
       question: "Choose the overall layout: how should the video and cards coexist on the canvas?",
       header: "Layout",
@@ -369,56 +354,51 @@ AskUserQuestion({
 
 **Channel B — plain-text fallback** (Codex CLI, runtimes without a
 native question tool). Post this as one normal message, then wait for
-the reply. Bullet-style 1/2/3/4 keeps the reply parseable:
+the reply. Bullet-style 1/2/3 keeps the reply parseable:
 
 ```
-I need to confirm four visual decisions with you before I start cutting cards:
+I need to confirm three visual decisions with you before I start cutting cards
+(the canvas is <ratio>, matching your video):
 
-1) Output aspect ratio (canvas):
-   A. 16:9 landscape (1920×1080) — TV / YouTube / desktop playback
-   B. 9:16 portrait (1080×1920) — TikTok / Reels / short-form mobile
-   C. 4:5 near-portrait (1080×1350) — Instagram feed / works for both platforms
-   ▸ My recommendation:  <recommendedRatio>  (matches source video W×H = <sourceW>×<sourceH>)
-
-2) Overall layout (how video & card coexist):
+1) Overall layout (how video & card coexist):
    A. split   side-by-side (50/50)
    B. stack   top-bottom (video top, card bottom)
    C. pip     picture-in-picture (card full canvas, video rounded corner window)
    D. overlay full-screen glass overlay (video full-bleed, card glass layer)
 
-3) Card style group (maps to frame auto-pick matrix, pick 1 of 3):
+2) Card style group (maps to frame auto-pick matrix, pick 1 of 3):
    A. warm paper (warm-paper)      (academic / editorial / whiteboard / xhs)
    B. clinical / cold (clinical)   (audit / swiss / terminal / minimal)
    C. experimental (experimental)  (geom / spotlight)
 
-4) Card count (takeaway pacing):
+3) Card count (takeaway pacing):
    A. Auto (recommended) — approx <autoCount> cards
    B. Fewer — approx round(<autoCount> × 0.6) cards
    C. More — approx round(<autoCount> × 1.5) cards
    D. Give me a specific number (e.g. "8", "20")
 
-Reply format: "1A 2C 3B 4A" or natural language is fine.
+Reply format: "1C 2B 3A" or natural language is fine.
 If you want all recommended defaults, reply "default" / "auto" / "use all recommendations".
 ```
 
 Parsing the plain-text reply:
 
-- Accept loose formats: `"1A 2C 3B 4A"`, `"A C B A"`, `"16:9 / pip /
-data / auto"`, full sentences, or `default`.
+- Accept loose formats: `"1C 2B 3A"`, `"C B A"`, `"pip / data /
+auto"`, full sentences, or `default`.
 - If any answer is ambiguous → re-ask only the ambiguous ones (still
   inside the 2–5 cap).
 - If the user says "default / auto / use all recommendations" → skip without re-asking.
 
 After the user answers (any channel):
 
-1. **Resolve the output canvas** from the ratio answer — these are the
+1. **Resolve the output canvas** from `ratio` — these are the
    exact `storyboard.composition.width / height` values to write:
 
-   | user choice | composition.width × height | storyboard.layout field                                       |
-   | ----------- | -------------------------- | ------------------------------------------------------------- |
-   | `16:9`      | **1920 × 1080**            | `"landscape"`                                                 |
-   | `9:16`      | **1080 × 1920**            | `"portrait"`                                                  |
-   | `4:5`       | **1080 × 1350**            | `"portrait"` (schema treats 4:5 as portrait — height > width) |
+   | `ratio` | composition.width × height | storyboard.layout field                                       |
+   | ------- | -------------------------- | ------------------------------------------------------------- |
+   | `16:9`  | **1920 × 1080**            | `"landscape"`                                                 |
+   | `9:16`  | **1080 × 1920**            | `"portrait"`                                                  |
+   | `4:5`   | **1080 × 1350**            | `"portrait"` (schema treats 4:5 as portrait — height > width) |
 
    For **4:5 bounds inside `references/layouts/*.html`** — those files
    only document landscape (1920×1080) and portrait (1080×1920). For
@@ -456,7 +436,7 @@ After the user answers (any channel):
    | `overlay` | `clean` (full-bleed forbids deco frames)                    | `clean`                                              | `clean`                                |
 
 5. **Tell the user what you chose** in one sentence — ratio (+ canvas
-   size), layout, specific style, frame, and final cardCount — then
+   size, from the source), layout, specific style, frame, and final cardCount — then
    proceed with the rest of Step 7 (per-card layouts, motion patterns).
 6. Record the five values (ratio / layout / style / frame / cardCount)
    in working memory (no schema field needed); you'll reference them
@@ -580,7 +560,7 @@ recipe pairing a `zone` with a `#video-wrap` tween target:
 | `overlay`          | `video-overlay`         | `{ left: 0, top: 0, width: 1920, height: 1080 }` (full-bleed)             | `{ left: 0, top: 0, width: 1080, height: 1920 }`                  | cinematic / dramatic / glass card on full video |
 
 For 4:5 (1080×1350), scale portrait y/h values by `1350/1920 ≈ 0.703`
-(see Step 7.0 Channel A / Channel B `recommendedRatio` resolution
+(see Step 7.0 `ratio` resolution
 table).
 
 **Other zone values for one-off variants** (still uses `card.zone`; no
