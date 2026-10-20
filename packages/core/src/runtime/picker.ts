@@ -238,7 +238,7 @@ export function createPickerModule(deps: PickerModuleDeps): PickerModule {
   }
 
   function siblingSelector(el: Element): string {
-    const tag = el.tagName.toLowerCase();
+    const tag = CSS.escape(el.tagName.toLowerCase());
     const parent = el.parentElement;
     if (!parent) return tag;
     const siblings = Array.from(parent.children).filter(

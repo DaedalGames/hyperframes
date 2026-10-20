@@ -48,7 +48,7 @@ describe("applyFileMutations", () => {
         applyFileMutations(projectDir, [
           { sourceFile: "index.html", absPath: path, after: "<html><body></body></html>" },
         ]),
-      ).toThrow(/root composition "main"/);
+      ).toThrow(/remove its root composition/);
       expect(readFileSync(path, "utf8")).toBe(before);
     } finally {
       rmSync(projectDir, { recursive: true, force: true });

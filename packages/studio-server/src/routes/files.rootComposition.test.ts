@@ -56,7 +56,7 @@ it("deleting a nested sub-scene child removes only that child", async () => {
 it("refuses a delete that would remove the root composition and leaves the file untouched", async () => {
   const res = await removeElements("index.html", [{ id: "root", selector: "#root" }]);
   expect(res.status).toBe(422);
-  expect(((await res.json()) as { error: string }).error).toMatch(/root composition "main"/);
+  expect(((await res.json()) as { error: string }).error).toMatch(/remove its root composition/);
   expect(read("index.html")).toBe(INDEX);
 });
 
@@ -76,4 +76,54 @@ it("refuses a save whose body drops the root composition and leaves the file unt
   });
   expect(res.status).toBe(422);
   expect(read("index.html")).toBe(INDEX);
+});
+
+it("still deletes a sub-scene host, which leaves the root composition in place", async () => {
+  const res = await removeElements("index.html", [{ id: "broll-host", selector: "#broll-host" }]);
+  expect(res.status).toBe(200);
+  expect(read("index.html")).not.toContain("broll-host");
+  expect(read("index.html")).toContain('data-composition-id="main"');
+});
+
+it("still saves a root composition renamed in the code editor", async () => {
+  const renamed = INDEX.replace('data-composition-id="main"', 'data-composition-id="intro"');
+  const res = await app().request("http://localhost/projects/demo/files/index.html", {
+    method: "PUT",
+    headers: { "If-Match": fileContentVersion(Buffer.from(INDEX)) },
+    body: renamed,
+  });
+  expect(res.status).toBe(200);
+  expect(read("index.html")).toBe(renamed);
+});
+
+it("never refuses a non-HTML file that only mentions a composition", async () => {
+  const notes = 'Mount with `<div data-composition-id="main">`.';
+  writeFileSync(join(project, "notes.md"), notes);
+  const res = await app().request("http://localhost/projects/demo/files/notes.md", {
+    method: "PUT",
+    headers: { "If-Match": fileContentVersion(Buffer.from(notes)) },
+    body: "Mount it by hand.",
+  });
+  expect(res.status).toBe(200);
+});
+
+it("refuses an element patch that strips the last composition, with a 422 not a 500", async () => {
+  const res = await app().request(
+    `http://localhost/projects/demo/file-mutations/patch-elements-batch/${encodeURIComponent("compositions/broll.html")}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        patches: [
+          {
+            target: { selector: '[data-composition-id="broll"]' },
+            operations: [{ type: "html-attribute", property: "data-composition-id", value: null }],
+          },
+        ],
+      }),
+    },
+  );
+  expect(res.status).toBe(422);
+  expect(((await res.json()) as { error: string }).error).toMatch(/remove its root composition/);
+  expect(read("compositions/broll.html")).toBe(BROLL);
 });

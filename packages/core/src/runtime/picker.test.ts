@@ -415,6 +415,7 @@ describe("createPickerModule", () => {
           <div class="shot"><div class="caption"><div class="label">B-roll</div></div></div>
         </div></div>
         <div data-track-index="1"><span>a</span><span>b</span></div>
+        <o:p><span>c</span></o:p><o:p><span>d</span></o:p>
       </div>`;
       const api = (window as any).__HF_PICKER_API;
       const label = document.querySelector(".label")!;
