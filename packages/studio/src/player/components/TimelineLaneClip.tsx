@@ -48,6 +48,17 @@ const sameCapabilities = (a: TimelineEditCapabilities, b: TimelineEditCapabiliti
 
 const NO_PICTURE: TimelineProps["renderClipContent"] = () => null;
 
+function contentRendererAtWidth(
+  renderClipContent: TimelineProps["renderClipContent"],
+  previewElement: TimelineElement,
+  pps: number,
+): TimelineProps["renderClipContent"] {
+  if (!renderClipContent) return renderClipContent;
+  return clipWidthLadder(clipWidthPx(previewElement, pps)) === "frame"
+    ? NO_PICTURE
+    : renderClipContent;
+}
+
 const zoomKey = (p: TimelineLaneClipProps) =>
   clipZoomKey(p.previewElement, p.pps, p.isSelected || p.isHovered);
 
@@ -90,7 +101,6 @@ export const TimelineLaneClip = memo(function TimelineLaneClip({
       actions.current.gestures,
     );
   const isComposition = !!el.compositionSrc;
-  const pictured = clipWidthLadder(clipWidthPx(previewElement, pps)) !== "frame";
   return (
     <TimelineClip
       onContextMenu={(e: React.MouseEvent) => {
@@ -125,7 +135,7 @@ export const TimelineLaneClip = memo(function TimelineLaneClip({
       {renderClipChildren(
         previewElement,
         clipStyle,
-        renderClipContent && !pictured ? NO_PICTURE : renderClipContent,
+        contentRendererAtWidth(renderClipContent, previewElement, pps),
         renderClipOverlay,
         { priority, rich },
       )}
