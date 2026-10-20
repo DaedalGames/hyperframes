@@ -87,7 +87,7 @@ mkdir -p "$WORK_DIR"
 ```bash
 # metadata — duration / width / height / fps
 ffprobe -v error -select_streams v:0 \
-  -show_entries stream=width,height,r_frame_rate \
+  -show_entries stream=width,height,r_frame_rate:stream_side_data=rotation \
   -show_entries format=duration -of json "$VIDEO_PATH" > "$WORK_DIR/metadata.json"
 # audio
 ffmpeg -y -i "$VIDEO_PATH" -vn -acodec libmp3lame -q:a 2 "$WORK_DIR/audio.mp3"
@@ -263,9 +263,10 @@ for the output ratio: the footage answers it. Frames are auto-selected
 from the chosen layout × style combination (see "Auto-pick frame" table
 below). Before sending the question, **precompute two things**:
 
-1. **`ratio`** from the source video's aspect ratio (`metadata.json`
-   width / height, as the clip plays: swap them when the stream carries a
-   90° rotation), unless the request already names a ratio or platform:
+1. **`ratio`** from the source video's aspect ratio (Step 3's probed
+   width / height):
+   - a ratio or platform the request already names wins
+   - swap width and height when the stream's rotation is 90 or -90 (it plays upright)
    - `sourceAspect = width / height`
    - `sourceAspect ≥ 1.5` (≥ ~3:2 wide) → **`16:9`**
    - `sourceAspect ≤ 0.7` (≤ ~9:13 tall) → **`9:16`**
