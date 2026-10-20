@@ -1,0 +1,260 @@
+#!/usr/bin/env bun
+// Heavy-film bench for real Safari and Chrome over plain WebDriver; both run bench-page.js on one machine.
+// Needs safaridriver (`sudo safaridriver --enable`) or chromedriver, and the media from make-media.sh.
+// bun run tests/perf/browsers/run.ts --browsers safari,chrome --runs 2 [--fixtures a,b]
+import { spawn, execFileSync, type ChildProcess } from "node:child_process";
+import { mkdirSync, readFileSync, readdirSync, writeFileSync, appendFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { percentile } from "../runner.ts";
+import { startServer } from "../server.ts";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const RESULTS_DIR = resolve(HERE, "../results");
+const PAGE_SCRIPT = readFileSync(resolve(HERE, "bench-page.js"), "utf-8");
+const PLAY_MS = 8_000;
+const SEEK_FRACTIONS = [0.1, 0.7, 0.2, 0.8, 0.3, 0.9, 0.4, 0.6, 0.5, 0.05];
+const WORK_BUDGET_MS = 8;
+
+type Browser = "safari" | "chrome";
+
+const DRIVERS: Record<
+  Browser,
+  { cmd: string; args: (port: number) => string[]; caps: object; procs: RegExp }
+> = {
+  safari: {
+    cmd: "safaridriver",
+    args: (port) => ["-p", String(port)],
+    caps: { browserName: "safari" },
+    procs: /com\.apple\.WebKit\.|\/Safari$/,
+  },
+  chrome: {
+    cmd: process.env.CHROMEDRIVER ?? "chromedriver",
+    args: (port) => [`--port=${port}`],
+    caps: {
+      browserName: "chrome",
+      "goog:chromeOptions": {
+        args: [
+          "--autoplay-policy=no-user-gesture-required",
+          "--no-first-run",
+          "--no-default-browser-check",
+        ],
+      },
+    },
+    procs: /Google Chrome|Chromium/,
+  },
+};
+
+function arg(name: string, fallback: string): string {
+  const i = process.argv.indexOf(`--${name}`);
+  return i > 0 && process.argv[i + 1] ? process.argv[i + 1]! : fallback;
+}
+
+async function wd(base: string, method: string, path: string, body?: unknown): Promise<any> {
+  const res = await fetch(base + path, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const json = (await res.json()) as { value: any };
+  if (!res.ok || json.value?.error) {
+    throw new Error(`${method} ${path}: ${JSON.stringify(json.value).slice(0, 600)}`);
+  }
+  return json.value;
+}
+
+async function startDriver(browser: Browser, port: number): Promise<ChildProcess> {
+  const spec = DRIVERS[browser];
+  const proc = spawn(spec.cmd, spec.args(port), { stdio: "inherit" });
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    try {
+      if ((await wd(`http://127.0.0.1:${port}`, "GET", "/status")).ready) return proc;
+    } catch {}
+    await Bun.sleep(200);
+  }
+  proc.kill();
+  throw new Error(`${spec.cmd} did not become ready on port ${port}`);
+}
+
+/** Resident memory of the browser's own processes, in MB (WebDriver has no memory API Safari answers). */
+function browserRssMb(procs: RegExp): number {
+  const out = execFileSync("ps", ["-axo", "rss=,command="], { encoding: "utf-8" });
+  let kb = 0;
+  for (const line of out.split("\n")) {
+    const m = line.trim().match(/^(\d+)\s+(.*)$/);
+    if (m && procs.test(m[2]!) && !/driver/i.test(m[2]!)) kb += Number(m[1]);
+  }
+  return kb / 1024;
+}
+
+type PageResult = {
+  userAgent: string;
+  devicePixelRatio: number;
+  videoCount: number;
+  mediaErrors: string[];
+  idle: number[];
+  frames: Array<{ ts: number; work: number | null; comp: number }>;
+  decoded: { dropped: number; total: number };
+  seeks: Array<{ target: number; ms: number; timedOut: boolean }>;
+};
+
+function score(page: PageResult) {
+  const idleIntervals = page.idle.slice(1).map((t, i) => t - page.idle[i]!);
+  const vsync = percentile(idleIntervals, 50);
+  const intervals = page.frames.slice(1).map((f, i) => f.ts - page.frames[i]!.ts);
+  const dropped = intervals.reduce(
+    (n, d) => n + (d > vsync * 1.5 ? Math.round(d / vsync) - 1 : 0),
+    0,
+  );
+  const work = page.frames.map((f) => f.work).filter((w): w is number => w !== null);
+  const first = page.frames[0]!;
+  const last = page.frames[page.frames.length - 1]!;
+  const seekMs = page.seeks.map((s) => s.ms);
+  const round = (n: number) => Math.round(n * 10) / 10;
+  return {
+    vsyncMs: round(vsync),
+    frames: page.frames.length,
+    droppedFrames: dropped,
+    longestFrameMs: round(Math.max(...intervals)),
+    p95FrameMs: round(percentile(intervals, 95)),
+    maxWorkMs: round(Math.max(...work)),
+    p95WorkMs: round(percentile(work, 95)),
+    framesOverBudget: work.filter((w) => w > WORK_BUDGET_MS).length,
+    clockRatio:
+      Math.round((((last.comp - first.comp) * 1000) / (last.ts - first.ts)) * 1000) / 1000,
+    decoderDropped: page.decoded.dropped,
+    decoderFrames: page.decoded.total,
+    seekP50Ms: round(percentile(seekMs, 50)),
+    seekP95Ms: round(percentile(seekMs, 95)),
+    seekTimeouts: page.seeks.filter((s) => s.timedOut).length,
+  };
+}
+
+async function runFilm(base: string, browser: Browser, origin: string, fixture: string) {
+  const session = await wd(base, "POST", "/session", {
+    capabilities: { alwaysMatch: DRIVERS[browser].caps },
+  });
+  const s = `/session/${session.sessionId}`;
+  let peakRssMb = 0;
+  try {
+    await wd(base, "POST", `${s}/window/rect`, { x: 0, y: 0, width: 1400, height: 900 });
+    await wd(base, "POST", `${s}/url`, {
+      url: `${origin}/host.html?fixture=${fixture}&width=1280&height=720`,
+    });
+    await wd(base, "POST", `${s}/execute/sync`, {
+      script: `${PAGE_SCRIPT}
+        window.__bench = null;
+        window.__hfBench(arguments[0]).then(
+        (r) => { window.__bench = { ok: r }; },
+        (e) => { window.__bench = { error: String(e && e.stack || e) }; });`,
+      args: [{ playMs: PLAY_MS, seekFractions: SEEK_FRACTIONS }],
+    });
+    const deadline = Date.now() + 180_000;
+    while (Date.now() < deadline) {
+      peakRssMb = Math.max(peakRssMb, browserRssMb(DRIVERS[browser].procs));
+      const r = await wd(base, "POST", `${s}/execute/sync`, {
+        script: "return window.__bench",
+        args: [],
+      });
+      if (r?.error) throw new Error(r.error);
+      if (r?.ok) return { page: r.ok as PageResult, peakRssMb: Math.round(peakRssMb) };
+      await Bun.sleep(500);
+    }
+    throw new Error("bench did not finish within 180 s");
+  } finally {
+    await wd(base, "DELETE", s).catch(() => {});
+  }
+}
+
+const browsers = arg("browsers", "safari,chrome").split(",") as Browser[];
+const runs = Number(arg("runs", "2"));
+const fixtures = arg(
+  "fixtures",
+  readdirSync(resolve(HERE, "../fixtures"))
+    .filter((f) => f.startsWith("heavy-") || f === "10-video-grid" || f === "gsap-heavy")
+    .join(","),
+).split(",");
+
+mkdirSync(RESULTS_DIR, { recursive: true });
+const server = startServer();
+const rows: Array<Record<string, unknown>> = [];
+let failed = false;
+try {
+  for (const browser of browsers) {
+    const port = 4444 + browsers.indexOf(browser);
+    const driver = await startDriver(browser, port);
+    try {
+      for (const fixture of fixtures) {
+        for (let run = 1; run <= runs; run++) {
+          try {
+            const { page, peakRssMb } = await runFilm(
+              `http://127.0.0.1:${port}`,
+              browser,
+              server.origin,
+              fixture,
+            );
+            const row = {
+              browser,
+              fixture,
+              run,
+              ...score(page),
+              peakRssMb,
+              videos: page.videoCount,
+              mediaErrors: page.mediaErrors,
+              userAgent: page.userAgent,
+              raw: page,
+            };
+            rows.push(row);
+            const { raw: _raw, userAgent: _ua, ...brief } = row;
+            console.log(JSON.stringify(brief));
+          } catch (e) {
+            failed = true;
+            rows.push({ browser, fixture, run, error: String(e) });
+            console.error(`[browsers] ${browser} ${fixture} run ${run} failed: ${e}`);
+          }
+        }
+      }
+    } finally {
+      driver.kill();
+    }
+  }
+} finally {
+  await server.stop();
+}
+
+writeFileSync(resolve(RESULTS_DIR, "browsers.json"), JSON.stringify(rows, null, 2) + "\n");
+const cols = [
+  "browser",
+  "fixture",
+  "run",
+  "droppedFrames",
+  "longestFrameMs",
+  "p95FrameMs",
+  "maxWorkMs",
+  "p95WorkMs",
+  "framesOverBudget",
+  "clockRatio",
+  "decoderDropped",
+  "seekP50Ms",
+  "seekP95Ms",
+  "seekTimeouts",
+  "peakRssMb",
+  "error",
+];
+const md = [
+  `| ${cols.join(" | ")} |`,
+  `|${cols.map(() => "---").join("|")}|`,
+  ...rows.map(
+    (r) =>
+      `| ${cols.map((c) => (r[c] === undefined ? "" : String(r[c]).slice(0, 80))).join(" | ")} |`,
+  ),
+].join("\n");
+writeFileSync(resolve(RESULTS_DIR, "browsers.md"), md + "\n");
+console.log(md);
+if (process.env.GITHUB_STEP_SUMMARY)
+  appendFileSync(
+    process.env.GITHUB_STEP_SUMMARY,
+    `## Heavy films: ${browsers.join(" vs ")}\n\n${md}\n`,
+  );
+process.exit(failed ? 1 : 0);
