@@ -12,7 +12,6 @@ import {
   readFileSync,
   renameSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -32,6 +31,7 @@ import { type PlayedSegment, planTrim } from "./offloadTrim.js";
 import {
   assertUnchanged,
   type HtmlAttributeResolver,
+  readChecked,
   rewriteCssUrls,
   rewriteHtmlAttributes,
   rewriteStyleBlocks,
@@ -374,9 +374,8 @@ async function ffmpegReencode(
       { maxBuffer: 16 * MiB },
     );
     // Never read an output the asset API would refuse: it can exceed what one read can hold.
-    assertFitsAsset(sourcePath, outPath, statSync(outPath).size);
     return {
-      bytes: readFileSync(outPath),
+      bytes: readChecked(outPath, ({ size }) => assertFitsAsset(sourcePath, outPath, size)),
       filename: basename(outPath),
       contentType: preset.contentType,
     };

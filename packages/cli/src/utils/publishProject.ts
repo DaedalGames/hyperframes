@@ -1,5 +1,14 @@
 import { basename, dirname, join, posix, relative, resolve } from "node:path";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  fstatSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  type Stats,
+  statSync,
+} from "node:fs";
 import { parseHTML } from "linkedom";
 import AdmZip from "adm-zip";
 import ignore, { type Ignore } from "ignore";
@@ -349,26 +358,44 @@ export function stagedSize(file: StagedFile): number {
   return Buffer.isBuffer(file) ? file.byteLength : file.size;
 }
 
-export function assertUnchanged(file: DiskFile): void {
-  const now = statSync(file.absPath, { throwIfNoEntry: false });
+function assertSame(file: DiskFile, now: Stats | undefined): void {
   if (now?.size !== file.size || now.mtimeMs !== file.mtimeMs) {
     throw new Error(`${file.absPath} changed on disk while it was being prepared. Run it again.`);
+  }
+}
+
+export function assertUnchanged(file: DiskFile): void {
+  assertSame(file, statSync(file.absPath, { throwIfNoEntry: false }));
+}
+
+/** Reads through one descriptor, so `check` (run before and after) sees the stat of the bytes returned. */
+export function readChecked(path: string, check: (stat: Stats) => void): Buffer {
+  const fd = openSync(path, "r");
+  try {
+    check(fstatSync(fd));
+    const bytes = readFileSync(fd);
+    check(fstatSync(fd));
+    return bytes;
+  } finally {
+    closeSync(fd);
   }
 }
 
 /** The staged bytes; a file left on disk is read now and must not have changed since staging. */
 export function readStaged(file: StagedFile): Buffer {
   if (Buffer.isBuffer(file)) return file;
-  assertUnchanged(file);
-  const bytes = readFileSync(file.absPath);
-  assertUnchanged(file);
-  return bytes;
+  return readChecked(file.absPath, (stat) => assertSame(file, stat));
 }
 
 function stageFile(absPath: string, onDiskMinBytes: number): StagedFile {
-  const { size, mtimeMs } = statSync(absPath);
-  if (size < onDiskMinBytes || TEXT_FILE_EXTS.test(absPath)) return readFileSync(absPath);
-  return { absPath, size, mtimeMs };
+  const fd = openSync(absPath, "r");
+  try {
+    const { size, mtimeMs } = fstatSync(fd);
+    if (size < onDiskMinBytes || TEXT_FILE_EXTS.test(absPath)) return readFileSync(fd);
+    return { absPath, size, mtimeMs };
+  } finally {
+    closeSync(fd);
+  }
 }
 
 interface ExternalAssetContext {
