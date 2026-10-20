@@ -572,9 +572,8 @@ describe("TimelineLanes selection", () => {
 });
 
 describe("TimelineLanes keyboard focus", () => {
-  // Arrow keys focus a clip without selecting it; Enter then selects it. A
-  // frame-wide audio clip used to swap its button on that selection, dropping
-  // focus to <body> where the arrow keys no longer reach the timeline.
+  // Arrow keys focus a clip without selecting it; Enter then selects it. If
+  // that selection swaps the button, focus falls to <body>, out of the arrows' reach.
   it("keeps arrow navigation after Enter selects a focused frame-wide audio clip", () => {
     const voice = (id: string, start: number): TimelineElement => ({
       ...element(id, TRACK_A),

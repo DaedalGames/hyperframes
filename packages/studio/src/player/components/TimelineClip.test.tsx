@@ -372,7 +372,7 @@ describe("TimelineClip", () => {
     }
 
     // Arrow keys focus without selecting, then Enter selects the focused clip.
-    // Swapping the button there dropped focus to <body>, and arrows went dead.
+    // A new button there would leave focus on <body>, where the arrows do nothing.
     it("keeps the focused button when a frame-wide clip is selected", () => {
       const view = mountFocused(10);
       expect(view.focused.getAttribute("data-ladder")).toBe("frame");
