@@ -47,10 +47,14 @@ jobs:
       - name: Enable safaridriver
         run: sudo safaridriver --enable
 
+      # Spotlight indexes the fresh checkout and generated media during the runs, taking 1 to 2 cores.
+      - name: Stop Spotlight indexing
+        run: sudo mdutil -a -i off || true
+
       - name: Profile Safari while GSAP-heavy films play
         continue-on-error: true
         working-directory: packages/player
-        run: bun run tests/perf/browsers/profile.ts --films heavy-long-gsap,gsap-heavy --seconds 6
+        run: bun run tests/perf/browsers/profile.ts --seconds 6
 
       - name: Upload the Safari profile
         if: always()

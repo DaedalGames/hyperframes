@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Profiles Safari natively (Instruments Time Profiler) while a film plays in the player, and sums the
 // samples per process and per function, so the frame cost splits into style, layout, paint and compositing.
-// macOS only. bun run tests/perf/browsers/profile.ts [--films heavy-long-gsap,gsap-heavy] [--seconds 6]
+// macOS only. bun run tests/perf/browsers/profile.ts [--seconds 6]
 import { execFileSync } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -18,7 +18,13 @@ function arg(name: string, fallback: string): string {
   return i > 0 && process.argv[i + 1] ? process.argv[i + 1]! : fallback;
 }
 
-type Sample = { process: string; thread: string; weightNs: number; frames: string[] };
+type Sample = {
+  process: string;
+  thread: string;
+  timeNs: number;
+  weightNs: number;
+  frames: string[];
+};
 
 // xctrace's XML defines each thread, process, frame, backtrace and weight once (id="n") and later rows
 // point back to it (ref="n"); a thread's process is only nested in its first definition.
@@ -41,7 +47,7 @@ function parseSamples(xml: string): Sample[] {
     const [whole, closing, tag, attrs = "", selfClosing] = m;
     if (tag === "row") {
       if (closing && row) samples.push(row);
-      row = closing ? null : { process: "", thread: "", weightNs: 0, frames: [] };
+      row = closing ? null : { process: "", thread: "", timeNs: 0, weightNs: 0, frames: [] };
       continue;
     }
     if (!row) continue;
@@ -75,11 +81,12 @@ function parseSamples(xml: string): Sample[] {
       row.process = (ref ? names.get(ref) : attr(attrs, "fmt")) ?? "";
       if (id) names.set(id, row.process);
       if (threadId) threadProcess.set(threadId, row.process);
-    } else if (tag === "weight") {
+    } else if (tag === "weight" || tag === "sample-time") {
       const at = m.index! + whole.length;
       const value = ref ? names.get(ref) : xml.slice(at, xml.indexOf("<", at));
       if (id && value) names.set(id, value);
-      row.weightNs = Number(value) || 0;
+      if (tag === "weight") row.weightNs = Number(value) || 0;
+      else row.timeNs = Number(value) || 0;
     }
   }
   return samples;
@@ -94,6 +101,30 @@ function top(entries: Map<string, number>, total: number) {
       ms: Math.round(ns / 1e6),
       pct: Math.round((ns / total) * 1000) / 10,
     }));
+}
+
+// Main-thread CPU in each 60 Hz frame window: what a frame actually costs the page, idle waits excluded.
+function busyPerFrame(samples: Sample[]) {
+  const windowNs = 1e9 / 60;
+  const busy = new Map<number, number>();
+  for (const s of samples) {
+    const w = Math.floor(s.timeNs / windowNs);
+    busy.set(w, (busy.get(w) ?? 0) + s.weightNs / 1e6);
+  }
+  const first = Math.min(...busy.keys());
+  const last = Math.max(...busy.keys());
+  const ms = Array.from({ length: last - first + 1 }, (_, i) => busy.get(first + i) ?? 0).sort(
+    (a, b) => a - b,
+  );
+  const at = (q: number) =>
+    Math.round(ms[Math.min(ms.length - 1, Math.floor(q * ms.length))]! * 10) / 10;
+  return {
+    windows: ms.length,
+    p50Ms: at(0.5),
+    p95Ms: at(0.95),
+    maxMs: at(1),
+    over8Ms: ms.filter((v) => v > 8).length,
+  };
 }
 
 function summarize(samples: Sample[], seconds: number) {
@@ -124,7 +155,9 @@ function summarize(samples: Sample[], seconds: number) {
       self: top(self, total),
     };
   });
+  const main = samples.filter((s) => /WebContent/.test(s.process) && /Main Thread/i.test(s.thread));
   return {
+    mainThreadPerFrame: main.length ? busyPerFrame(main) : null,
     perProcessMsPerSecond: Object.fromEntries(
       [...perProcess]
         .sort((a, b) => b[1] - a[1])
@@ -135,7 +168,21 @@ function summarize(samples: Sample[], seconds: number) {
   };
 }
 
-const films = arg("films", "heavy-long-gsap,gsap-heavy").split(",");
+// The long film's tiles have no will-change and a box shadow; each arm takes one of those away.
+const ARMS = [
+  { name: "heavy-long-gsap", film: "heavy-long-gsap", css: "" },
+  {
+    name: "heavy-long-gsap, tiles will-change",
+    film: "heavy-long-gsap",
+    css: ".dot { will-change: transform; }",
+  },
+  {
+    name: "heavy-long-gsap, no tile shadow",
+    film: "heavy-long-gsap",
+    css: ".dot { box-shadow: none; }",
+  },
+  { name: "gsap-heavy", film: "gsap-heavy", css: "" },
+];
 const seconds = Number(arg("seconds", "6"));
 mkdirSync(OUT, { recursive: true });
 const server = startServer();
@@ -144,7 +191,7 @@ const driver = await startDriver("safari", port);
 const base = `http://127.0.0.1:${port}`;
 const report: Record<string, unknown> = {};
 try {
-  for (const film of films) {
+  for (const { name, film, css } of ARMS) {
     const session = await wd(base, "POST", "/session", {
       capabilities: { alwaysMatch: DRIVERS.safari.caps },
     });
@@ -166,11 +213,17 @@ try {
         await Bun.sleep(250);
       }
       await wd(base, "POST", `${s}/execute/sync`, {
-        script: "document.getElementById('player').play()",
-        args: [],
+        script: `const doc = document.getElementById("player").shadowRoot.querySelector("iframe").contentDocument;
+          if (arguments[0]) doc.head.append(Object.assign(doc.createElement("style"), { textContent: arguments[0] }));
+          window.__frames = 0;
+          (function count() { window.__frames++; requestAnimationFrame(count); })();
+          window.__since = performance.now();
+          document.getElementById("player").play();`,
+        args: [css],
       });
       await Bun.sleep(1000);
-      const trace = resolve(OUT, `${film}.trace`);
+      const slug = name.replace(/[^a-z0-9]+/gi, "-");
+      const trace = resolve(OUT, `${slug}.trace`);
       execFileSync(
         "sudo",
         [
@@ -189,7 +242,12 @@ try {
         ],
         { stdio: "inherit" },
       );
-      const xmlPath = resolve(OUT, `${film}.xml`);
+      const fps = await wd(base, "POST", `${s}/execute/sync`, {
+        script:
+          "return Math.round((window.__frames / (performance.now() - window.__since)) * 10000) / 10",
+        args: [],
+      });
+      const xmlPath = resolve(OUT, `${slug}.xml`);
       execFileSync("sudo", ["-n", "chmod", "-R", "a+rwX", trace]);
       execFileSync("xcrun", [
         "xctrace",
@@ -201,9 +259,10 @@ try {
         "--xpath",
         '/trace-toc/run[@number="1"]/data/table[@schema="time-profile"]',
       ]);
-      report[film] = summarize(parseSamples(readFileSync(xmlPath, "utf8")), seconds);
+      const summary = { fps, ...summarize(parseSamples(readFileSync(xmlPath, "utf8")), seconds) };
+      report[name] = summary;
       console.log(
-        `[profile] ${film}: ${JSON.stringify((report[film] as { perProcessMsPerSecond: unknown }).perProcessMsPerSecond)}`,
+        `[profile] ${name}: ${fps} fps, main thread per frame ${JSON.stringify(summary.mainThreadPerFrame)}`,
       );
     } finally {
       await wd(base, "DELETE", s).catch(() => {});
@@ -217,7 +276,9 @@ try {
 writeFileSync(resolve(OUT, "profile.json"), JSON.stringify(report, null, 2) + "\n");
 const md = Object.entries(report)
   .map(([film, r]) => {
-    const { perProcessMsPerSecond, detail } = r as ReturnType<typeof summarize>;
+    const { fps, mainThreadPerFrame, perProcessMsPerSecond, detail } = r as {
+      fps: number;
+    } & ReturnType<typeof summarize>;
     const rows = detail
       .map(
         (d) =>
@@ -225,7 +286,7 @@ const md = Object.entries(report)
           d.inclusive.map((f) => `| ${f.pct} | ${f.name.replace(/\|/g, "\\|")} |`).join("\n"),
       )
       .join("\n\n");
-    return `### ${film}\n\nCPU ms per second by process: ${JSON.stringify(perProcessMsPerSecond)}\n\n${rows}`;
+    return `### ${film}\n\n${fps} fps; main-thread CPU per frame: ${JSON.stringify(mainThreadPerFrame)}\n\nCPU ms per second by process: ${JSON.stringify(perProcessMsPerSecond)}\n\n${rows}`;
   })
   .join("\n\n");
 writeFileSync(resolve(OUT, "profile.md"), md + "\n");
