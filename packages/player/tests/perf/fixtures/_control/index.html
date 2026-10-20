@@ -18,14 +18,21 @@
   </head>
   <body>
     <script>
-      // ?src=&n=&rate=, &tick=1 (per-frame media writes),
+      // ?media=<key>&n=&rate=, &tick=1 (per-frame media writes),
       // &animate=scale|translate|css (ancestor transform every frame; css runs on the compositor).
       (async function () {
         var q = new URLSearchParams(location.search);
+        var MEDIA = {
+          "grid-sample": "../10-video-grid/sample.mp4",
+          "h264-1080": "../_media/h264-1080.mp4",
+          "alpha-vp9": "../_media/alpha-vp9.webm",
+        };
+        var src = MEDIA[q.get("media")];
+        if (!src) throw new Error("unknown media " + q.get("media"));
         var videos = [];
         for (var i = 0; i < Number(q.get("n") || 1); i++) {
           var v = document.createElement("video");
-          v.src = q.get("src");
+          v.src = src;
           v.muted = true;
           v.playsInline = true;
           v.preload = "auto";

@@ -26,7 +26,7 @@ const DRIVERS: Record<
     cmd: "safaridriver",
     args: (port) => ["-p", String(port)],
     caps: { browserName: "safari" },
-    procs: /com\.apple\.WebKit\.|\/Safari$/,
+    procs: /\/(?:com\.apple\.WebKit\.\w+|Safari)$/,
   },
   chrome: {
     cmd: process.env.CHROMEDRIVER ?? "chromedriver",
@@ -82,7 +82,7 @@ async function startDriver(browser: Browser, port: number): Promise<ChildProcess
 
 /** Resident memory of the browser's own processes, in MB (WebDriver has no memory API Safari answers). */
 function browserRssMb(procs: RegExp): number {
-  const out = execFileSync("ps", ["-axo", "rss=,command="], { encoding: "utf-8" });
+  const out = execFileSync("ps", ["-axo", "rss=,comm="], { encoding: "utf-8" });
   let kb = 0;
   for (const line of out.split("\n")) {
     const m = line.trim().match(/^(\d+)\s+(.*)$/);
@@ -150,38 +150,38 @@ function score(page: PageResult) {
 
 // The same media played natively, without the player: separates browser decoder drops from runtime-caused ones.
 const CONTROLS = [
-  { name: "grid-sample", src: "/fixtures/10-video-grid/sample.mp4", n: 10, rate: 1 },
-  { name: "grid-sample-rate-1.03", src: "/fixtures/10-video-grid/sample.mp4", n: 10, rate: 1.03 },
+  { name: "grid-sample", media: "grid-sample", n: 10, rate: 1 },
+  { name: "grid-sample-rate-1.03", media: "grid-sample", n: 10, rate: 1.03 },
   {
     name: "grid-sample-tick",
-    src: "/fixtures/10-video-grid/sample.mp4",
+    media: "grid-sample",
     n: 10,
     rate: 1,
     extra: "&tick=1",
   },
   {
     name: "grid-sample-animate",
-    src: "/fixtures/10-video-grid/sample.mp4",
+    media: "grid-sample",
     n: 10,
     rate: 1,
     extra: "&animate=scale",
   },
   {
     name: "grid-sample-translate",
-    src: "/fixtures/10-video-grid/sample.mp4",
+    media: "grid-sample",
     n: 10,
     rate: 1,
     extra: "&animate=translate",
   },
   {
     name: "grid-sample-css",
-    src: "/fixtures/10-video-grid/sample.mp4",
+    media: "grid-sample",
     n: 10,
     rate: 1,
     extra: "&animate=css",
   },
-  { name: "16x1080", src: "/fixtures/_media/h264-1080.mp4", n: 16, rate: 1 },
-  { name: "alpha-webm", src: "/fixtures/_media/alpha-vp9.webm", n: 6, rate: 1 },
+  { name: "16x1080", media: "h264-1080", n: 16, rate: 1 },
+  { name: "alpha-webm", media: "alpha-vp9", n: 6, rate: 1 },
 ];
 
 async function runControl(
@@ -196,7 +196,7 @@ async function runControl(
   const s = `/session/${session.sessionId}`;
   try {
     await wd(base, "POST", `${s}/url`, {
-      url: `${origin}/fixtures/_control/index.html?src=${c.src}&n=${c.n}&rate=${c.rate}${c.extra ?? ""}`,
+      url: `${origin}/fixtures/_control/index.html?media=${c.media}&n=${c.n}&rate=${c.rate}${c.extra ?? ""}`,
     });
     const deadline = Date.now() + 60_000;
     while (Date.now() < deadline) {
