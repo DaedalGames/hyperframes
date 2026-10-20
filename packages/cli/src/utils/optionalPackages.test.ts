@@ -27,6 +27,7 @@ import {
   loadSharp,
   loadSharpInBackground,
   optionalPackageDir,
+  requireSharpBesideCli,
   SHARP_VERSION,
   type OptionalPackageDeps,
 } from "./optionalPackages.js";
@@ -137,12 +138,12 @@ describe("loadOptionalPackage", () => {
 
 describe("loadSharp", () => {
   const sharp = { fake: "sharp" };
-  const absent = async () => null;
+  const absent = () => null;
 
   it("uses the installed copy, whatever its version, without installing", async () => {
     const { deps, install } = fakeDeps();
 
-    expect(await loadSharp("compare", deps, async () => sharp as never)).toBe(sharp);
+    expect(await loadSharp("compare", deps, () => sharp as never)).toBe(sharp);
     expect(install).not.toHaveBeenCalled();
   });
 
@@ -176,6 +177,24 @@ describe("loadSharp", () => {
     );
   });
 
+  it("with HYPERFRAMES_NO_OPTIONAL_INSTALL=1, fails fast with a stable message instead of installing", async () => {
+    vi.stubEnv("HYPERFRAMES_NO_OPTIONAL_INSTALL", "1");
+    try {
+      const { deps, install, log } = fakeDeps();
+
+      await expect(loadSharp("compare", deps, absent)).rejects.toThrow(
+        "sharp is not installed and HYPERFRAMES_NO_OPTIONAL_INSTALL=1 turns off installing it; compare needs it.",
+      );
+      await expect(
+        loadOptionalPackage("onnxruntime-node", "background removal", deps),
+      ).rejects.toThrow("onnxruntime-node is not installed and HYPERFRAMES_NO_OPTIONAL_INSTALL=1");
+      expect(install).not.toHaveBeenCalled();
+      expect(log).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("installs a version the CLI's own dependency range accepts", () => {
     const manifest = JSON.parse(
       readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
@@ -199,7 +218,7 @@ describe("loadSharpInBackground", () => {
         }),
     );
     deps.install = install;
-    const load = () => loadSharpInBackground("image thumbnails", deps, async () => null);
+    const load = () => loadSharpInBackground("image thumbnails", deps, () => null);
 
     await expect(load()).rejects.toThrow("installing it once for image thumbnails");
     await expect(load()).rejects.toThrow("installing it once for image thumbnails");
@@ -207,6 +226,71 @@ describe("loadSharpInBackground", () => {
 
     finish();
     expect(await load()).toBe(sharp);
+  });
+});
+
+describe("requireSharpBesideCli", () => {
+  function sharpPackage(dir: string, body: string) {
+    const pkg = join(dir, "node_modules", "sharp");
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(
+      join(pkg, "package.json"),
+      JSON.stringify({ version: "0.1.0", main: "index.js" }),
+    );
+    writeFileSync(join(pkg, "index.js"), body);
+  }
+
+  it("loads whatever version is installed beside the CLI, and null when there is none", () => {
+    const root = mkdtempSync(join(tmpdir(), "hf-sharp-beside-"));
+    const cliUrl = pathToFileURL(join(root, "node_modules", "hyperframes", "dist", "cli.js")).href;
+    try {
+      expect(requireSharpBesideCli("compare", cliUrl)).toBeNull();
+      sharpPackage(root, `module.exports = { copy: "beside" };`);
+      expect(requireSharpBesideCli("compare", cliUrl)).toEqual({ copy: "beside" });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("names the feature when the installed copy cannot load", () => {
+    const root = mkdtempSync(join(tmpdir(), "hf-sharp-broken-"));
+    sharpPackage(root, `throw new Error("libvips was blocked");`);
+    const cliUrl = pathToFileURL(join(root, "node_modules", "hyperframes", "dist", "cli.js")).href;
+    try {
+      expect(() => requireSharpBesideCli("remove-background", cliUrl)).toThrow(
+        "remove-background needs sharp, which is installed but could not load (libvips was blocked). ",
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("finds a host's runtime pack on NODE_PATH", () => {
+    const root = mkdtempSync(join(tmpdir(), "hf-sharp-node-path-"));
+    const pack = join(root, "pack");
+    sharpPackage(pack, `module.exports = { copy: "pack" };`);
+    // Bundled into a folder with no node_modules above it, so only NODE_PATH can supply sharp.
+    const bundle = join(root, "cli", "optionalPackages.mjs");
+    buildSync({
+      entryPoints: [fileURLToPath(new URL("./optionalPackages.ts", import.meta.url))],
+      bundle: true,
+      platform: "node",
+      format: "esm",
+      outfile: bundle,
+    });
+    const script = `const m = await import(${JSON.stringify(pathToFileURL(bundle).href)});
+console.log(JSON.stringify(await m.loadSharp("compare", { cacheDir: "/no-cache", loadBesideCli: () => null,
+  loadInstalled: () => null, install: async () => { throw new Error("installed"); }, log() {} })));`;
+    try {
+      const child = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+        encoding: "utf-8",
+        env: { ...process.env, NODE_PATH: join(pack, "node_modules") },
+      });
+      expect(child.stderr).toBe("");
+      expect(JSON.parse(child.stdout)).toEqual({ copy: "pack" });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

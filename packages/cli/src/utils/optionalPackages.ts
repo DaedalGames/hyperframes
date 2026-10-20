@@ -102,13 +102,14 @@ export async function loadOptionalPackage<N extends OptionalPackage>(
 }
 
 type Sharp = typeof import("sharp").default;
+type FindSharp = (feature: string) => Sharp | null;
 
 export async function loadSharp(
   feature: string,
   deps: OptionalPackageDeps = defaultDeps,
-  besideCli = importSharpBesideCli,
+  besideCli: FindSharp = requireSharpBesideCli,
 ): Promise<Sharp> {
-  return (await besideCli(feature)) ?? sharpExport(await loadOrInstall("sharp", feature, deps));
+  return besideCli(feature) ?? sharpExport(await loadOrInstall("sharp", feature, deps));
 }
 
 let backgroundSharpInstall: Promise<unknown> | undefined;
@@ -117,9 +118,9 @@ let backgroundSharpInstall: Promise<unknown> | undefined;
 export async function loadSharpInBackground(
   feature: string,
   deps: OptionalPackageDeps = defaultDeps,
-  besideCli = importSharpBesideCli,
+  besideCli: FindSharp = requireSharpBesideCli,
 ): Promise<Sharp> {
-  const present = await loadInstalledSharp(feature, deps, besideCli);
+  const present = loadInstalledSharp(feature, deps, besideCli);
   if (present !== null) return present;
   backgroundSharpInstall ??= loadOrInstall("sharp", feature, deps).catch((err: unknown) =>
     deps.log((err as Error).message),
@@ -127,27 +128,26 @@ export async function loadSharpInBackground(
   throw new Error(`sharp is not installed yet; installing it once for ${feature}`);
 }
 
-async function loadInstalledSharp(
+function loadInstalledSharp(
   feature: string,
-  deps: OptionalPackageDeps = defaultDeps,
-  besideCli = importSharpBesideCli,
-): Promise<Sharp | null> {
-  const found = (await besideCli(feature)) ?? loadPresent("sharp", deps);
+  deps: OptionalPackageDeps,
+  besideCli: FindSharp,
+): Sharp | null {
+  const found = besideCli(feature) ?? loadPresent("sharp", deps);
   return found === null ? null : sharpExport(found);
 }
 
-/** Any version counts: npm resolved it against the CLI's own range. A copy that fails to load throws. */
-async function importSharpBesideCli(
-  feature: string,
-  cliUrl = import.meta.url,
-): Promise<Sharp | null> {
+/** Any version counts, found as require finds it (NODE_PATH included). A copy that fails to load throws. */
+export function requireSharpBesideCli(feature: string, cliUrl = import.meta.url): Sharp | null {
+  const req = createRequire(cliUrl);
+  let entry: string;
   try {
-    createRequire(cliUrl).resolve("sharp");
+    entry = req.resolve("sharp");
   } catch {
     return null;
   }
   try {
-    return sharpExport(await import("sharp"));
+    return sharpExport(req(entry));
   } catch (err) {
     throw new Error(
       `${feature} needs sharp, which is installed but could not load (${(err as Error).message}). ` +
@@ -171,6 +171,11 @@ async function loadOrInstall(
   const dir = optionalPackageDir(name, deps.cacheDir);
 
   const version = versionOf(name);
+  if (process.env["HYPERFRAMES_NO_OPTIONAL_INSTALL"] === "1") {
+    throw new Error(
+      `${name} is not installed and HYPERFRAMES_NO_OPTIONAL_INSTALL=1 turns off installing it; ${feature} needs it.`,
+    );
+  }
   deps.log(`installing ${name} for ${feature}, once`);
   try {
     await deps.install(dir, name, version);

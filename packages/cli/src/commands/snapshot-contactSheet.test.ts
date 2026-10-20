@@ -81,7 +81,7 @@ describe("snapshot contact sheet failures", () => {
 
   afterEach(() => {
     vi.doUnmock("../capture/contactSheet.js");
-    vi.doUnmock("sharp");
+    vi.doUnmock("../utils/optionalPackages.js");
     vi.restoreAllMocks();
     rmSync(project, { recursive: true, force: true });
   });
@@ -97,8 +97,9 @@ describe("snapshot contact sheet failures", () => {
         throw new Error(message);
       });
       if (failure === "import") {
-        vi.doMock("sharp", () => ({
-          get default() {
+        vi.doMock("../utils/optionalPackages.js", async (importOriginal) => ({
+          ...(await importOriginal<typeof import("../utils/optionalPackages.js")>()),
+          loadSharp: async () => {
             throw new Error(message);
           },
         }));

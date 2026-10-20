@@ -146,14 +146,14 @@ describe("background-removal/inference — missing optional native modules", () 
     vi.doUnmock("../utils/optionalPackages.js");
   });
 
-  it("createSession throws an actionable error when sharp can't load", async () => {
-    vi.doMock("sharp", () => {
-      throw new Error("Could not load the sharp module");
-    });
+  it("createSession asks the loader for sharp first and surfaces its error", async () => {
+    const loadSharp = vi.fn().mockRejectedValue(new Error("remove-background needs sharp"));
+    const loadOptionalPackage = vi.fn();
+    vi.doMock("../utils/optionalPackages.js", () => ({ loadOptionalPackage, loadSharp }));
     const { createSession } = await import("./inference.js");
-    await expect(createSession()).rejects.toThrow(
-      /remove-background needs sharp, which is installed but could not load[\s\S]*npm i sharp/,
-    );
-    vi.doUnmock("sharp");
+    await expect(createSession()).rejects.toThrow("remove-background needs sharp");
+    expect(loadSharp).toHaveBeenCalledWith("remove-background");
+    expect(loadOptionalPackage).not.toHaveBeenCalled();
+    vi.doUnmock("../utils/optionalPackages.js");
   });
 });
