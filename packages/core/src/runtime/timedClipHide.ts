@@ -18,10 +18,7 @@ const SKIPPABLE_CLIP = `[data-start]:not(video, audio, img, [${STUDIO_PREVIEW_UP
 export const SKIPPED_CLIP = `${SKIPPABLE_CLIP}[${CLIP_HIDDEN_ATTR}]`;
 const STUDIO_PREVIEW_MARK = `meta[name="${STUDIO_PREVIEW_MARK_META}"]`;
 const CONTENTS_ATTR = "data-hf-hidden-clip-contents";
-// Doubled to keep the weight the rule had when it also matched the inline hide.
-const HIDDEN_CLIP = `[${CLIP_HIDDEN_ATTR}][${CLIP_HIDDEN_ATTR}]`;
-// Compatibility path for shader-transitions builds that reveal clips by inline style alone (see
-// keepInlineHideRulesForOlderShaders); the [style] selector is what costs WebKit a re-serialization per write.
+const HIDDEN_CLIP_DOUBLED_FOR_WEIGHT = `[${CLIP_HIDDEN_ATTR}][${CLIP_HIDDEN_ATTR}]`;
 const HIDDEN_CLIP_BY_INLINE_STYLE = `[${CLIP_HIDDEN_ATTR}][style*="visibility: hidden"]`;
 const skipHiddenImages = (clip: string) =>
   `${SKIPPABLE_CLIP}${clip} img { display: none !important; }`;
@@ -61,9 +58,9 @@ export function hideTimedClipsUntilFirstPass(): void {
   if (!parent) return;
   const preview = document.querySelector(STUDIO_PREVIEW_MARK) !== null;
   if (preview && !skipsHiddenImages())
-    appendStyle(parent, SKIP_ATTR, skipHiddenImages(HIDDEN_CLIP));
+    appendStyle(parent, SKIP_ATTR, skipHiddenImages(HIDDEN_CLIP_DOUBLED_FOR_WEIGHT));
   if (!document.querySelector(`style[${CONTENTS_ATTR}]`))
-    appendStyle(parent, CONTENTS_ATTR, hideHiddenClipContents(HIDDEN_CLIP));
+    appendStyle(parent, CONTENTS_ATTR, hideHiddenClipContents(HIDDEN_CLIP_DOUBLED_FOR_WEIGHT));
   const win = window as FirstPassWindow;
   // A runtime that already initialised may never run another pass to lift a new rule.
   if (win.__hfFirstPassHidden || win.__hyperframeRuntimeBootstrapped) return;
@@ -83,7 +80,6 @@ export function revealTimedClipsAfterFirstPass(): boolean {
   return true;
 }
 
-/** Run once composition scripts have loaded. Removable once published builds older than revealClip are retired. */
 export function keepInlineHideRulesForOlderShaders(): void {
   if (!olderShaderBuildOnPage()) return;
   const skip = document.querySelector(`style[${SKIP_ATTR}]`);

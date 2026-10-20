@@ -375,11 +375,11 @@ describe("runtime entry", () => {
     const loads: HTMLMediaElement[] = [];
     const spyLoad = () => {
       loads.length = 0;
-      vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(function (
-        this: HTMLMediaElement,
-      ) {
-        loads.push(this);
-      });
+      vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(
+        function (this: HTMLMediaElement) {
+          loads.push(this);
+        },
+      );
     };
     const loadsOf = (...els: HTMLMediaElement[]) =>
       els.map((el) => loads.filter((loaded) => loaded === el).length);
