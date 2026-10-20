@@ -100,6 +100,15 @@ export async function bench(cfg) {
       await sleep(300);
     }
     const marksAtPlay = rasterMarks();
+    // Animations still running in the player's own UI at play time, e.g. a loader overlay left mid-hide.
+    const loader = host.shadowRoot.querySelector(".hfp-shader-loader");
+    const uiState = {
+      runningAnimations: host.shadowRoot.getAnimations().filter((a) => a.playState === "running")
+        .length,
+      loaderVisible: loader?.classList.contains("hfp-visible") === true,
+      loaderHiding: loader?.classList.contains("hfp-hiding") === true,
+    };
+    if (cfg.removeLoader) loader?.remove();
     const hostOps = { play: 0, seek: 0 };
     const hostProto = window.HTMLMediaElement.prototype;
     const hostPlay = hostProto.play;
@@ -146,6 +155,7 @@ export async function bench(cfg) {
       frameReads,
       proxyState,
       rasterMarks: { before: marksBefore, atPlay: marksAtPlay },
+      uiState,
       hostOps,
       perVideo: all.map((v, i) => {
         const a = startQuality.get(v);

@@ -4,4 +4,5 @@ export function bench(cfg: {
   countersOnly?: boolean;
   emptyProxies?: boolean;
   fullRaster?: boolean;
+  removeLoader?: boolean;
 }): Promise<unknown>;

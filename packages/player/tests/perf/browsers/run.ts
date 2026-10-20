@@ -240,6 +240,7 @@ function dropsBySteering(perVideo: PerVideo[] | undefined) {
 type ProxyReport = {
   proxyState?: { owner: number; count: number; playing: number };
   rasterMarks?: { before: number; atPlay: number };
+  uiState?: { runningAnimations: number; loaderVisible: boolean; loaderHiding: boolean };
   hostOps?: { play: number; seek: number };
 };
 
@@ -252,6 +253,9 @@ function proxyColumns(page: ProxyReport) {
     hostSeeks: num(page.hostOps?.seek),
     rasterMarksBefore: num(page.rasterMarks?.before),
     rasterMarksAtPlay: num(page.rasterMarks?.atPlay),
+    uiRunningAnimations: num(page.uiState?.runningAnimations),
+    loaderVisible: page.uiState?.loaderVisible === true,
+    loaderHiding: page.uiState?.loaderHiding === true,
   };
 }
 
@@ -269,12 +273,6 @@ const CONTROLS: Array<{
 }> = [
   { name: "grid-native", media: "grid-sample", n: 10, rate: 1 },
   { name: "grid-runtime-bare", film: "10-video-grid" },
-  { name: "grid-bare-player-attrs", film: "10-video-grid", extra: "&attrs=1" },
-  { name: "grid-bare-shadow-root", film: "10-video-grid", extra: "&shadow=1" },
-  { name: "grid-bare-player-messages", film: "10-video-grid", extra: "&messages=1" },
-  { name: "grid-bare-all-three", film: "10-video-grid", extra: "&attrs=1&shadow=1&messages=1" },
-  { name: "grid-bare-player-messages (2)", film: "10-video-grid", extra: "&messages=1" },
-  { name: "grid-bare-all-three (2)", film: "10-video-grid", extra: "&attrs=1&shadow=1&messages=1" },
 ];
 
 // Opens a page and returns the value it publishes on window[global] once it has one.
@@ -314,6 +312,7 @@ async function runFilm(
   countersOnly = false,
   emptyProxies = false,
   fullRaster = false,
+  removeLoader = false,
 ) {
   const session = await wd(base, "POST", "/session", {
     capabilities: { alwaysMatch: DRIVERS[browser].caps },
@@ -332,7 +331,14 @@ async function runFilm(
         (r) => { window.__bench = { ok: r }; },
         (e) => { window.__bench = { error: String(e && e.stack || e) }; });`,
       args: [
-        { playMs: PLAY_MS, seekFractions: SEEK_FRACTIONS, countersOnly, emptyProxies, fullRaster },
+        {
+          playMs: PLAY_MS,
+          seekFractions: SEEK_FRACTIONS,
+          countersOnly,
+          emptyProxies,
+          fullRaster,
+          removeLoader,
+        },
       ],
     });
     const deadline = Date.now() + 180_000;
@@ -422,12 +428,12 @@ try {
           }
         }
       }
-      for (const [fixture, fullRaster] of COUNTERS_ONLY_FILMS.flatMap((f) => [
+      for (const [fixture, removeLoader] of COUNTERS_ONLY_FILMS.flatMap((f) => [
         [f, false] as const,
         [f, true] as const,
       ])) {
         for (let run = 1; run <= runs; run++) {
-          const label = `${fixture} (counters only${fullRaster ? ", display scale 1" : ""})`;
+          const label = `${fixture} (counters only${removeLoader ? ", loader removed" : ""})`;
           try {
             const { page } = await runFilm(
               `http://127.0.0.1:${port}`,
@@ -436,7 +442,8 @@ try {
               fixture,
               true,
               false,
-              fullRaster,
+              false,
+              removeLoader,
             );
             const dropped = num(page.decoded.dropped) ?? 0;
             const total = num(page.decoded.total) ?? 0;
@@ -543,6 +550,9 @@ const cols = [
   "hostSeeks",
   "rasterMarksBefore",
   "rasterMarksAtPlay",
+  "uiRunningAnimations",
+  "loaderVisible",
+  "loaderHiding",
   "mediaSeeks",
   "rateWrites",
   "seekP50Ms",
