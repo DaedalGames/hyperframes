@@ -29,7 +29,6 @@ import { HyperframesApiError } from "./_gen/client.js";
 
 export interface UploadZipViaDirectResult {
   asset_id: string;
-  /** Public URL of the finalized asset. */
   url: string;
   size_bytes: number;
   duration_ms: number;

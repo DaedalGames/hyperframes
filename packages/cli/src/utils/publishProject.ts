@@ -378,9 +378,8 @@ function tryResolveExternal(
   return addExternalAsset(ctx, absPath);
 }
 
-/** Resolves a raw attribute or CSS `url()` value (plus the referrer's absolute
- * directory) to the archive path or absolute URL it should point at, or `null`
- * to leave it untouched. */
+/** Resolves a raw attribute or CSS `url()` value to the archive path or absolute
+ * URL it should point at, or `null` to leave it untouched. */
 export type HtmlAttributeResolver = (rawValue: string, referrerAbsDir: string) => string | null;
 
 function referenceFrom(entryPath: string, target: string): string {

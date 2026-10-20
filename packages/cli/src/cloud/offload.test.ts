@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { buildPublishFileMap } from "../utils/publishProject.js";
 import {
+  type GifPrep,
   OFFLOAD_MIN_BYTES,
   offloadHeavyMedia,
   type Reencoder,
@@ -214,12 +215,17 @@ describe("offloadHeavyMedia", () => {
     expect(upload).not.toHaveBeenCalled();
   });
 
-  it("keeps a zip copy of a file a script names, since only markup can be rewritten", async () => {
+  it("rewrites plain string literals in scripts and data, keeping a copy of a path a script builds", async () => {
     const dir = project({
-      "index.html": html(`<video src="clip.mp4"></video><script src="main.js"></script>`),
-      "main.js": `new Audio("music.mp3").play();`,
-      "clip.mp4": HEAVY,
+      "index.html": html(
+        `<script src="main.js"></script>` +
+          `<script>fetch('./media/clip.mp4'); video.src = \`media/clip.mp4\`;</script>`,
+      ),
+      "main.js": `new Audio("music.mp3").play(); const voice = \`media/\${name}\`; // voice.mp3`,
+      "data/cues.json": `{"track": "music.mp3"}`,
+      "media/clip.mp4": HEAVY,
       "music.mp3": HEAVY,
+      "voice.mp3": HEAVY,
     });
     const fileMap = buildPublishFileMap(dir);
 
@@ -229,11 +235,93 @@ describe("offloadHeavyMedia", () => {
       cachePath: cachePath(),
     });
 
-    expect(report.find((item) => item.path === "music.mp3")).toMatchObject({
+    const url = (path: string) => report.find((item) => item.path === path)!.url!;
+    const index = fileMap.get("index.html")!.toString();
+    expect(index).toContain(`fetch('${url("media/clip.mp4")}')`);
+    expect(index).toContain(`video.src = \`${url("media/clip.mp4")}\``);
+    expect(fileMap.get("main.js")!.toString()).toContain(`new Audio("${url("music.mp3")}")`);
+    expect(fileMap.get("data/cues.json")!.toString()).toBe(`{"track": "${url("music.mp3")}"}`);
+    expect(report.find((item) => item.path === "voice.mp3")).toMatchObject({
       kept_in_archive: true,
     });
-    expect(fileMap.has("music.mp3")).toBe(true);
-    expect(fileMap.has("clip.mp4")).toBe(false);
+    expect(fileMap.has("voice.mp3")).toBe(true);
+    expect(fileMap.has("music.mp3")).toBe(false);
+    expect(fileMap.has("media/clip.mp4")).toBe(false);
+  });
+
+  it("converts a still image the API refuses and leaves an animated one in the zip", async () => {
+    const dir = project({
+      "index.html": html(`<img src="still.avif" /><img src="moving.avif" />`),
+      "still.avif": HEAVY,
+      "moving.avif": Buffer.alloc(OFFLOAD_MIN_BYTES, 2),
+    });
+    const reencoder: Reencoder = {
+      choose: async (sourcePath) => (sourcePath.endsWith("still.avif") ? "image" : null),
+      run: async () => ({
+        bytes: Buffer.from("png"),
+        filename: "still.png",
+        contentType: "image/png",
+      }),
+    };
+    const upload = fakeUpload();
+    const fileMap = buildPublishFileMap(dir);
+
+    const report = await offloadHeavyMedia(dir, fileMap, {
+      apiBaseUrl: "https://api.example",
+      upload,
+      reencoder,
+      cachePath: cachePath(),
+    });
+
+    expect(report).toEqual([expect.objectContaining({ path: "still.avif", action: "reencode" })]);
+    expect(upload.mock.calls[0]![0]).toMatchObject({ contentType: "image/png" });
+    expect(fileMap.has("still.avif")).toBe(false);
+    expect(fileMap.has("moving.avif")).toBe(true);
+    expect(fileMap.get("index.html")!.toString()).toContain(`<img src="moving.avif">`);
+  });
+
+  it("offloads the video the renderer's GIF prep makes from an entry GIF, and drops the GIF", async () => {
+    const dir = project({
+      "index.html": html(`<img src="media/loop.gif" data-loop="true" data-duration="4" />`),
+      "compositions/scene.html": html(`<img src="media/other.gif" />`),
+      "media/loop.gif": HEAVY,
+      "media/other.gif": HEAVY,
+    });
+    const gifPrep = vi.fn<GifPrep>(async (input, options) => {
+      const outputPath = join(options.outputDir, "hfgif-v1-abc.webm");
+      writeFileSync(outputPath, HEAVY);
+      return {
+        html: input.replace(
+          `<img src="media/loop.gif" data-loop="true" data-duration="4" />`,
+          `<video src="${options.outputSrcPrefix}/hfgif-v1-abc.webm" loop></video>`,
+        ),
+        preparedGifs: [{ sourceSrc: "media/loop.gif", outputPath }],
+      };
+    });
+    const fileMap = buildPublishFileMap(dir);
+
+    const report = await offloadHeavyMedia(dir, fileMap, {
+      apiBaseUrl: "https://api.example",
+      upload: fakeUpload(),
+      gifPrep,
+      reencoder: { choose: async () => null, run: vi.fn() },
+      cachePath: cachePath(),
+    });
+
+    expect(gifPrep.mock.calls[0]![1]).toMatchObject({
+      projectDir: dir,
+      outputSrcPrefix: "_animated_gif",
+    });
+    expect(report).toEqual([
+      expect.objectContaining({ path: "_animated_gif/hfgif-v1-abc.webm", action: "upload" }),
+    ]);
+    expect(fileMap.get("index.html")!.toString()).toContain(
+      `<video src="https://assets.example/1/hfgif-v1-abc.webm" loop>`,
+    );
+    expect(fileMap.has("media/loop.gif")).toBe(false);
+    expect(fileMap.has("_animated_gif/hfgif-v1-abc.webm")).toBe(false);
+    // Sub-compositions are prepared by the renderer after inlining, so their GIFs stay in the zip.
+    expect(fileMap.has("media/other.gif")).toBe(true);
   });
 
   it("leaves small media and remote URLs alone", async () => {

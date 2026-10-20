@@ -18,6 +18,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, dirname, extname, join, posix, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { parseHTML } from "linkedom";
+import { parseAnimatedGifMetadata } from "@hyperframes/core";
 import { rewriteAssetPath } from "@hyperframes/parsers/asset-paths";
 import {
   cleanAssetUrl,
@@ -85,6 +86,8 @@ const AUDIO_EXTS = new Set([
   ".aiff",
   ".wma",
 ]);
+// Still images the API refuses; converted to PNG unless animated.
+const CONVERTIBLE_IMAGE_EXTS = new Set([".gif", ".avif", ".bmp", ".tif", ".tiff"]);
 
 /** Visually lossless re-encodes for media the asset API refuses or caps. Quality lives here. */
 const REENCODE_PRESETS = {
@@ -111,6 +114,12 @@ const REENCODE_PRESETS = {
     contentType: "audio/wav",
     args: ["-vn"],
     audio: ["-c:a", "pcm_s16le"],
+  },
+  image: {
+    ext: ".png",
+    contentType: "image/png",
+    args: ["-frames:v", "1"],
+    audio: [],
   },
 } as const;
 
@@ -139,15 +148,33 @@ export interface OffloadOptions {
   upload?: (file: UploadableFile) => Promise<{ asset_id: string; url: string }>;
   fetchImpl?: typeof fetch;
   cachePath?: string;
+  /** The composition the render starts from; its animated GIFs are prepared as video. */
+  entryPath?: string;
   /** Overrides ffprobe/ffmpeg for tests. */
   reencoder?: Reencoder;
+  /** Overrides the renderer's GIF preparation for tests. */
+  gifPrep?: GifPrep;
   onFile?: (item: OffloadedMedia) => void;
 }
 
+type MediaKind = "video" | "audio" | "image";
+
 export interface Reencoder {
-  choose: (sourcePath: string, kind: "video" | "audio") => Promise<PresetName>;
+  /** `null` keeps the file in the zip as authored. */
+  choose: (sourcePath: string, kind: MediaKind) => Promise<PresetName | null>;
   run: (sourcePath: string, preset: PresetName) => Promise<UploadableFile>;
 }
+
+export type GifPrep = (
+  html: string,
+  options: {
+    projectDir: string;
+    downloadDir: string;
+    outputDir: string;
+    outputSrcPrefix: string;
+    cacheDir: string;
+  },
+) => Promise<{ html: string; preparedGifs: Array<{ sourceSrc: string; outputPath: string }> }>;
 
 interface CacheEntry {
   asset_id: string;
@@ -184,11 +211,11 @@ async function stillServed(entry: CacheEntry, fetchImpl: typeof fetch): Promise<
   }
 }
 
-function mediaKind(path: string): "video" | "audio" | "image" | null {
+function mediaKind(path: string): MediaKind | null {
   const ext = extname(path).toLowerCase();
   if (VIDEO_EXTS.has(ext)) return "video";
   if (AUDIO_EXTS.has(ext)) return "audio";
-  if (ACCEPTED[ext]) return "image";
+  if (ACCEPTED[ext] || CONVERTIBLE_IMAGE_EXTS.has(ext)) return "image";
   return null;
 }
 
@@ -212,6 +239,7 @@ async function probeVideo(path: string): Promise<VideoProbe> {
     "stream=codec_name,pix_fmt,color_primaries,color_transfer,color_space:stream_tags",
     "-of",
     "json",
+    "--",
     path,
   ]);
   const stream = (JSON.parse(stdout).streams?.[0] ?? {}) as Record<string, unknown>;
@@ -253,7 +281,7 @@ async function ffmpegReencode(sourcePath: string, presetName: PresetName): Promi
   const ffmpeg = findFFmpeg();
   if (!ffmpeg) throw new Error(`Re-encoding needs ffmpeg. Install it: ${getFFmpegInstallHint()}`);
   const preset = REENCODE_PRESETS[presetName];
-  const probe = presetName === "audio" ? undefined : await probeVideo(sourcePath);
+  const probe = preset.contentType.startsWith("video/") ? await probeVideo(sourcePath) : undefined;
   const decoder = probe ? alphaDecoderArgs(probe) : [];
   const color = presetName === "hdrVideo" && probe ? hdrColorArgs(probe) : [];
   const workDir = mkdtempSync(join(tmpdir(), "hf-offload-"));
@@ -285,10 +313,35 @@ async function ffmpegReencode(sourcePath: string, presetName: PresetName): Promi
   }
 }
 
-async function choosePreset(sourcePath: string, kind: "video" | "audio"): Promise<PresetName> {
+async function choosePreset(sourcePath: string, kind: MediaKind): Promise<PresetName | null> {
   if (kind === "audio") return "audio";
+  // An animated image's first frame is not the image; such files stay in the zip.
+  if (kind === "image") return (await isAnimatedImage(sourcePath)) ? null : "image";
   const probe = await probeVideo(sourcePath);
   return probe.alpha ? "alphaVideo" : probe.hdr ? "hdrVideo" : "video";
+}
+
+async function isAnimatedImage(path: string): Promise<boolean> {
+  if (extname(path).toLowerCase() === ".gif") {
+    return parseAnimatedGifMetadata(readFileSync(path))?.animated ?? true;
+  }
+  const ffprobe = findFFprobe();
+  if (!ffprobe) return true;
+  try {
+    const { stdout } = await execFileAsync(ffprobe, [
+      "-v",
+      "error",
+      "-show_entries",
+      "stream=nb_frames",
+      "-of",
+      "csv=p=0",
+      "--",
+      path,
+    ]);
+    return stdout.split("\n").some((line) => Number(line) > 1);
+  } catch {
+    return true;
+  }
 }
 
 const ffmpegReencoder: Reencoder = { choose: choosePreset, run: ffmpegReencode };
@@ -316,6 +369,8 @@ interface OffloadContext {
   fetchImpl: typeof fetch;
   reencoder: Reencoder;
   tempFiles: string[];
+  /** Staged GIFs the entry composition no longer shows as images. */
+  preparedGifSources: string[];
 }
 
 interface FilePlan {
@@ -337,10 +392,10 @@ async function planFile(
   if (accepted && bytes.byteLength <= accepted.maxBytes) {
     return { key: keyFor("as-is"), sourcePath: "", contentType: accepted.contentType };
   }
-  // Images the API refuses or caps stay in the zip; the archive size check names them.
-  if (kind === "image") return null;
   const sourcePath = sourcePathFor(ctx.absDir, path, bytes, ctx.tempFiles);
   const preset = await ctx.reencoder.choose(sourcePath, kind);
+  // Files left as authored stay in the zip; the archive size check names them.
+  if (!preset) return null;
   // Keyed by encode settings too, so changing a preset re-encodes instead of reusing old output.
   return { key: keyFor(JSON.stringify(REENCODE_PRESETS[preset])), preset, sourcePath };
 }
@@ -391,9 +446,36 @@ async function uploadPlanned(
   return asset.url;
 }
 
+const GIF_PREFIX = "_animated_gif";
+
+// The renderer's own GIF prep turns each animated <img> into a seek-synced WebM <video>, which then
+// offloads like any video. Sub-compositions are prepared by the renderer after inlining, so not here.
+async function prepareEntryGifs(ctx: OffloadContext, fileMap: Map<string, Buffer>): Promise<void> {
+  const entryPath = ctx.opts.entryPath ?? "index.html";
+  const html = fileMap.get(entryPath)?.toString("utf-8");
+  if (!html || !/\.gif\b/i.test(html)) return;
+  const prep = ctx.opts.gifPrep ?? (await import("@hyperframes/producer")).prepareAnimatedGifInputs;
+  const outputDir = mkdtempSync(join(tmpdir(), "hf-offload-gif-"));
+  ctx.tempFiles.push(outputDir);
+  const result = await prep(html, {
+    projectDir: ctx.absDir,
+    downloadDir: outputDir,
+    outputDir,
+    outputSrcPrefix: posix.relative(posix.dirname(entryPath), GIF_PREFIX),
+    cacheDir: join(homedir(), ".cache", "hyperframes", "animated-gif"),
+  });
+  if (result.preparedGifs.length === 0) return;
+  fileMap.set(entryPath, Buffer.from(result.html, "utf-8"));
+  for (const gif of result.preparedGifs) {
+    fileMap.set(`${GIF_PREFIX}/${basename(gif.outputPath)}`, readFileSync(gif.outputPath));
+    const source = resolveLocalAssetCandidates(ctx.absDir, cleanAssetUrl(gif.sourceSrc))[0];
+    if (source) ctx.preparedGifSources.push(relative(ctx.absDir, source).replaceAll("\\", "/"));
+  }
+}
+
 /**
  * Upload each heavy media file as an asset (or reuse a cached one still served), point its references at the
- * asset URL and drop it from `fileMap`. Without `upload`, plans the same outcome with no encode or network.
+ * asset URL and drop it from `fileMap`. Without `upload`, nothing uploads and only animated GIFs are encoded.
  */
 export async function offloadHeavyMedia(
   projectDir: string,
@@ -409,10 +491,12 @@ export async function offloadHeavyMedia(
     fetchImpl: opts.fetchImpl ?? fetch,
     reencoder: opts.reencoder ?? ffmpegReencoder,
     tempFiles: [],
+    preparedGifSources: [],
   };
   const urls = new Map<string, string>();
   const report: OffloadedMedia[] = [];
   try {
+    await prepareEntryGifs(ctx, fileMap);
     for (const [path, bytes] of [...fileMap].sort(([a], [b]) => a.localeCompare(b))) {
       const item = await offloadFile(ctx, path, bytes);
       if (!item) continue;
@@ -425,19 +509,29 @@ export async function offloadHeavyMedia(
     for (const dir of ctx.tempFiles) rmSync(dir, { recursive: true, force: true });
   }
 
-  if (urls.size === 0) return report;
-  rewriteReferences(ctx.absDir, fileMap, urls);
-  const assetUrls = [...urls.values()];
+  if (urls.size > 0) rewriteReferences(ctx.absDir, fileMap, urls);
+  dropReplacedFiles(fileMap, report, ctx.preparedGifSources, [...urls.values()]);
+  return report;
+}
+
+function dropReplacedFiles(
+  fileMap: Map<string, Buffer>,
+  report: OffloadedMedia[],
+  preparedGifSources: string[],
+  assetUrls: string[],
+): void {
   for (const item of report) {
     if (isStillMentioned(fileMap, item.path, assetUrls)) item.kept_in_archive = true;
     else fileMap.delete(item.path);
   }
-  return report;
+  for (const gif of preparedGifSources) {
+    if (!isStillMentioned(fileMap, gif, assetUrls)) fileMap.delete(gif);
+  }
 }
 
 const TEXT_EXTS = /\.(html?|css|m?js|cjs|json|svg|xml|txt)$/i;
 
-// A file named only in script or data text has no reference we can rewrite, so it keeps a zip copy.
+// A file still named after rewriting (say, built by string concatenation) keeps a zip copy.
 function isStillMentioned(
   fileMap: Map<string, Buffer>,
   path: string,
@@ -453,12 +547,14 @@ function isStillMentioned(
   return false;
 }
 
+type UrlFor = (rootRelative: string) => string | null;
+
 function rewriteReferences(
   absDir: string,
   fileMap: Map<string, Buffer>,
   urls: Map<string, string>,
 ): void {
-  const urlFor = (rootRelative: string): string | null => {
+  const urlFor: UrlFor = (rootRelative) => {
     for (const candidate of resolveLocalAssetCandidates(absDir, rootRelative)) {
       const url = urls.get(relative(absDir, candidate).replaceAll("\\", "/"));
       if (url) return url;
@@ -467,41 +563,73 @@ function rewriteReferences(
   };
 
   for (const [entryPath, content] of [...fileMap]) {
-    const isHtml = /\.html?$/i.test(entryPath);
-    if (!isHtml && !entryPath.toLowerCase().endsWith(".css")) continue;
-    const referrerAbsDir = resolve(absDir, dirname(entryPath));
-    const resolveTarget: HtmlAttributeResolver = (raw) => {
-      const clean = cleanAssetUrl(raw);
-      if (!clean || isRemoteOrInlineUrl(clean)) return null;
-      if (clean.startsWith("/")) return urlFor(clean);
-      // HTML srcs resolve the way the renderer inlines sub-compositions; a stylesheet's url() is relative to it.
-      return urlFor(
-        isHtml
-          ? rewriteAssetPath(entryPath, clean, (p) => fileMap.has(p))
-          : posix.join(posix.dirname(entryPath), clean),
-      );
-    };
-
-    if (!isHtml) {
-      const result = rewriteCssUrls(
-        content.toString("utf-8"),
-        referrerAbsDir,
-        entryPath,
-        resolveTarget,
-      );
-      if (result.modified) fileMap.set(entryPath, Buffer.from(result.css, "utf-8"));
-      continue;
-    }
-    const { document } = parseHTML(content.toString("utf-8"));
-    const attrs = rewriteHtmlAttributes(document, referrerAbsDir, entryPath, resolveTarget, {
-      attrs: ["src", "poster", "href"],
-    });
-    const srcsets = rewriteSrcsets(document, resolveTarget);
-    const styles = rewriteStyleBlocks(document, referrerAbsDir, entryPath, resolveTarget);
-    if (attrs || srcsets || styles) {
-      fileMap.set(entryPath, Buffer.from(document.toString(), "utf-8"));
-    }
+    const text = content.toString("utf-8");
+    const next = /\.html?$/i.test(entryPath)
+      ? rewriteHtmlEntry(absDir, entryPath, text, urlFor, fileMap)
+      : /\.css$/i.test(entryPath)
+        ? rewriteCssEntry(absDir, entryPath, text, urlFor)
+        : /\.(m?js|cjs|json)$/i.test(entryPath)
+          ? rewriteStringLiterals(text, urlFor)
+          : null;
+    if (next !== null) fileMap.set(entryPath, Buffer.from(next, "utf-8"));
   }
+}
+
+function localTarget(raw: string, toRootRelative: (clean: string) => string, urlFor: UrlFor) {
+  const clean = cleanAssetUrl(raw);
+  if (!clean || isRemoteOrInlineUrl(clean)) return null;
+  return urlFor(clean.startsWith("/") ? clean : toRootRelative(clean));
+}
+
+function rewriteCssEntry(absDir: string, entryPath: string, css: string, urlFor: UrlFor) {
+  // A stylesheet's url() resolves against the stylesheet itself.
+  const result = rewriteCssUrls(css, resolve(absDir, dirname(entryPath)), entryPath, (raw) =>
+    localTarget(raw, (clean) => posix.join(posix.dirname(entryPath), clean), urlFor),
+  );
+  return result.modified ? result.css : null;
+}
+
+function rewriteHtmlEntry(
+  absDir: string,
+  entryPath: string,
+  html: string,
+  urlFor: UrlFor,
+  fileMap: Map<string, Buffer>,
+): string | null {
+  const referrerAbsDir = resolve(absDir, dirname(entryPath));
+  // Sub-composition srcs resolve the way the renderer inlines them.
+  const resolveTarget: HtmlAttributeResolver = (raw) =>
+    localTarget(raw, (clean) => rewriteAssetPath(entryPath, clean, (p) => fileMap.has(p)), urlFor);
+  const { document } = parseHTML(html);
+  const attrs = rewriteHtmlAttributes(document, referrerAbsDir, entryPath, resolveTarget, {
+    attrs: ["src", "poster", "href"],
+  });
+  const srcsets = rewriteSrcsets(document, resolveTarget);
+  const styles = rewriteStyleBlocks(document, referrerAbsDir, entryPath, resolveTarget);
+  let scripts = false;
+  for (const script of document.querySelectorAll("script")) {
+    if (script.hasAttribute("src")) continue;
+    const next = rewriteStringLiterals(script.textContent ?? "", urlFor);
+    if (next === null) continue;
+    script.textContent = next;
+    scripts = true;
+  }
+  return attrs || srcsets || styles || scripts ? document.toString() : null;
+}
+
+// A plain string literal: no escapes, interpolation or line breaks.
+const STRING_LITERAL_RE = /(["'`])([^"'`\\\n$]+)\1/g;
+
+/** Script URLs resolve against the page, which the renderer roots at the project. */
+function rewriteStringLiterals(code: string, urlFor: UrlFor): string | null {
+  let modified = false;
+  const next = code.replace(STRING_LITERAL_RE, (full, quote: string, value: string) => {
+    const url = localTarget(value, (clean) => clean, urlFor);
+    if (!url) return full;
+    modified = true;
+    return `${quote}${url}${quote}`;
+  });
+  return modified ? next : null;
 }
 
 function rewriteSrcsets(document: Document, resolveTarget: HtmlAttributeResolver): boolean {

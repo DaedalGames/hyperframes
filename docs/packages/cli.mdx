@@ -1798,12 +1798,15 @@ Keep them narrow — a dynamically selected asset may have no static reference t
 protect it.
 
 Media files of 5 MB or more go up as HeyGen assets before zipping, and the
-zip's copy of each HTML and CSS file points at the asset URL instead; your
-project files are not changed. Uploads are cached by content, so a re-render
-uploads only what changed. Media the asset API does not take as is (for example
-MKV, FLAC or M4A, or video over 200 MB) is re-encoded on your machine at
-visually lossless quality first, which needs ffmpeg. A file a script names
-(rather than markup or CSS) also stays in the zip.
+zip's copy of each HTML, CSS, script and JSON file points at the asset URL
+instead; your project files are not changed. Uploads are cached by content, so
+a re-render uploads only what changed. Media the asset API does not take as is
+is converted on your machine first, which needs ffmpeg: video (for example MKV,
+or over 200 MB) and audio (for example FLAC or M4A) at visually lossless
+quality, still images such as AVIF to PNG, and animated GIFs in the entry
+composition to the same seekable video the renderer makes from them. A file a
+script reaches by building its path, rather than naming it in a plain string,
+also stays in the zip, as do animated GIFs inside sub-compositions.
 
 The zip has to come in under 200 MB — the direct-upload cap — or the command
 stops before uploading it and names the largest files left. Use `--dry-run`

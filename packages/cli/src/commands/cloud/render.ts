@@ -602,8 +602,8 @@ async function prepareLocalArchive(
     console.log("");
     console.log(`${c.accent("◆")}  Zipping ${c.accent(project.name)}`);
   }
-  const fileMap = stageProjectFiles(project, composition);
-  const offloaded = await offloadMedia(project, fileMap, asJson, upload);
+  const { fileMap, entryPath } = stageProjectFiles(project, composition);
+  const offloaded = await offloadMedia(project, fileMap, entryPath, asJson, upload);
 
   const archive = zipPublishFileMap(fileMap);
   if (!asJson) {
@@ -620,7 +620,7 @@ async function prepareLocalArchive(
 function stageProjectFiles(
   project: ProjectDir,
   composition: string | undefined,
-): Map<string, Buffer> {
+): { fileMap: Map<string, Buffer>; entryPath: string } {
   try {
     const fileMap = buildPublishFileMap(project.dir);
     const entryPath = relative(
@@ -632,7 +632,7 @@ function stageProjectFiles(
         `Composition "${composition ?? "index.html"}" is excluded from the archive. Check .hyperframesignore.`,
       );
     }
-    return fileMap;
+    return { fileMap, entryPath };
   } catch (err) {
     const msg = normalizeErrorMessage(err);
     errorBox("Zip failed", msg, "Check the project and .hyperframesignore for missing files.");
@@ -643,6 +643,7 @@ function stageProjectFiles(
 async function offloadMedia(
   project: ProjectDir,
   fileMap: Map<string, Buffer>,
+  entryPath: string,
   asJson: boolean,
   upload: OffloadOptions["upload"],
 ): Promise<OffloadedMedia[]> {
@@ -651,6 +652,7 @@ async function offloadMedia(
     offloaded = await offloadHeavyMedia(project.dir, fileMap, {
       apiBaseUrl: resolveCloudBaseUrl(),
       upload,
+      entryPath,
       onFile: asJson
         ? undefined
         : (item) => console.log(c.dim(`   ${describeOffload(item, !upload)}`)),
@@ -660,7 +662,11 @@ async function offloadMedia(
   }
   if (!asJson) {
     for (const item of offloaded.filter((entry) => entry.kept_in_archive)) {
-      console.log(c.dim(`   ${item.path} also stays in the zip: a script or data file names it`));
+      console.log(
+        c.dim(
+          `   ${item.path} also stays in the zip: a script builds its path in a way that cannot be rewritten`,
+        ),
+      );
     }
   }
   return offloaded;
