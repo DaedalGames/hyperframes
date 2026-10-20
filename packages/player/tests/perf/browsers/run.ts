@@ -100,7 +100,7 @@ type PageResult = {
   frames: Array<{ ts: number; work: number | null; script: number | null; comp: number }>;
   decoded: { dropped: number; total: number };
   droppedTimeline: number[];
-  presentedFps: number | null;
+  videoStates: Array<Record<string, unknown>>;
   mediaOps: Record<"seek" | "rate" | "play" | "pause" | "load", number>;
   seeks: Array<{ target: number; ms: number; timedOut: boolean }>;
 };
@@ -139,7 +139,9 @@ function score(page: PageResult) {
     decoderFrames: page.decoded.total,
     mediaSeeks: page.mediaOps.seek,
     rateWrites: page.mediaOps.rate,
-    presentedFps: page.presentedFps,
+    presentedFps: page.videoCount
+      ? round((page.decoded.total - page.decoded.dropped) / page.videoCount / (PLAY_MS / 1000))
+      : null,
     seekP50Ms: round(percentile(seekMs, 50)),
     seekP95Ms: round(percentile(seekMs, 95)),
     seekTimeouts: page.seeks.filter((s) => s.timedOut).length,

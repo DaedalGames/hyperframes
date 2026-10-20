@@ -77,23 +77,19 @@
             requestAnimationFrame(frame);
           })(0);
         }
-        var presented = 0;
-        var counting = true;
-        videos.forEach(function onFrame(v) {
-          v.requestVideoFrameCallback(function again() {
-            if (!counting) return;
-            presented++;
-            v.requestVideoFrameCallback(again);
-          });
-        });
         var before = decoded();
         await new Promise((r) => setTimeout(r, 8000));
-        counting = false;
         var after = decoded();
         window.__control = {
           dropped: after.dropped - before.dropped,
           total: after.total - before.total,
-          presentedFps: Math.round((presented / videos.length / 8) * 10) / 10,
+          presentedFps:
+            Math.round(
+              ((after.total - before.total - (after.dropped - before.dropped)) /
+                videos.length /
+                8) *
+                10,
+            ) / 10,
         };
       })().catch((e) => (window.__control = { error: String(e) }));
     </script>

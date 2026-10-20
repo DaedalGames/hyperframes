@@ -124,19 +124,19 @@ window.__hfBench = async function bench(cfg) {
     () => droppedTimeline.push(decoded().dropped - decodedBefore.dropped),
     500,
   );
-  let presented = 0;
-  let countPresented = true;
-  for (const v of videos()) {
-    if (!v.requestVideoFrameCallback) continue;
-    v.requestVideoFrameCallback(function again() {
-      if (!countPresented) return;
-      presented++;
-      v.requestVideoFrameCallback(again);
-    });
-  }
+  const startTimes = new Map(videos().map((v) => [v, v.currentTime]));
   const play = await recordFrames(cfg.playMs);
-  countPresented = false;
-  const playingVideos = videos().filter((v) => !v.paused && !v.error).length;
+  const videoStates = videos().map((v) => ({
+    src: v.currentSrc.split("/").pop(),
+    readyState: v.readyState,
+    networkState: v.networkState,
+    paused: v.paused,
+    advanced: Math.round((v.currentTime - (startTimes.get(v) ?? 0)) * 100) / 100,
+    bufferedEnd: v.buffered.length
+      ? Math.round(v.buffered.end(v.buffered.length - 1) * 10) / 10
+      : 0,
+    shown: shown(v),
+  }));
   clearInterval(sampler);
   const decodedAfter = decoded();
   countOps = false;
@@ -188,9 +188,7 @@ window.__hfBench = async function bench(cfg) {
       total: decodedAfter.total - decodedBefore.total,
     },
     droppedTimeline,
-    presentedFps: playingVideos
-      ? Math.round((presented / playingVideos / (cfg.playMs / 1000)) * 10) / 10
-      : null,
+    videoStates,
     mediaOps,
     rateLog,
     seeks,
