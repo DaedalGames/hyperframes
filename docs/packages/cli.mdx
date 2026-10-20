@@ -1804,7 +1804,11 @@ a re-render uploads only what changed. Media the asset API does not take as is
 is converted on your machine first, which needs ffmpeg: video (for example MKV,
 or over 200 MB) and audio (for example FLAC or M4A) at visually lossless
 quality, still images such as AVIF to PNG, and animated GIFs in the entry
-composition to the same seekable video the renderer makes from them. A file a
+composition to the same seekable video the renderer makes from them. A video or audio file that has to be re-encoded is first cut to the
+parts the entry composition plays (plus half a second either side), and the
+composition's media starts shift to match, so a long source fits. Media inside
+sub-compositions, looping clips and files a script names keep their full
+length. A file a
 script reaches by building its path, rather than naming it in a plain string,
 also stays in the zip, as do animated GIFs inside sub-compositions.
 

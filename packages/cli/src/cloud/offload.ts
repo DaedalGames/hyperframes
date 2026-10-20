@@ -27,6 +27,7 @@ import {
 } from "@hyperframes/parsers/asset-resolution";
 import { findFFmpeg, findFFprobe, getFFmpegInstallHint } from "../browser/ffmpeg.js";
 import { formatBytes } from "../ui/format.js";
+import { type PlayedSegment, planTrim } from "./offloadTrim.js";
 import {
   type HtmlAttributeResolver,
   rewriteCssUrls,
@@ -131,6 +132,8 @@ export interface OffloadedMedia {
   /** What happened (or, on a dry run, would happen) to the file. */
   action: "upload" | "reencode" | "cached";
   url?: string;
+  /** Seconds of the source kept when only the parts the composition plays are uploaded. */
+  trimmed_to_seconds?: number;
   /** Still referenced from a script or data file, so a copy also stays in the zip. */
   kept_in_archive?: boolean;
 }
@@ -162,7 +165,13 @@ type MediaKind = "video" | "audio" | "image";
 export interface Reencoder {
   /** `null` keeps the file in the zip as authored. */
   choose: (sourcePath: string, kind: MediaKind) => Promise<PresetName | null>;
-  run: (sourcePath: string, preset: PresetName) => Promise<UploadableFile>;
+  /** Positions per second a cut may land on (the frame rate), or null when the file cannot be cut. */
+  trimGrid?: (sourcePath: string, kind: MediaKind) => Promise<number | null>;
+  run: (
+    sourcePath: string,
+    preset: PresetName,
+    segments?: PlayedSegment[],
+  ) => Promise<UploadableFile>;
 }
 
 export type GifPrep = (
@@ -277,7 +286,64 @@ function hdrColorArgs({ color }: VideoProbe): string[] {
   ];
 }
 
-async function ffmpegReencode(sourcePath: string, presetName: PresetName): Promise<UploadableFile> {
+async function hasAudioStream(ffprobe: string, path: string): Promise<boolean> {
+  const { stdout } = await execFileAsync(ffprobe, [
+    "-v",
+    "error",
+    "-select_streams",
+    "a",
+    "-show_entries",
+    "stream=index",
+    "-of",
+    "csv=p=0",
+    "--",
+    path,
+  ]);
+  return stdout.trim() !== "";
+}
+
+// Seconds floored to the microsecond, so a frame-aligned cut never rounds past its first frame.
+const seconds = (t: number) => (Math.floor(t * 1e6) / 1e6).toFixed(6);
+
+/** Inputs and mapping for a cut: one accurately seeked input per segment, joined in order. */
+async function segmentArgs(
+  sourcePath: string,
+  decoder: string[],
+  segments: PlayedSegment[] | undefined,
+  audioOnly: boolean,
+): Promise<string[]> {
+  if (!segments?.length) return [...decoder, "-i", sourcePath];
+  const inputs = segments.flatMap((s) => [
+    ...decoder,
+    "-ss",
+    seconds(s.start),
+    "-t",
+    seconds(s.end - s.start),
+    "-i",
+    sourcePath,
+  ]);
+  if (segments.length === 1) return inputs;
+  const audio = audioOnly || (await hasAudioStream(findFFprobe()!, sourcePath));
+  return [...inputs, ...concatArgs(segments.length, !audioOnly, audio)];
+}
+
+function concatArgs(count: number, video: boolean, audio: boolean): string[] {
+  const pad = (i: number) => (video ? `[${i}:v]` : "") + (audio ? `[${i}:a]` : "");
+  const pads = Array.from({ length: count }, (_, i) => pad(i)).join("");
+  const flags = `n=${count}:v=${video ? 1 : 0}:a=${audio ? 1 : 0}`;
+  return [
+    "-filter_complex",
+    `${pads}concat=${flags}${video ? "[v]" : ""}${audio ? "[a]" : ""}`,
+    ...(video ? ["-map", "[v]"] : []),
+    ...(audio ? ["-map", "[a]"] : []),
+  ];
+}
+
+async function ffmpegReencode(
+  sourcePath: string,
+  presetName: PresetName,
+  segments?: PlayedSegment[],
+): Promise<UploadableFile> {
   const ffmpeg = findFFmpeg();
   if (!ffmpeg) throw new Error(`Re-encoding needs ffmpeg. Install it: ${getFFmpegInstallHint()}`);
   const preset = REENCODE_PRESETS[presetName];
@@ -293,9 +359,7 @@ async function ffmpegReencode(sourcePath: string, presetName: PresetName): Promi
         "-v",
         "error",
         "-y",
-        ...decoder,
-        "-i",
-        sourcePath,
+        ...(await segmentArgs(sourcePath, decoder, segments, presetName === "audio")),
         ...preset.args,
         ...color,
         ...preset.audio,
@@ -344,7 +408,34 @@ async function isAnimatedImage(path: string): Promise<boolean> {
   }
 }
 
-const ffmpegReencoder: Reencoder = { choose: choosePreset, run: ffmpegReencode };
+// Audio cuts land on the millisecond; video only on a constant frame rate's frames.
+async function trimGrid(sourcePath: string, kind: MediaKind): Promise<number | null> {
+  if (kind === "audio") return 1000;
+  if (kind !== "video") return null;
+  const ffprobe = findFFprobe();
+  if (!ffprobe) return null;
+  const { stdout } = await execFileAsync(ffprobe, [
+    "-v",
+    "error",
+    "-select_streams",
+    "v:0",
+    "-show_entries",
+    "stream=r_frame_rate,avg_frame_rate",
+    "-of",
+    "csv=p=0",
+    "--",
+    sourcePath,
+  ]);
+  const rate = (fraction: string | undefined) => {
+    const [num, den] = (fraction ?? "").split("/").map(Number);
+    return num && den ? num / den : NaN;
+  };
+  const [real, average] = stdout.trim().split(",");
+  const fps = rate(real);
+  return Number.isFinite(fps) && Math.abs(fps - rate(average)) < 0.01 ? fps : null;
+}
+
+const ffmpegReencoder: Reencoder = { choose: choosePreset, trimGrid, run: ffmpegReencode };
 
 function sha256Hex(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
@@ -371,6 +462,7 @@ interface OffloadContext {
   tempFiles: string[];
   /** Staged GIFs the entry composition no longer shows as images. */
   preparedGifSources: string[];
+  fileMap: Map<string, Buffer>;
 }
 
 interface FilePlan {
@@ -378,6 +470,7 @@ interface FilePlan {
   preset?: PresetName;
   sourcePath: string;
   contentType?: string;
+  segments?: PlayedSegment[];
 }
 
 async function planFile(
@@ -396,8 +489,37 @@ async function planFile(
   const preset = await ctx.reencoder.choose(sourcePath, kind);
   // Files left as authored stay in the zip; the archive size check names them.
   if (!preset) return null;
-  // Keyed by encode settings too, so changing a preset re-encodes instead of reusing old output.
-  return { key: keyFor(JSON.stringify(REENCODE_PRESETS[preset])), preset, sourcePath };
+  const segments = kind === "image" ? null : await planFileTrim(ctx, path, sourcePath, kind);
+  // Keyed by encode settings and cut too, so either changing re-encodes instead of reusing old output.
+  const variant = JSON.stringify([REENCODE_PRESETS[preset], segments]);
+  return { key: keyFor(variant), preset, sourcePath, segments: segments ?? undefined };
+}
+
+/** Cuts a re-encoded file to what the entry composition plays, shifting its clips to match. */
+async function planFileTrim(
+  ctx: OffloadContext,
+  path: string,
+  sourcePath: string,
+  kind: MediaKind,
+): Promise<PlayedSegment[] | null> {
+  const entryPath = ctx.opts.entryPath ?? "index.html";
+  const entryHtml = ctx.fileMap.get(entryPath)?.toString("utf-8");
+  const gridPerSecond = entryHtml ? await ctx.reencoder.trimGrid?.(sourcePath, kind) : null;
+  if (!entryHtml || !gridPerSecond) return null;
+  const name = basename(path);
+  const plan = planTrim({
+    entryHtml,
+    path,
+    gridPerSecond,
+    resolveKey: (raw) => htmlSrcKey(ctx.absDir, entryPath, raw, ctx.fileMap),
+    mentionedElsewhere: [...ctx.fileMap].some(
+      ([other, content]) =>
+        other !== entryPath && other !== path && TEXT_EXTS.test(other) && content.includes(name),
+    ),
+  });
+  if (!plan) return null;
+  ctx.fileMap.set(entryPath, Buffer.from(plan.html, "utf-8"));
+  return plan.segments;
 }
 
 async function offloadFile(
@@ -411,6 +533,9 @@ async function offloadFile(
     path,
     size_bytes: bytes.byteLength,
     action: plan.preset ? "reencode" : "upload",
+    ...(plan.segments && {
+      trimmed_to_seconds: plan.segments.reduce((sum, s) => sum + s.end - s.start, 0),
+    }),
   };
   const hit = ctx.cache[plan.key];
   if (hit && (!ctx.opts.upload || (await stillServed(hit, ctx.fetchImpl)))) {
@@ -428,7 +553,7 @@ async function uploadPlanned(
   plan: FilePlan,
 ): Promise<string> {
   const file = plan.preset
-    ? await ctx.reencoder.run(plan.sourcePath, plan.preset)
+    ? await ctx.reencoder.run(plan.sourcePath, plan.preset, plan.segments)
     : { bytes, filename: basename(path), contentType: plan.contentType! };
   const maxBytes = ACCEPTED[extname(file.filename).toLowerCase()]?.maxBytes ?? 0;
   if (file.bytes.byteLength > maxBytes) {
@@ -492,6 +617,7 @@ export async function offloadHeavyMedia(
     reencoder: opts.reencoder ?? ffmpegReencoder,
     tempFiles: [],
     preparedGifSources: [],
+    fileMap,
   };
   const urls = new Map<string, string>();
   const report: OffloadedMedia[] = [];
@@ -545,6 +671,25 @@ function isStillMentioned(
     if (text.includes(name)) return true;
   }
   return false;
+}
+
+/** The staged file an HTML src loads, resolved the way the renderer inlines sub-compositions. */
+function htmlSrcKey(
+  absDir: string,
+  entryPath: string,
+  raw: string,
+  fileMap: Map<string, Buffer>,
+): string | null {
+  const clean = cleanAssetUrl(raw);
+  if (!clean || isRemoteOrInlineUrl(clean)) return null;
+  const rootRelative = clean.startsWith("/")
+    ? clean
+    : rewriteAssetPath(entryPath, clean, (p) => fileMap.has(p));
+  for (const candidate of resolveLocalAssetCandidates(absDir, rootRelative)) {
+    const key = relative(absDir, candidate).replaceAll("\\", "/");
+    if (fileMap.has(key)) return key;
+  }
+  return null;
 }
 
 type UrlFor = (rootRelative: string) => string | null;

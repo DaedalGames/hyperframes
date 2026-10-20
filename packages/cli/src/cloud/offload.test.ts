@@ -179,7 +179,7 @@ describe("offloadHeavyMedia", () => {
       cachePath: cachePath(),
     });
 
-    expect(reencoder.run).toHaveBeenCalledWith(join(dir, "take.mkv"), "video");
+    expect(reencoder.run).toHaveBeenCalledWith(join(dir, "take.mkv"), "video", undefined);
     expect(upload.mock.calls[0]![0]).toMatchObject({
       filename: "take.mp4",
       contentType: "video/mp4",
@@ -322,6 +322,68 @@ describe("offloadHeavyMedia", () => {
     expect(fileMap.has("_animated_gif/hfgif-v1-abc.webm")).toBe(false);
     // Sub-compositions are prepared by the renderer after inlining, so their GIFs stay in the zip.
     expect(fileMap.has("media/other.gif")).toBe(true);
+  });
+
+  it("cuts a re-encoded video to the windows its clips play and shifts their starts to match", async () => {
+    const dir = project({
+      "index.html": html(
+        `<video id="a" src="long.mkv" data-start="0" data-duration="2" data-media-start="10"></video>` +
+          `<video id="b" src="long.mkv" data-start="2" data-duration="2" data-media-start="100.5" data-playback-rate="2"></video>`,
+      ),
+      "long.mkv": HEAVY,
+    });
+    const run = vi.fn(async () => ({
+      bytes: Buffer.from("cut"),
+      filename: "long.mp4",
+      contentType: "video/mp4",
+    }));
+    const fileMap = buildPublishFileMap(dir);
+
+    const report = await offloadHeavyMedia(dir, fileMap, {
+      apiBaseUrl: "https://api.example",
+      upload: fakeUpload(),
+      reencoder: { choose: async () => "video", trimGrid: async () => 30, run },
+      cachePath: cachePath(),
+    });
+
+    expect(run).toHaveBeenCalledWith(join(dir, "long.mkv"), "video", [
+      { start: 9.5, end: 12.5 },
+      { start: 100, end: 105 },
+    ]);
+    expect(report[0]).toMatchObject({ path: "long.mkv", trimmed_to_seconds: 8 });
+    const index = fileMap.get("index.html")!.toString();
+    expect(index).toMatch(/id="a"[^>]*data-media-start="0.5"/);
+    expect(index).toMatch(/id="b"[^>]*data-media-start="3.5"/);
+  });
+
+  it("keeps the whole file when a use is not a bounded clip or a script names it", async () => {
+    const looped = project({
+      "index.html": html(
+        `<video src="long.mkv" data-duration="2" data-media-start="10" loop></video>`,
+      ),
+      "long.mkv": HEAVY,
+    });
+    const scripted = project({
+      "index.html": html(`<video src="long.mkv" data-duration="2" data-media-start="10"></video>`),
+      "main.js": "const name = `long.mkv`.replace('.mkv', '');",
+      "long.mkv": HEAVY,
+    });
+    for (const dir of [looped, scripted]) {
+      const run = vi.fn(async () => ({
+        bytes: Buffer.from("full"),
+        filename: "long.mp4",
+        contentType: "video/mp4",
+      }));
+      const fileMap = buildPublishFileMap(dir);
+      await offloadHeavyMedia(dir, fileMap, {
+        apiBaseUrl: "https://api.example",
+        upload: fakeUpload(),
+        reencoder: { choose: async () => "video", trimGrid: async () => 30, run },
+        cachePath: cachePath(),
+      });
+      expect(run).toHaveBeenCalledWith(join(dir, "long.mkv"), "video", undefined);
+      expect(fileMap.get("index.html")!.toString()).toContain(`data-media-start="10"`);
+    }
   });
 
   it("leaves small media and remote URLs alone", async () => {
