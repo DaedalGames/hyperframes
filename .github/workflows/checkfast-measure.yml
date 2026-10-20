@@ -1,0 +1,54 @@
+name: checkfast warm measure
+on:
+  push:
+    branches: [checkfast/instant-measure]
+permissions:
+  contents: read
+jobs:
+  measure:
+    name: warm check ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest]
+    env:
+      HYPERFRAMES_NO_TELEMETRY: "1"
+      DO_NOT_TRACK: "1"
+      HYPERFRAMES_SKIP_SKILLS: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          lfs: true
+      - name: Install FFmpeg (Windows)
+        if: runner.os == 'Windows'
+        uses: ./.github/actions/install-ffmpeg-windows
+      - name: Set FFMPEG_BIN for bun install
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $path = (Get-Command ffmpeg.exe).Source
+          "FFMPEG_BIN=$path" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Install FFmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      - name: Install FFmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - run: bun install --frozen-lockfile
+      - name: Build
+        shell: bash
+        run: bun run build
+      - name: Measure cold vs warm, then the warm process tests
+        shell: bash
+        run: bash .github/checkfast/winlaunch.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: checkfast-measure-${{ matrix.os }}
+          path: checkfast-out
