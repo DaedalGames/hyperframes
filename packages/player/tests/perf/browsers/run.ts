@@ -38,6 +38,9 @@ const DRIVERS: Record<
           "--autoplay-policy=no-user-gesture-required",
           "--no-first-run",
           "--no-default-browser-check",
+          "--disable-backgrounding-occluded-windows",
+          "--disable-renderer-backgrounding",
+          "--disable-background-timer-throttling",
         ],
       },
     },
@@ -96,6 +99,8 @@ type PageResult = {
   idle: number[];
   frames: Array<{ ts: number; work: number | null; comp: number }>;
   decoded: { dropped: number; total: number };
+  droppedTimeline: number[];
+  mediaOps: Record<"seek" | "rate" | "play" | "pause" | "load", number>;
   seeks: Array<{ target: number; ms: number; timedOut: boolean }>;
 };
 
@@ -125,6 +130,8 @@ function score(page: PageResult) {
       Math.round((((last.comp - first.comp) * 1000) / (last.ts - first.ts)) * 1000) / 1000,
     decoderDropped: page.decoded.dropped,
     decoderFrames: page.decoded.total,
+    mediaSeeks: page.mediaOps.seek,
+    rateWrites: page.mediaOps.rate,
     seekP50Ms: round(percentile(seekMs, 50)),
     seekP95Ms: round(percentile(seekMs, 95)),
     seekTimeouts: page.seeks.filter((s) => s.timedOut).length,
@@ -236,6 +243,9 @@ const cols = [
   "framesOverBudget",
   "clockRatio",
   "decoderDropped",
+  "decoderFrames",
+  "mediaSeeks",
+  "rateWrites",
   "seekP50Ms",
   "seekP95Ms",
   "seekTimeouts",

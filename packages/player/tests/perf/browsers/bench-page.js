@@ -67,13 +67,46 @@ window.__hfBench = async function bench(cfg) {
     });
   }
 
+  // What the runtime does to its media during playback; a seek or rate change resets a decoder.
+  const mediaOps = { seek: 0, rate: 0, play: 0, pause: 0, load: 0 };
+  let countOps = false;
+  const proto = win.HTMLMediaElement.prototype;
+  for (const [prop, key] of [
+    ["currentTime", "seek"],
+    ["playbackRate", "rate"],
+  ]) {
+    const d = Object.getOwnPropertyDescriptor(proto, prop);
+    Object.defineProperty(proto, prop, {
+      ...d,
+      set(value) {
+        if (countOps) mediaOps[key]++;
+        d.set.call(this, value);
+      },
+    });
+  }
+  for (const method of ["play", "pause", "load"]) {
+    const original = proto[method];
+    proto[method] = function (...args) {
+      if (countOps) mediaOps[method]++;
+      return original.apply(this, args);
+    };
+  }
+
   const idle = await recordFrames(1000);
 
   host.play();
   await until(() => runtime.isPlaying(), 5_000, "isPlaying");
+  countOps = true;
   const decodedBefore = decoded();
+  const droppedTimeline = [];
+  const sampler = setInterval(
+    () => droppedTimeline.push(decoded().dropped - decodedBefore.dropped),
+    500,
+  );
   const play = await recordFrames(cfg.playMs);
+  clearInterval(sampler);
   const decodedAfter = decoded();
+  countOps = false;
   host.pause();
   await until(() => !runtime.isPlaying(), 5_000, "pause");
 
@@ -97,7 +130,7 @@ window.__hfBench = async function bench(cfg) {
       await until(
         () =>
           videos()
-            .filter(shown)
+            .filter((v) => shown(v) && !v.error)
             .every((v) => presented.has(v) || (!v.seeking && v.readyState >= 2)),
         5_000,
         `video frames at ${target}`,
@@ -121,6 +154,8 @@ window.__hfBench = async function bench(cfg) {
       dropped: decodedAfter.dropped - decodedBefore.dropped,
       total: decodedAfter.total - decodedBefore.total,
     },
+    droppedTimeline,
+    mediaOps,
     seeks,
   };
 };
