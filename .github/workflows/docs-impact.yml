@@ -1,0 +1,62 @@
+name: Docs impact
+
+permissions:
+  contents: read
+
+# Suppress hyperframes CLI telemetry from HeyGen's own CI runs.
+# External users' CI continues to emit telemetry unless they set this themselves.
+env:
+  HYPERFRAMES_NO_TELEMETRY: "1"
+
+# No path filter: a public export can change from any package source, and the script passes at once when
+# neither the CLI nor a package changed. `edited`, `labeled` and `unlabeled` start a fresh run when the
+# opt-out changes; re-running an old run would reuse the event's stale body and labels. Reading the label
+# and body from the event payload needs no extra permission, fork PRs included. Not a merge-queue check:
+# a merge group has no PR body (see merge-queue-workflows.test.mjs before adding merge_group).
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+    branches: [main]
+
+concurrency:
+  group: docs-impact-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  docs-impact:
+    name: Docs impact
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      # HEAD is the PR merge ref; its first parent is the current base tip, unlike the payload's
+      # base.sha, which goes stale and would count the base's newer commits as the PR's changes.
+      - name: Find the pull request's current base
+        id: base
+        run: |
+          git rev-parse --verify -q HEAD^2 > /dev/null || { echo "::error::HEAD is not the pull request merge commit"; exit 1; }
+          sha="$(git rev-parse --verify HEAD^1)"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          git diff --quiet "$sha" HEAD -- packages/cli/src || echo "cli=true" >> "$GITHUB_OUTPUT"
+
+      - run: bash scripts/ci/install-workspace-dependencies.sh
+
+      # Only a CLI change needs the command tree, which imports core's generated sources.
+      - if: steps.base.outputs.cli == 'true'
+        run: bun run --cwd packages/core build
+
+      - name: Require docs for CLI and public export changes
+        env:
+          BASE_SHA: ${{ steps.base.outputs.sha }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: node scripts/check-docs-impact.mjs --base "$BASE_SHA"
