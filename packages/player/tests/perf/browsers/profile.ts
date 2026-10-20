@@ -294,7 +294,9 @@ const md = Object.entries(report)
       .map(
         (d) =>
           `#### ${d.group}: ${d.msPerSecond} ms of CPU per second\n\n| inclusive % | function |\n|---|---|\n` +
-          d.inclusive.map((f) => `| ${f.pct} | ${f.name.replace(/\|/g, "\\|")} |`).join("\n"),
+          d.inclusive
+            .map((f) => `| ${f.pct} | ${f.name.replace(/\\/g, "\\\\").replace(/\|/g, "\\|")} |`)
+            .join("\n"),
       )
       .join("\n\n");
     return `### ${film}\n\n${fps} fps; main-thread CPU per frame: ${JSON.stringify(mainThreadPerFrame)}\n\nCPU ms per second by process: ${JSON.stringify(perProcessMsPerSecond)}\n\n${rows}`;

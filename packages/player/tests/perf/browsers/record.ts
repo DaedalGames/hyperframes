@@ -3,6 +3,7 @@
 // what a viewer sees, independent of the browser's own decoder counters. macOS only (avfoundation).
 // bun run tests/perf/browsers/record.ts --browsers safari,chrome
 import { execFileSync, spawn } from "node:child_process";
+import { once } from "node:events";
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -101,6 +102,7 @@ function analyse(file: string, rects: number[][]) {
       "frame=pts_time",
       "-of",
       "csv=p=0",
+      "--",
       file,
     ],
     { encoding: "utf-8" },
@@ -131,20 +133,17 @@ function analyse(file: string, rects: number[][]) {
     );
     const size = CROP.w * CROP.h;
     const changes: number[] = [];
-    let luma = 0;
     for (let f = 1; f * size < raw.length; f++) {
       let diff = 0;
       for (let i = 0; i < size; i++)
         diff += Math.abs(raw[f * size + i]! - raw[(f - 1) * size + i]!);
       if (diff / size > CHANGE_THRESHOLD) changes.push(times[f] ?? f / 60);
-      luma += raw[f * size]!;
     }
-    return { changes, meanLuma: luma / Math.max(1, raw.length / size) };
+    const meanLuma = raw.reduce((sum, v) => sum + v, 0) / Math.max(1, raw.length);
+    return { changes, meanLuma };
   });
   const all = tiles.flatMap((t) => t.changes);
-  const start = Math.min(...all);
-  const end = Math.max(...all);
-  const span = end - start;
+  const span = all.length ? Math.max(...all) - Math.min(...all) : 0;
   const perTile = tiles.map((t) => {
     const gaps = t.changes.slice(1).map((c, i) => c - t.changes[i]!);
     return {
@@ -240,8 +239,9 @@ try {
             });
             await Bun.sleep(9000);
           }
+          const exited = recorder.exitCode === null ? once(recorder, "exit") : Promise.resolve();
           recorder.stdin?.write("q");
-          await new Promise((r) => recorder.on("exit", r));
+          await exited;
           const rects = (await wd(base, "POST", `${s}/execute/sync`, {
             script: RECTS_SCRIPT,
             args: [],
