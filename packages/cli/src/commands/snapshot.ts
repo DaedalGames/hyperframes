@@ -31,7 +31,8 @@ import {
   parseZoomTarget,
   resolveCropRegion,
   runFfmpegOnce,
-  seekCompositionTimeline,
+  seekCompositionTimelineOnly,
+  settleCompositionSeek,
   type ZoomTarget,
 } from "../capture/captureCompositionFrame.js";
 import {
@@ -709,7 +710,8 @@ async function captureSnapshots(
       for (let i = 0; i < positions.length; i++) {
         const time = positions[i]!;
 
-        await seekCompositionTimeline(page, time, { exactTime: true });
+        const seekOptions = { exactTime: true };
+        await seekCompositionTimelineOnly(page, time, seekOptions);
 
         if (cameraExpr) await page.evaluate(cameraExpr);
 
@@ -853,6 +855,7 @@ async function captureSnapshots(
           }
         }
 
+        await settleCompositionSeek(page, seekOptions);
         await recaptureSnapshotComposite(page);
 
         const timeLabel = formatSnapshotTimestamp(time);
