@@ -87,7 +87,7 @@ mkdir -p "$WORK_DIR"
 ```bash
 # metadata — duration / width / height / fps
 ffprobe -v error -select_streams v:0 \
-  -show_entries stream=width,height,r_frame_rate:stream_side_data=rotation \
+  -show_entries stream=width,height,sample_aspect_ratio,r_frame_rate:stream_side_data=rotation \
   -show_entries format=duration -of json "$VIDEO_PATH" > "$WORK_DIR/metadata.json"
 # audio
 ffmpeg -y -i "$VIDEO_PATH" -vn -acodec libmp3lame -q:a 2 "$WORK_DIR/audio.mp3"
@@ -263,9 +263,10 @@ for the output ratio: the footage answers it. Frames are auto-selected
 from the chosen layout × style combination (see "Auto-pick frame" table
 below). Before sending the question, **precompute two things**:
 
-1. **`ratio`** from the source video's aspect ratio (Step 3's probed
+1. **`ratio`**: a ratio or platform the request already names wins. Otherwise
+   choose the preset nearest the source's shape as it plays (Step 3's probed
    width / height):
-   - a ratio or platform the request already names wins
+   - multiply width by `sample_aspect_ratio` when it is not `1:1` (non-square pixels)
    - swap width and height when the stream's rotation is 90 or -90 (it plays upright)
    - `sourceAspect = width / height`
    - `sourceAspect ≥ 1.5` (≥ ~3:2 wide) → **`16:9`**
@@ -359,7 +360,7 @@ the reply. Bullet-style 1/2/3 keeps the reply parseable:
 
 ```
 I need to confirm three visual decisions with you before I start cutting cards
-(the canvas is <ratio>, matching your video):
+(the canvas uses the selected ratio, <ratio>):
 
 1) Overall layout (how video & card coexist):
    A. split   side-by-side (50/50)
@@ -436,8 +437,8 @@ After the user answers (any channel):
    | `pip`     | `clean` (pip pill already has chrome)                       | `clean`                                              | `clean`                                |
    | `overlay` | `clean` (full-bleed forbids deco frames)                    | `clean`                                              | `clean`                                |
 
-5. **Tell the user what you chose** in one sentence — ratio (+ canvas
-   size, from the source), layout, specific style, frame, and final cardCount — then
+5. **Tell the user what you chose** in one sentence — the selected ratio (+ canvas
+   size), layout, specific style, frame, and final cardCount — then
    proceed with the rest of Step 7 (per-card layouts, motion patterns).
 6. Record the five values (ratio / layout / style / frame / cardCount)
    in working memory (no schema field needed); you'll reference them
