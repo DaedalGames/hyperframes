@@ -349,10 +349,8 @@ export interface ShownBox {
 }
 
 /**
- * Seeks the page to each of `times` and returns the largest box each video is drawn in, in device
- * pixels. A video whose pixels are read rather than drawn (colour grading, any other canvas on the
- * page), whose drawn size follows its own (`object-fit: none | scale-down`), or that is never laid
- * out has no entry: it keeps full-size frames.
+ * Seeks to each of `times`; returns each video's largest drawn box in device pixels. Videos that are
+ * graded, sampled by a canvas, `object-fit: none | scale-down` or never laid out get none (full size).
  */
 export async function measureVideoShownBoxes(
   page: Page,
