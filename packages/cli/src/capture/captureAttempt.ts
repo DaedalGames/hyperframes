@@ -239,6 +239,7 @@ export async function captureWebsiteAttempt(
 
     const coreResult = await runCoreExtraction({
       page1,
+      canRetryWithoutWebgl: !disableWebgl,
       chromeBrowser,
       cdp,
       cdpAnims,

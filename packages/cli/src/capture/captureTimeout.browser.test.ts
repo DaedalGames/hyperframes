@@ -25,7 +25,7 @@ it("frees a page whose step script never returns, so the next step runs", async 
     capMs: 500,
   });
 
-  expect(outcome).toEqual({ kind: "timed-out" });
+  expect(outcome).toEqual({ kind: "timed-out", pageAnswered: true });
   const next = await Promise.race([
     page.evaluate("1 + 1"),
     new Promise((resolve) => setTimeout(() => resolve("page still stuck"), 5_000)),

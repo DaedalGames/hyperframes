@@ -124,8 +124,32 @@ describe("runPageStep", () => {
       stopPageScript,
       capMs: 20,
     });
-    expect(outcome).toEqual({ kind: "timed-out" });
+    expect(outcome).toEqual({ kind: "timed-out", pageAnswered: true });
     expect(stopPageScript).toHaveBeenCalledOnce();
+  });
+
+  it("gives up on a stop Chrome never confirms, and says the page did not answer", async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = runPageStep(() => new Promise<never>(() => {}), {
+        label: "tokens",
+        stopPageScript: () => new Promise<never>(() => {}),
+      });
+      await vi.advanceTimersByTimeAsync(30_000 + 5_000);
+      await expect(pending).resolves.toEqual({ kind: "timed-out", pageAnswered: false });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("counts a refused stop as an answer", async () => {
+    const outcome = await runPageStep(() => new Promise<never>(() => {}), {
+      label: "tokens",
+      stopPageScript: () =>
+        Promise.reject(new Error("Protocol error: Execution context was destroyed")),
+      capMs: 20,
+    });
+    expect(outcome).toEqual({ kind: "timed-out", pageAnswered: true });
   });
 
   it("treats a protocol evaluate timeout as a timed-out step", async () => {
@@ -133,7 +157,7 @@ describe("runPageStep", () => {
       () => Promise.reject(new Error("Runtime.evaluate timed out. Increase the 'protocolTimeout'")),
       { label: "tokens", stopPageScript: async () => {} },
     );
-    expect(outcome).toEqual({ kind: "timed-out" });
+    expect(outcome).toEqual({ kind: "timed-out", pageAnswered: true });
   });
 
   it("returns the value of a step that finishes and rethrows other errors", async () => {

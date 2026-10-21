@@ -84,8 +84,11 @@ export async function withRemainingBudget<T>(
 }
 
 const PAGE_STEP_CAP_MS = 30_000;
+const STOP_CONFIRM_MS = 5_000;
 
-export type PageStepOutcome<T> = { kind: "done"; value: T } | { kind: "timed-out" };
+export type PageStepOutcome<T> =
+  | { kind: "done"; value: T }
+  | { kind: "timed-out"; pageAnswered: boolean };
 
 export async function runPageStep<T>(
   step: () => Promise<T>,
@@ -96,8 +99,15 @@ export async function runPageStep<T>(
     return { kind: "done", value };
   } catch (err) {
     if (!isDegradableEvaluateTimeoutError(err)) throw err;
-    await opts.stopPageScript().catch(() => undefined);
-    return { kind: "timed-out" };
+    const pageAnswered = await withRemainingBudget(
+      opts.stopPageScript(),
+      STOP_CONFIRM_MS,
+      `stopping ${opts.label}`,
+    ).then(
+      () => true,
+      (stopError: unknown) => !(stopError instanceof StageBudgetTimeoutError),
+    );
+    return { kind: "timed-out", pageAnswered };
   }
 }
 

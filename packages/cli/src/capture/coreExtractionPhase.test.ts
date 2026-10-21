@@ -13,6 +13,9 @@ const control = vi.hoisted(() => ({
   expireLazy: false,
   throwCatalog: false,
   hangTokens: false,
+  hangStop: false,
+  htmlReads: 0,
+  webglRetry: false,
 }));
 vi.mock("./lazyScrollForCapture.js", () => ({
   lazyScrollForCapture: async () => {
@@ -56,6 +59,7 @@ vi.mock("./designStyleExtractor.js", () => ({
 vi.mock("./assetCataloger.js", () => ({ catalogAssets: async () => [] }));
 vi.mock("./htmlExtractor.js", () => ({
   extractHtml: async () => ({
+    reads: control.htmlReads++,
     headHtml: "",
     bodyHtml: "",
     cssomRules: "",
@@ -80,6 +84,9 @@ afterEach(() => {
   control.expireLazy = false;
   control.throwCatalog = false;
   control.hangTokens = false;
+  control.hangStop = false;
+  control.htmlReads = 0;
+  control.webglRetry = false;
 });
 
 const REFUSED = "Protocol error (Page.captureScreenshot): Unable to capture screenshot";
@@ -90,7 +97,11 @@ async function extract(expireScreenshot = false, refuseShot?: number) {
   const outputDir = mkdtempSync(join(tmpdir(), "hf-core-budget-"));
   mkdirSync(join(outputDir, "extracted"));
   const state = createPartialCaptureState({ url: "https://example.com", outputDir });
-  const cdpSend = vi.fn(async (_method: string) => {});
+  const cdpSend = vi.fn((method: string) =>
+    control.hangStop && method === "Runtime.terminateExecution"
+      ? new Promise<never>(() => {})
+      : Promise.resolve(),
+  );
   let shots = 0;
   const screenshot = vi.fn(async () => {
     if (++shots === refuseShot) throw new Error(REFUSED);
@@ -109,6 +120,7 @@ async function extract(expireScreenshot = false, refuseShot?: number) {
   try {
     const pending = runCoreExtraction({
       page1: page,
+      canRetryWithoutWebgl: control.webglRetry,
       chromeBrowser: {} as Browser,
       cdp: { send: cdpSend } as never,
       cdpAnims: [],
@@ -140,6 +152,7 @@ async function extract(expireScreenshot = false, refuseShot?: number) {
       downloadByteBudget: createCaptureDownloadBudget(),
       canWrite: () => true,
     });
+    pending.catch(() => {});
     await vi.runAllTimersAsync();
     const result = await pending;
     return { result, warnings: state.warnings, screenshot, cdpSend };
@@ -205,6 +218,31 @@ describe("core extraction page steps", () => {
     expect(cdpSend).toHaveBeenCalledWith("Runtime.terminateExecution");
     expect(result.screenshotOutcome).toEqual({ kind: "complete" });
     expect(result.screenshots).toHaveLength(3);
+  });
+
+  it("skips the rest of the page steps once Chrome stops answering, and keeps the screenshots", async () => {
+    control.hangTokens = true;
+    control.hangStop = true;
+    const { result, warnings } = await extract();
+    expect(result.timedOutSteps).toEqual(["design token extraction"]);
+    expect(warnings).toContain(
+      "HTML extraction skipped: the page stopped responding during design token extraction",
+    );
+    expect(control.htmlReads).toBe(0);
+    expect(result.screenshots).toHaveLength(3);
+  });
+});
+
+describe("core extraction on a page that stops answering", () => {
+  it("ends the attempt for the WebGL-off retry instead of running the rest", async () => {
+    control.hangTokens = true;
+    control.hangStop = true;
+    control.webglRetry = true;
+    await expect(extract()).rejects.toMatchObject({
+      name: "PageStoppedRespondingError",
+      step: "design token extraction",
+    });
+    expect(control.htmlReads).toBe(0);
   });
 });
 

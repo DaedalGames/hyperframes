@@ -8,6 +8,13 @@ export class NavigationDeadlineError extends Error {
   }
 }
 
+export class PageStoppedRespondingError extends Error {
+  constructor(readonly step: string) {
+    super(`the page stopped responding during ${step}`);
+    this.name = "PageStoppedRespondingError";
+  }
+}
+
 export class CaptureDirRefusedError extends Error {
   constructor(message: string) {
     super(message);

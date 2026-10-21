@@ -3,7 +3,7 @@ import { createPartialCaptureState } from "./partialCapture.js";
 import { CAPTURE_PHASE_SCHEMA } from "./types.js";
 import type { CaptureOptions, CaptureResult } from "./types.js";
 import { captureBrowserArgs } from "./browserLaunchArgs.js";
-import { NavigationDeadlineError } from "./captureErrors.js";
+import { NavigationDeadlineError, PageStoppedRespondingError } from "./captureErrors.js";
 
 const { captureWebsiteAttemptMock } = vi.hoisted(() => ({
   captureWebsiteAttemptMock: vi.fn(),
@@ -29,7 +29,13 @@ describe("capture navigation retry launch", () => {
     expect(args).not.toContain("--use-gl=angle");
   });
 
-  it("retries a WebGL navigation deadline and carries the degradation warning into the result", async () => {
+  it.each([
+    [new NavigationDeadlineError(new Error("timeout"), true), "Navigation timed out"],
+    [
+      new PageStoppedRespondingError("design token extraction"),
+      "The page stopped responding during design token extraction",
+    ],
+  ])("retries %s and carries the degradation warning into the result", async (error, why) => {
     const options: CaptureOptions = {
       url: "https://example.com",
       outputDir: "/tmp/hf-capture-test",
@@ -54,9 +60,7 @@ describe("capture navigation retry launch", () => {
         remainingMs: 1,
       },
     };
-    captureWebsiteAttemptMock
-      .mockRejectedValueOnce(new NavigationDeadlineError(new Error("timeout"), true))
-      .mockResolvedValueOnce(result);
+    captureWebsiteAttemptMock.mockRejectedValueOnce(error).mockResolvedValueOnce(result);
     const phases: string[] = [];
 
     const { captureWebsite } = await import("./index.js");
@@ -73,7 +77,7 @@ describe("capture navigation retry launch", () => {
       expect.anything(),
       expect.anything(),
     );
-    expect(actual.warnings).toContain("Navigation timed out; retrying once with WebGL disabled");
+    expect(actual.warnings).toContain(`${why}; retrying once with WebGL disabled`);
     expect(phases).toContain("webgl-disabled-retry");
   });
 

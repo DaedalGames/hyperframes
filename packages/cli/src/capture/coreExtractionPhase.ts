@@ -11,7 +11,7 @@ import { startCdpAnimationCapture } from "./animationCataloger.js";
 import { createCaptureDownloadBudget } from "./readBoundedResponse.js";
 import { detectLibraries } from "./contentExtractor.js";
 import { writeCaptureFileSync } from "./captureFile.js";
-import { CaptureDirRefusedError } from "./captureErrors.js";
+import { CaptureDirRefusedError, PageStoppedRespondingError } from "./captureErrors.js";
 import { join } from "node:path";
 import { extractHtml } from "./htmlExtractor.js";
 import { extractTokens } from "./tokenExtractor.js";
@@ -34,6 +34,7 @@ const HTML_STEP_CAP_MS = 45_000;
 
 export interface CoreExtractionInput {
   page1: Page;
+  canRetryWithoutWebgl: boolean;
   chromeBrowser: Browser;
   cdp: Awaited<ReturnType<typeof startCdpAnimationCapture>>["cdp"];
   cdpAnims: Awaited<ReturnType<typeof startCdpAnimationCapture>>["animations"];
@@ -124,12 +125,21 @@ export async function runCoreExtraction(input: CoreExtractionInput): Promise<Cor
       : "--capture-budget spent before the animation catalog finished; continuing without animation catalog";
   let screenshotOutcome: CoreExtractionResult["screenshotOutcome"] = { kind: "complete" };
   const timedOutSteps: string[] = [];
+  let unresponsiveSince: string | undefined;
+  const warnStep = (message: string): void => {
+    warnings.push(message);
+    progress("warn", message);
+  };
   const pageStep = async <T>(
     label: string,
     step: () => Promise<T>,
     fallback: T,
     capMs?: number,
   ): Promise<T> => {
+    if (unresponsiveSince) {
+      warnStep(`${label} skipped: the page stopped responding during ${unresponsiveSince}`);
+      return fallback;
+    }
     const outcome = await runPageStep(step, {
       label,
       stopPageScript: () => cdp.send("Runtime.terminateExecution"),
@@ -137,10 +147,14 @@ export async function runCoreExtraction(input: CoreExtractionInput): Promise<Cor
     });
     if (outcome.kind === "done") return outcome.value;
     timedOutSteps.push(label);
-    const message = `${label} timed out; continuing without it`;
-    warnings.push(message);
-    progress("warn", message);
+    if (!outcome.pageAnswered) unresponsiveSince ??= label;
+    warnStep(`${label} timed out; continuing without it`);
     return fallback;
+  };
+  const retryIfStuck = (): void => {
+    if (unresponsiveSince && input.canRetryWithoutWebgl) {
+      throw new PageStoppedRespondingError(unresponsiveSince);
+    }
   };
   const runLazyAndLottie = async (): Promise<void> => {
     if (!contentCheckTimedOut && pageContentCheck.textLength < 100) {
@@ -241,6 +255,7 @@ export async function runCoreExtraction(input: CoreExtractionInput): Promise<Cor
     await saveDiscoveredLotties();
   };
   await runAnimationDiscovery();
+  retryIfStuck();
   recordBudget("animation discovery");
 
   // Save captured WebGL shaders (useful context for shader transitions + library detection)
@@ -273,6 +288,7 @@ export async function runCoreExtraction(input: CoreExtractionInput): Promise<Cor
     }
   };
   await runShaderCapture();
+  retryIfStuck();
   recordBudget("shader capture");
 
   const runTokenExtraction = async (): Promise<void> => {
@@ -320,6 +336,7 @@ export async function runCoreExtraction(input: CoreExtractionInput): Promise<Cor
     }
   };
   await runTokenExtraction();
+  retryIfStuck();
   recordBudget("design token extraction");
 
   const runAnimationCapture = async (): Promise<void> => {
@@ -352,6 +369,7 @@ export async function runCoreExtraction(input: CoreExtractionInput): Promise<Cor
     recordBudget("animation catalog");
   };
   await runAnimationCapture();
+  retryIfStuck();
 
   const runScreenshotCapture = async (): Promise<void> => {
     progress("screenshots", "Capturing scroll screenshots...");
@@ -399,6 +417,7 @@ export async function runCoreExtraction(input: CoreExtractionInput): Promise<Cor
     progress("screenshots", `${screenshots.length} scroll screenshots captured`);
   };
   await runScreenshotCapture();
+  retryIfStuck();
   const runHtmlExtraction = async (): Promise<void> => {
     await waitForPageReady(page1, {
       timeoutMs: Math.min(15_000, remainingMs()),
@@ -408,6 +427,7 @@ export async function runCoreExtraction(input: CoreExtractionInput): Promise<Cor
     // Catalog all assets (must run before extractHtml which converts img src to data URLs)
     progress("design", "Cataloging assets...");
     try {
+      if (unresponsiveSince) throw new PageStoppedRespondingError(unresponsiveSince);
       const { catalogAssets } = await import("./assetCataloger.js");
       catalogedAssets = await catalogAssets(page1);
       progress("design", `${catalogedAssets.length} assets cataloged`);
