@@ -1012,7 +1012,11 @@ describe("handler dispatch", () => {
     expect(url.searchParams.get("X-Amz-Signature")).toMatch(/^[a-f0-9]{64}$/);
   });
 
-  async function planStitched(chunkCount: number, separateAudio = false, workerConcurrency = 16) {
+  async function planStitched(
+    chunkCount: number,
+    separateAudio = false,
+    workerConcurrency?: number,
+  ) {
     const tmpRoot = makeTmpRoot();
     const s3 = new FakeS3Client();
     s3.objects.set("s3://bucket/project.tar.gz", await makeMinimalProjectTar());
@@ -1081,6 +1085,22 @@ describe("handler dispatch", () => {
     const one = await planStitched(8, false, 1);
     expect(planOptions(one)).toMatchObject({ deferAudio: false });
     expect([one.planned.SeparateAudio, one.planned.MaxChunkConcurrency]).toEqual([false, 1]);
+    for (const [reserved, separate, chunks] of [
+      ["2", true, 1],
+      ["1", false, 1],
+    ] as const) {
+      process.env.HYPERFRAMES_LAMBDA_RESERVED_CONCURRENCY = reserved;
+      try {
+        const run = await planStitched(8, separate, undefined);
+        expect(planOptions(run)).toMatchObject({ deferAudio: separate });
+        expect([run.planned.SeparateAudio, run.planned.MaxChunkConcurrency]).toEqual([
+          separate,
+          chunks,
+        ]);
+      } finally {
+        delete process.env.HYPERFRAMES_LAMBDA_RESERVED_CONCURRENCY;
+      }
+    }
   });
 
   it.skipIf(spawnSync("ffmpeg", ["-version"]).status !== 0)(
