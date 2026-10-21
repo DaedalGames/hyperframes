@@ -429,11 +429,8 @@ function customProperties(style: CSSStyleDeclaration): string[] {
     .map((prop) => `${prop}: ${style.getPropertyValue(prop).trim()};`);
 }
 
-/**
- * The tokens the component's demo hands it: every custom property set on the demo's mount
- * for this entry or on an ancestor, outermost first so the nearest wins. With them the
- * preview wears the demo's theme instead of the snippet's fallbacks.
- */
+// Custom properties the demo sets on this entry's mount or its ancestors, outermost first so
+// the nearest wins: the preview wears the demo's theme, not the snippet's fallbacks.
 function demoThemeTokens(tmpDir: string, entryFile: string): string[] {
   const demoPath = join(tmpDir, "demo.html");
   if (!existsSync(demoPath)) return [];
