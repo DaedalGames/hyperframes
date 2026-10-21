@@ -177,7 +177,6 @@ export async function captureWebsiteAttempt(
       HTMLCanvasElement.prototype.getContext = function(type, attrs) {
         var ctx = origGetContext.call(this, type, attrs);
         if (ctx && (type === 'webgl' || type === 'webgl2' || type === 'experimental-webgl')) {
-          window.__hfWebglSeen = true;
           if (ctx.shaderSource && !ctx.__hfHooked) {
             var origShaderSource = ctx.shaderSource.bind(ctx);
             ctx.shaderSource = function(shader, source) {

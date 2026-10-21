@@ -22,10 +22,7 @@ export async function captureWebsite(
     return first.result;
   } catch (err) {
     const stuck = err instanceof PageStoppedRespondingError;
-    if (
-      !(stuck || (err instanceof NavigationDeadlineError && err.webglObserved)) ||
-      watchdog.expired()
-    ) {
+    if (!(stuck || err instanceof NavigationDeadlineError) || watchdog.expired()) {
       throw err;
     }
     const retrying = `${stuck ? `The page stopped responding during ${err.step}` : "Navigation timed out"}; retrying once with WebGL disabled`;

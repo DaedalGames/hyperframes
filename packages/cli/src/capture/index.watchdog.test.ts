@@ -30,7 +30,7 @@ describe("capture navigation retry launch", () => {
   });
 
   it.each([
-    [new NavigationDeadlineError(new Error("timeout"), true), "Navigation timed out"],
+    [new NavigationDeadlineError(new Error("timeout")), "Navigation timed out"],
     [
       new PageStoppedRespondingError("design token extraction"),
       "The page stopped responding during design token extraction",
@@ -81,18 +81,20 @@ describe("capture navigation retry launch", () => {
     expect(phases).toContain("webgl-disabled-retry");
   });
 
-  it("does not retry a navigation deadline without observed WebGL", async () => {
+  it("retries only once when the WebGL-off attempt stops too", async () => {
     const options: CaptureOptions = {
       url: "https://example.com",
-      outputDir: "/tmp/hf-capture-test-no-webgl",
+      outputDir: "/tmp/hf-capture-test-retry-once",
     };
     captureWebsiteAttemptMock.mockReset();
-    captureWebsiteAttemptMock.mockRejectedValueOnce(
-      new NavigationDeadlineError(new Error("timeout"), false),
-    );
+    captureWebsiteAttemptMock
+      .mockRejectedValueOnce(new NavigationDeadlineError(new Error("timeout")))
+      .mockRejectedValueOnce(new PageStoppedRespondingError("Lottie DOM scan"));
 
     const { captureWebsite } = await import("./index.js");
-    await expect(captureWebsite(options)).rejects.toThrow("capture navigation timed out");
-    expect(captureWebsiteAttemptMock).toHaveBeenCalledOnce();
+    await expect(captureWebsite(options)).rejects.toThrow(
+      "the page stopped responding during Lottie DOM scan",
+    );
+    expect(captureWebsiteAttemptMock).toHaveBeenCalledTimes(2);
   });
 });
