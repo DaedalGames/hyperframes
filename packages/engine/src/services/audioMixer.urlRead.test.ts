@@ -35,27 +35,23 @@ function serve(body: Buffer, cut?: { from: number; at: number }): Promise<Server
 
 describe.skipIf(!HAS_FFMPEG)("audio cut from a cloud-held file's URL", () => {
   let dir: string;
-  let source: Buffer;
   let server: Server | undefined;
+
+  function makeMedia(name: string, args: string[]): Buffer {
+    const path = join(dir, name);
+    const made = spawnSync(getFfmpegBinary(), ["-v", "error", ...args, path]);
+    expect(made.status).toBe(0);
+    return readFileSync(path);
+  }
+
+  const makeVoice = () =>
+    makeMedia("voice.wav", [
+      ...["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=20"],
+      ...["-ac", "2", "-c:a", "pcm_s16le"],
+    ]);
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "hf-audio-url-read-"));
-    const wav = join(dir, "voice.wav");
-    const made = spawnSync(getFfmpegBinary(), [
-      "-v",
-      "error",
-      "-f",
-      "lavfi",
-      "-i",
-      "sine=frequency=440:sample_rate=48000:duration=20",
-      "-ac",
-      "2",
-      "-c:a",
-      "pcm_s16le",
-      wav,
-    ]);
-    expect(made.status).toBe(0);
-    source = readFileSync(wav);
   });
 
   afterEach(async () => {
@@ -64,37 +60,44 @@ describe.skipIf(!HAS_FFMPEG)("audio cut from a cloud-held file's URL", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  async function mixFromUrl() {
+  async function mixFromUrl(
+    clip: { name: string; type: "audio" | "video"; mediaStart: number; end: number } = {
+      name: "voice.wav",
+      type: "audio",
+      mediaStart: 2,
+      end: 10,
+    },
+  ) {
     const { port } = server!.address() as AddressInfo;
     const baseDir = join(dir, "project");
     return processCompositionAudio(
       [
         {
-          id: "voice",
-          src: "takes/voice.wav",
+          id: "clip",
+          src: `takes/${clip.name}`,
           start: 0,
-          end: 10,
-          mediaStart: 2,
+          end: clip.end,
+          mediaStart: clip.mediaStart,
           layer: 0,
           volume: 1,
-          type: "audio",
+          type: clip.type,
         },
       ],
       baseDir,
       join(dir, "work"),
       join(dir, "out.m4a"),
-      10,
+      clip.end,
       undefined,
       {
         urlByAbsentLocalPath: new Map([
-          [join(baseDir, "takes", "voice.wav"), `http://127.0.0.1:${port}/voice.wav`],
+          [join(baseDir, "takes", clip.name), `http://127.0.0.1:${port}/${clip.name}`],
         ]),
       },
     );
   }
 
   it("mixes the whole span when the URL serves it", async () => {
-    server = await serve(source);
+    server = await serve(makeVoice());
 
     const result = await mixFromUrl();
 
@@ -104,19 +107,33 @@ describe.skipIf(!HAS_FFMPEG)("audio cut from a cloud-held file's URL", () => {
 
   it("fails the track when the read is cut mid-span, instead of padding it with silence", async () => {
     // The clip reads source seconds 2 to 12; the link fails at second 6.
-    server = await serve(source, { from: BYTES_PER_SECOND, at: 6 * BYTES_PER_SECOND });
+    server = await serve(makeVoice(), { from: BYTES_PER_SECOND, at: 6 * BYTES_PER_SECOND });
 
     const result = await mixFromUrl();
 
     expect(result.success).toBe(false);
     expect(result.failures).toEqual([
       expect.objectContaining({
-        elementId: "voice",
+        elementId: "clip",
         stage: "prepare",
         reason: "download_failed",
         owner: "system",
         retryable: true,
       }),
     ]);
+  });
+
+  it("mixes a video whose audio track ends before its picture", async () => {
+    const video = makeMedia("take.mp4", [
+      ...["-f", "lavfi", "-i", "testsrc2=size=64x64:rate=25:duration=6"],
+      ...["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=4"],
+      ...["-c:v", "mpeg4", "-c:a", "aac", "-movflags", "+faststart"],
+    ]);
+    server = await serve(video);
+
+    const result = await mixFromUrl({ name: "take.mp4", type: "video", mediaStart: 0, end: 6 });
+
+    expect(result.failures).toBeUndefined();
+    expect(result.success).toBe(true);
   });
 });
