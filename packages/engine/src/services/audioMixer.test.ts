@@ -82,7 +82,7 @@ vi.mock("../utils/ffprobe.js", async (importOriginal) => {
 });
 
 import { RATE_RANGE } from "@hyperframes/core/audio-automation";
-import { AudioFxRenderError } from "./audioFxRender.js";
+import { AudioFxRenderError, writeWav } from "./audioFxRender.js";
 import { parseAudioElements, processCompositionAudio } from "./audioMixer.js";
 import { encodeAac } from "./aacEncode.js";
 
@@ -1589,6 +1589,8 @@ describe("processCompositionAudio", () => {
     const extractArgs = runFfmpegMock.mock.calls[0]?.[0] ?? [];
     expect(extractArgs.indexOf("-tls_verify")).toBeGreaterThanOrEqual(0);
     expect(extractArgs.indexOf("-tls_verify")).toBeLessThan(extractArgs.indexOf("-i"));
+    expect(extractArgs.indexOf("-xerror")).toBeGreaterThanOrEqual(0);
+    expect(extractArgs.indexOf("-xerror")).toBeLessThan(extractArgs.indexOf("-i"));
     expect(extractArgs.slice(extractArgs.indexOf("-ss"), extractArgs.indexOf(url) + 1)).toEqual([
       "-ss",
       "600",
@@ -1633,6 +1635,55 @@ describe("processCompositionAudio", () => {
     });
     expect(result.success).toBe(false);
     expect(runFfmpegMock.mock.calls.some(([args]) => args.includes(url))).toBe(false);
+  });
+
+  it("fails a cloud-held file's audio when ffmpeg exits 0 with less audio than the URL holds", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "hf-audio-base-"));
+    const workDir = mkdtempSync(join(tmpdir(), "hf-audio-work-"));
+    tempDirs.push(baseDir, workDir);
+    extractAudioMetadataMock.mockResolvedValue({
+      durationSeconds: 20,
+      sampleRate: 48_000,
+      channels: 2,
+      audioCodec: "aac",
+    });
+    runFfmpegMock.mockImplementationOnce(async (args: string[]) => {
+      writeWav(args.at(-1)!, new Float32Array(48_000 * 2 * 4), 48_000, 2);
+      return { success: true, durationMs: 1, stderr: "", exitCode: 0 };
+    });
+    const url = "https://bucket.s3.amazonaws.com/cas/take.mov?X-Amz-Signature=s";
+
+    const result = await processCompositionAudio(
+      [
+        {
+          id: "take-audio",
+          src: "takes/take.mov",
+          start: 0,
+          end: 10,
+          mediaStart: 2,
+          layer: 0,
+          volume: 1,
+          type: "video",
+        },
+      ],
+      baseDir,
+      workDir,
+      join(baseDir, "out.m4a"),
+      10,
+      undefined,
+      { urlByAbsentLocalPath: new Map([[join(baseDir, "takes", "take.mov"), url]]) },
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.failures).toEqual([
+      expect.objectContaining({
+        elementId: "take-audio",
+        stage: "extract",
+        reason: "download_failed",
+        retryable: true,
+        detail: "Audio extract read 4.000 s of 10.000 s from its URL",
+      }),
+    ]);
   });
 
   it("preserves authored clip gain above unity for quiet-source boosting", async () => {

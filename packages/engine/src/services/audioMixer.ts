@@ -66,7 +66,7 @@ import {
   type RateSpec,
 } from "@hyperframes/core";
 import { readMasterFxChain, resolveAudioGroups } from "@hyperframes/core/audio-groups";
-import { applyAudioFxChain, AudioFxRenderError } from "./audioFxRender.js";
+import { applyAudioFxChain, AudioFxRenderError, readWavHeader } from "./audioFxRender.js";
 import type { AudioVolumeKeyframe } from "./audioMixer.types.js";
 
 export type { AudioElement, MixResult } from "./audioMixer.types.js";
@@ -668,7 +668,8 @@ async function extractAudioSegment(
   const sourceDuration = sourceTimeAt(normalizedPlaybackRate, duration);
   // A failed local probe keeps FFmpeg's default channel conversion and the input seek; a URL probe
   // is retried once, then fails: a blip must not change how the next, successful read is mixed.
-  const metadata = isHttpUrl(srcPath)
+  const readsUrl = isHttpUrl(srcPath);
+  const metadata = readsUrl
     ? await extractAudioMetadata(srcPath, { signal }).catch((error: unknown) => {
         if (signal?.aborted) throw error;
         return extractAudioMetadata(srcPath, { signal });
@@ -687,6 +688,8 @@ async function extractAudioSegment(
   );
 
   const args = [
+    // A URL read that fails past the reconnects ends the input there and exits 0 unless told to fail.
+    ...(readsUrl ? ["-xerror"] : []),
     ...urlInputArgs(srcPath),
     ...(inputSeek ? ["-ss", String(mediaStart), "-t", String(sourceDuration)] : []),
     "-i",
@@ -714,13 +717,60 @@ async function extractAudioSegment(
       failure,
     };
   }
-  const failure = !result.success ? ffmpegFailure(stage, result) : undefined;
+  let failure = result.success ? undefined : ffmpegFailure(stage, result);
+  if (readsUrl && metadata) {
+    // The probe already read this link as media, so a read that fails or comes up short is the network.
+    failure =
+      failure?.reason === "invalid_media" || failure?.reason === "ffmpeg_failed"
+        ? { ...failure, reason: "download_failed", owner: "system", retryable: true }
+        : (failure ??
+          shortUrlReadFailure(
+            stage,
+            outputPath,
+            metadata,
+            mediaStart,
+            duration,
+            normalizedPlaybackRate,
+          ));
+  }
   return {
-    success: result.success,
+    success: !failure,
     outputPath,
     durationMs: result.durationMs,
     error: failure?.detail,
     failure,
+  };
+}
+
+/** Rounding and codec frame padding only; a read cut off by the network falls far short of it. */
+const SHORT_URL_READ_TOLERANCE_SECONDS = 0.1;
+
+/** A failure when the WAV cut from a URL holds less audio than the source has from `mediaStart`. */
+function shortUrlReadFailure(
+  stage: "extract" | "prepare",
+  outputPath: string,
+  metadata: AudioMetadata,
+  mediaStart: number,
+  duration: number,
+  playbackRate: RateSpec,
+): AudioProcessingFailure | undefined {
+  const expected = Math.min(
+    duration,
+    timeAtSourceTime(playbackRate, metadata.durationSeconds - mediaStart),
+  );
+  const header = existsSync(outputPath) ? readWavHeader(outputPath) : null;
+  const produced = header
+    ? header.dataBytes / (header.sampleRate * header.channels * (header.bits / 8))
+    : 0;
+  if (produced >= expected - SHORT_URL_READ_TOLERANCE_SECONDS) return undefined;
+  return {
+    stage,
+    reason: "download_failed",
+    owner: "system",
+    retryable: true,
+    detail: boundedDetail(
+      `Audio ${stage} read ${produced.toFixed(3)} s of ${expected.toFixed(3)} s from its URL`,
+    ),
   };
 }
 
