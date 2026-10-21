@@ -4,6 +4,7 @@
 // the registry answers "Skill not found" for a hidden skill, which is what makes a rerun a no-op.
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
+import { RETIRED_SKILLS, retiredSkillNotice } from "../packages/cli/src/utils/skillsManifest.ts";
 
 const OWNER_HANDLE = "heygen-com";
 const NOT_FOUND = /Skill not found/;
@@ -57,9 +58,7 @@ function runClawhub(args) {
   return { ok: result.status === 0, output: result.stdout, message: result.stdout + result.stderr };
 }
 
-async function main() {
-  const manifest = new URL("../packages/cli/src/utils/skillsManifest.ts", import.meta.url);
-  const { RETIRED_SKILLS, retiredSkillNotice } = await import(manifest.href);
+function main() {
   const dryRun = process.env.DRY_RUN === "true";
   const { hidden, pending, errors } = unlistRetired({
     run: runClawhub,
@@ -77,5 +76,5 @@ async function main() {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  await main();
+  main();
 }
