@@ -2,6 +2,7 @@ import { globSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { parseHTMLContent } from "../packages/core/src/compiler/htmlDocument.js";
 
 const repoRoot = resolve(import.meta.dirname, "..");
 const DECLARATION = /(--[\w-]+)\s*:/g;
@@ -17,12 +18,25 @@ const CONTRACT = tokenNames(
   DECLARATION,
 );
 
-/** Contract tokens the file reads with no fallback and does not declare itself. */
-function bareContractTokens(html: string): string[] {
-  const live = html
-    .replace(/<!--[\s\S]*?-->/g, "")
+function dropComments(node: Node): void {
+  for (const child of [...node.childNodes]) {
+    if (child.nodeType === child.COMMENT_NODE) child.remove();
+    else dropComments(child);
+  }
+}
+
+/** The file with HTML comments removed by the parser, then CSS block and JS line comments. */
+function liveSource(html: string): string {
+  const document = parseHTMLContent(html);
+  dropComments(document);
+  return document.documentElement.outerHTML
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/^\s*\/\/.*$/gm, "");
+}
+
+/** Contract tokens the file reads with no fallback and does not declare itself. */
+function bareContractTokens(html: string): string[] {
+  const live = liveSource(html);
   const declared = tokenNames(live, DECLARATION);
   const read = tokenNames(live, BARE_READ);
   return [...read].filter((token) => CONTRACT.has(token) && !declared.has(token)).sort();
