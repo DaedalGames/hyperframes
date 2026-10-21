@@ -354,25 +354,35 @@ describe("runEnvironmentChecks — Chrome shared libraries (Linux/WSL)", () => {
     expect(result.outcomes.find((o) => o.name === "Chrome")).toMatchObject({ ok: true });
   });
 
-  it("passes a launcher module without running it as a browser binary", async () => {
-    vi.spyOn(manager, "findBrowser").mockResolvedValue({
-      executablePath: "/host/launcher.mjs",
-      source: "launcher",
-    });
+  it.each([
+    ["resolved", false],
+    ["passed back by render", true],
+  ])(
+    "passes a launcher module %s without running it as a browser binary",
+    async (_, passedBack) => {
+      const dir = mkdtempSync(join(tmpdir(), "hyperframes-preflight-launcher-"));
+      const launcher = join(dir, "launcher.mjs");
+      writeFileSync(launcher, "export async function launch() {}\n");
+      process.env.HYPERFRAMES_BROWSER_LAUNCHER = launcher;
+      vi.spyOn(manager, "findBrowser").mockResolvedValue({
+        executablePath: launcher,
+        source: "launcher",
+      });
+      try {
+        const result = await runEnvironmentChecks({
+          includeBrowser: true,
+          browserPath: passedBack ? launcher : undefined,
+        });
 
-    const result = await runEnvironmentChecks({ includeBrowser: true });
-
-    expect(result.outcomes.find((o) => o.name === "Chrome")).toMatchObject({
-      ok: true,
-      detail: "launcher: /host/launcher.mjs",
-    });
-    expect(result.browser?.executablePath).toBe("/host/launcher.mjs");
-    expect(runProcess).not.toHaveBeenCalledWith(
-      "/host/launcher.mjs",
-      expect.anything(),
-      expect.anything(),
-    );
-  });
+        expect(result.outcomes.find((o) => o.name === "Chrome")).toMatchObject({ ok: true });
+        expect(result.browser?.executablePath).toBe(launcher);
+        expect(runProcess).not.toHaveBeenCalledWith(launcher, expect.anything(), expect.anything());
+      } finally {
+        delete process.env.HYPERFRAMES_BROWSER_LAUNCHER;
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("resolveRenderBrowser returns the browser the render check found", async () => {
     vi.spyOn(manager, "findBrowser").mockResolvedValue({

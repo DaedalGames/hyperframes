@@ -243,18 +243,17 @@ function findManagedHeadlessShell(baseDir: string): string | undefined {
 }
 
 /**
- * Resolve chrome-headless-shell binary for deterministic BeginFrame rendering.
- * Checks config.chromePath, then PRODUCER_HEADLESS_SHELL_PATH env var,
- * then the CLI browser override, HyperFrames' managed cache, and Puppeteer's cache.
+ * Resolve chrome-headless-shell binary for deterministic BeginFrame rendering. None when a launcher module starts
+ * the browser; otherwise config.chromePath, then the env binary, HyperFrames' managed cache, and Puppeteer's cache.
  */
 export function resolveHeadlessShellPath(
   config?: Partial<Pick<EngineConfig, "chromePath">>,
 ): string | undefined {
+  const fromEnv = browserPathFromEnv();
+  if (fromEnv?.name === "HYPERFRAMES_BROWSER_LAUNCHER") return undefined;
   if (config?.chromePath) {
     return config.chromePath;
   }
-  const fromEnv = browserPathFromEnv();
-  if (fromEnv?.name === "HYPERFRAMES_BROWSER_LAUNCHER") return undefined;
   if (fromEnv) {
     if (!existsSync(fromEnv.path)) {
       throw new Error(

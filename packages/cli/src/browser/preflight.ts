@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { platform } from "node:os";
 import { findFfBinary } from "@hyperframes/parsers/ff-binaries";
+import { browserPathFromEnv } from "@hyperframes/engine/chrome-host-ceiling";
 import { ensureBrowser, findBrowser, type BrowserResult } from "./manager.js";
 import { describeBrowserInstall, type BrowserInstallFacts } from "./installFacts.js";
 import {
@@ -260,6 +261,10 @@ async function chromeLaunchOutcome(
   found: EnvironmentCheckOutcome,
   signal?: AbortSignal,
 ): Promise<EnvironmentCheckOutcome> {
+  // A launcher module is started by its host; there is no binary to run `--version` on.
+  const fromEnv = browserPathFromEnv();
+  if (fromEnv?.name === "HYPERFRAMES_BROWSER_LAUNCHER" && fromEnv.path === executablePath)
+    return found;
   const libraries = await chromeSharedLibOutcome(executablePath, found, signal);
   if (!libraries.ok) return libraries;
   try {
@@ -284,23 +289,6 @@ async function chromeLaunchOutcome(
       path: executablePath,
     };
   }
-}
-
-/** A launcher module is started by its host, so it has no binary to run `--version` on. */
-async function foundChromeOutcome(
-  info: BrowserResult,
-  signal?: AbortSignal,
-): Promise<EnvironmentCheckOutcome> {
-  const found: EnvironmentCheckOutcome = {
-    name: "Chrome",
-    ok: true,
-    level: "ok",
-    detail: `${info.source}: ${info.executablePath}`,
-    path: info.executablePath,
-  };
-  return info.source === "launcher"
-    ? found
-    : chromeLaunchOutcome(info.executablePath, found, signal);
 }
 
 async function checkChrome(
@@ -347,7 +335,19 @@ async function checkChrome(
     info = undefined;
     failure = normalizeErrorMessage(error);
   }
-  if (info) return foundChromeOutcome(info, signal);
+  if (info) {
+    return chromeLaunchOutcome(
+      info.executablePath,
+      {
+        name: "Chrome",
+        ok: true,
+        level: "ok",
+        detail: `${info.source}: ${info.executablePath}`,
+        path: info.executablePath,
+      },
+      signal,
+    );
+  }
 
   return {
     name: "Chrome",

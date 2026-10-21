@@ -881,6 +881,9 @@ describe("resolveHeadlessShellPath", () => {
       process.env.HYPERFRAMES_BROWSER_LAUNCHER = join(dir, "launcher.mjs");
 
       expect(resolveHeadlessShellPath({})).toBeUndefined();
+      expect(
+        resolveHeadlessShellPath({ chromePath: process.env.HYPERFRAMES_BROWSER_LAUNCHER }),
+      ).toBeUndefined();
     } finally {
       delete process.env.HYPERFRAMES_BROWSER_LAUNCHER;
       rmSync(dir, { recursive: true, force: true });
