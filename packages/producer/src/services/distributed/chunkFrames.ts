@@ -13,6 +13,7 @@ import {
   extractVideoFramesRange,
   type FrameRange,
   type FrameLookupTable,
+  type ShownBox,
 } from "@hyperframes/engine";
 import { resolveVideoCaptureBeyondViewport } from "../render/captureBeyondViewport.js";
 import { resolveCaptureJpegQuality } from "../render/captureImageFormat.js";
@@ -167,6 +168,35 @@ export function buildChunkCaptureOptions(input: {
 }
 
 /** Extracts the given frames of deferred videos under the names a full extraction gives them. */
+/** Source frame indexes each deferred video shows over `frames` (composition frame numbers). */
+export function shownDeferredFrameIndexes(
+  planVideos: PlanVideosJson,
+  frames: Iterable<number>,
+  fps: { num: number; den: number },
+): Map<string, Set<number>> {
+  const shown = new Map<string, Set<number>>();
+  const deferred = planVideos.extracted.filter((video) => video.deferredRange);
+  if (deferred.length === 0) return shown;
+  const table = createFrameLookupTable(
+    planVideos.videos,
+    deferred.map((video) => ({
+      ...video,
+      outputDir: "",
+      framePaths: new Map(Array.from({ length: video.totalFrames }, (_, i) => [i, String(i)])),
+    })),
+    resolveRenderFpsConfig(fps).value,
+  );
+  for (const frame of frames) {
+    const globalTime = (frame * fps.den) / fps.num;
+    for (const [videoId, payload] of table.getActiveFramePayloads(globalTime)) {
+      const indexes = shown.get(videoId) ?? new Set<number>();
+      indexes.add(payload.frameIndex);
+      shown.set(videoId, indexes);
+    }
+  }
+  return shown;
+}
+
 export async function extractDeferredVideoFramesForChunk(input: {
   planDir: string;
   planVideos: PlanVideosJson;
@@ -175,6 +205,8 @@ export async function extractDeferredVideoFramesForChunk(input: {
   outputRoot: string;
   cfg: Pick<EngineConfig, "ffmpegProcessTimeout">;
   remoteSources?: PlanV2RemoteSources;
+  /** Device-pixel box each video is drawn in over these frames; a video without one keeps full size. */
+  shownBoxes?: ReadonlyMap<string, ShownBox>;
 }): Promise<ExtractedFrames[]> {
   const deferred = input.planVideos.extracted.filter((video) => video.deferredRange);
   const remoteSources = input.remoteSources ?? {};
@@ -192,24 +224,7 @@ export async function extractDeferredVideoFramesForChunk(input: {
     });
   }
   if (deferred.length === 0) return [];
-  const table = createFrameLookupTable(
-    input.planVideos.videos,
-    deferred.map((video) => ({
-      ...video,
-      outputDir: input.outputRoot,
-      framePaths: new Map(Array.from({ length: video.totalFrames }, (_, i) => [i, String(i)])),
-    })),
-    resolveRenderFpsConfig(input.fps).value,
-  );
-  const shown = new Map<string, Set<number>>();
-  for (const frame of input.frames) {
-    const globalTime = (frame * input.fps.den) / input.fps.num;
-    for (const [videoId, payload] of table.getActiveFramePayloads(globalTime)) {
-      const indexes = shown.get(videoId) ?? new Set<number>();
-      indexes.add(payload.frameIndex);
-      shown.set(videoId, indexes);
-    }
-  }
+  const shown = shownDeferredFrameIndexes(input.planVideos, input.frames, input.fps);
   return Promise.all(
     deferred.map(async (video) => {
       const outputDir = join(input.outputRoot, video.videoId);
@@ -236,6 +251,7 @@ export async function extractDeferredVideoFramesForChunk(input: {
           outputDir: input.outputRoot,
           format: range.format,
           frameRanges: contiguousRuns(indexes),
+          shownBox: input.shownBoxes?.get(video.videoId),
         },
         undefined,
         input.cfg,
