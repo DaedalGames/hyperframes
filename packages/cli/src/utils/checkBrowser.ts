@@ -1,5 +1,6 @@
 import type { CheckDeadline } from "./checkDeadline.js";
 import { BrowserCleanupError, closeManagedBrowser } from "../browser/launch.js";
+import { collectMotionBlurDrafts, dropMotionBlurConsoleEcho } from "./checkMotionBlur.js";
 import { checkSnapshotDirectory } from "./checkSnapshotDirectory.js";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import os from "node:os";
@@ -78,6 +79,7 @@ interface RuntimeDraft {
   line?: number;
   count?: number;
   abortedImage?: boolean;
+  fixHint?: string;
 }
 
 type RuntimeStamp = Pick<RuntimeDraft, "time" | "timeRange">;
@@ -294,6 +296,8 @@ export async function runBrowserCheck(
       const message = tweenTailMessage(tail);
       drafts.push({ code: "gsap_tween_tail", severity: "warning", message, time: tail.later.end });
     }
+    const blur = await collectMotionBlurDrafts(page);
+    drafts.push(...blur);
     const sampleLog = sampleWindow(drafts);
     const driver = createPageDriver(page, clock, sampleLog);
     const result = await runGrid(driver, options, motion, helpers);
@@ -305,7 +309,7 @@ export async function runBrowserCheck(
       ...result,
       timings: { ...result.timings, launchSettleMs },
       runtimeFindings: dropFailedProxyEchoes(
-        keepBrokenImageAborts(merged, broken),
+        dropMotionBlurConsoleEcho(keepBrokenImageAborts(merged, broken), blur),
         failedPaths,
       ).map((draft) => runtimeFinding(draft, rootAnchor)),
     };
@@ -1294,20 +1298,23 @@ function anchorsInPage(values: AnchorRequest[]): CheckAnchor[] {
 }
 
 async function resolveRootAnchor(page: Page): Promise<CheckAnchor> {
+  const selector = await page.evaluate(
+    (explicit) => (document.querySelector(explicit) ? explicit : "[data-composition-id]"),
+    '[data-composition-id][data-root="true"]',
+  );
   const anchors = await resolveAnchors(page, [
-    { selector: "[data-composition-id]", time: 0, bbox: await compositionBbox(page) },
+    { selector, time: 0, bbox: await compositionBbox(page, selector) },
   ]);
   return anchors[0] ?? fallbackAnchor(undefined);
 }
 
-async function compositionBbox(page: Page): Promise<CheckBbox> {
-  return page.evaluate(() => {
-    const element = document.querySelector("[data-composition-id]");
-    const rect = element?.getBoundingClientRect();
+async function compositionBbox(page: Page, selector: string): Promise<CheckBbox> {
+  return page.evaluate((root) => {
+    const rect = document.querySelector(root)?.getBoundingClientRect();
     return rect
       ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
       : { x: 0, y: 0, width: 0, height: 0 };
-  });
+  }, selector);
 }
 
 async function collectContrast(
@@ -1777,6 +1784,7 @@ function runtimeFinding(draft: RuntimeDraft, root: CheckAnchor): CheckFinding {
     ...(draft.timeRange ? { timeRange: draft.timeRange } : {}),
     url: draft.url,
     line: draft.line,
+    ...(draft.fixHint ? { fixHint: draft.fixHint } : {}),
   };
 }
 
