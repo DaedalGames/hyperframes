@@ -297,21 +297,9 @@ function whichBinary(name: string): string | undefined {
   }
 }
 
-// Env-var aliases for a caller-supplied browser executable path. The CLI-native
-// name `HYPERFRAMES_BROWSER_PATH` is the canonical spelling (documented via the
-// download-failure hint added in #2443). `PRODUCER_HEADLESS_SHELL_PATH` is the
-// engine-side name that per-worker render launches already honor (see
-// `packages/engine/src/services/browserManager.ts` and `render.ts` which even
-// propagates the CLI-resolved executable into it). Docs in
-// `skills/hyperframes-animation/adapters/typegpu.md`,
-// `packages/gcp-cloud-run/Dockerfile`, and `examples/k8s-jobs/Dockerfile.example`
-// all instruct users to set `PRODUCER_HEADLESS_SHELL_PATH`, so field reports
-// (e.g. `#hyperframes-cli-feedback` ts=1784095034 on win32/x64) hit the case
-// where `render` completes via that env var while `check`, `snapshot`, and
-// `compare` all ignore it and crash on the cached headless-shell instead.
-// Alias them here so every consumer of `openSettledCompositionPage` (which
-// calls `ensureBrowser` → `findFromEnv`) picks up the same escape hatch.
-// Which variable wins is browserPathFromEnv's, so the engine launches what this resolved.
+// A caller-supplied browser, named by HYPERFRAMES_BROWSER_PATH or PRODUCER_HEADLESS_SHELL_PATH (the engine's
+// and the deploy docs' name). check, snapshot and compare honour it as render does; which name wins is
+// browserPathFromEnv's, so the engine launches what this resolved.
 function findFromEnv(): BrowserResult | undefined {
   const envPath = browserPathFromEnv()?.path;
   if (envPath && existsSync(envPath)) {
