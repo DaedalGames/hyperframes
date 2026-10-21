@@ -1012,7 +1012,7 @@ describe("handler dispatch", () => {
     expect(url.searchParams.get("X-Amz-Signature")).toMatch(/^[a-f0-9]{64}$/);
   });
 
-  async function planStitched(chunkCount: number) {
+  async function planStitched(chunkCount: number, separateAudio = false) {
     const tmpRoot = makeTmpRoot();
     const s3 = new FakeS3Client();
     s3.objects.set("s3://bucket/project.tar.gz", await makeMinimalProjectTar());
@@ -1025,7 +1025,11 @@ describe("handler dispatch", () => {
     const planV2WithPublisherMock = mock(
       async (_dir: string, _config: unknown, publisher: PlanV2ArtifactPublisher) => {
         const v1Dir = join(tmpRoot, "v1");
-        makeMinimalV1PlanDir(v1Dir, true, { chunkCount, chunksCarryAudio: true });
+        makeMinimalV1PlanDir(v1Dir, !separateAudio, {
+          chunkCount,
+          chunksCarryAudio: !separateAudio,
+          separateAudio,
+        });
         return publishPlanV2FromExecutionPlan(v1Dir, publisher);
       },
     );
@@ -1051,7 +1055,7 @@ describe("handler dispatch", () => {
     );
     if (!("PlanProtocol" in planned) || planned.PlanProtocol !== "v2")
       throw new Error("expected v2");
-    const assemble = (chunkS3Uris: string[]) =>
+    const assemble = (chunkS3Uris: string[], audioS3Uri: string | null = null) =>
       handler(
         {
           Action: "assemble",
@@ -1059,13 +1063,13 @@ describe("handler dispatch", () => {
           PlanV2ArtifactS3Prefix: planned.PlanV2ArtifactS3Prefix,
           PlanHash: planned.PlanHash,
           ChunkS3Uris: chunkS3Uris,
-          AudioS3Uri: null,
+          AudioS3Uri: audioS3Uri,
           OutputS3Uri: "s3://bucket/renders/f/output.mp4",
           Format: "mp4",
         },
         deps,
       );
-    return { s3, assembleMock, assemble };
+    return { s3, assembleMock, assemble, planV2WithPublisherMock };
   }
 
   it.skipIf(spawnSync("ffmpeg", ["-version"]).status !== 0)(
@@ -1095,6 +1099,55 @@ describe("handler dispatch", () => {
       expect(assembleMock).not.toHaveBeenCalled();
     },
   );
+
+  it.skipIf(spawnSync("ffmpeg", ["-version"]).status !== 0)(
+    "stitches the audio task's track in when the plan left its audio out",
+    async () => {
+      const { s3, assemble, planV2WithPublisherMock } = await planStitched(2, true);
+      expect((planV2WithPublisherMock.mock.calls[0] as unknown[])[3]).toMatchObject({
+        chunksCarryAudio: true,
+        deferAudio: true,
+      });
+      const ffmpeg = (args: string[], path: string) => {
+        const run = spawnSync("ffmpeg", ["-nostdin", "-loglevel", "error", ...args, "-y", path]);
+        if (run.status !== 0) throw new Error(String(run.stderr));
+        return readFileSync(path);
+      };
+      const chunks = [0, 1].map((index) => {
+        const uri = `s3://bucket/renders/f/chunks/000${index}.mp4`;
+        const lavfi = ["-f", "lavfi", "-i", "testsrc2=size=64x48:rate=30:duration=1"];
+        s3.objects.set(
+          uri,
+          ffmpeg([...lavfi, "-c:v", "libx264", "-bf", "0"], join(makeTmpRoot(), "chunk.mp4")),
+        );
+        return uri;
+      });
+      const audioUri = "s3://bucket/renders/f/audio/audio.m4a";
+      s3.objects.set(
+        audioUri,
+        ffmpeg(
+          ["-f", "lavfi", "-i", "sine=duration=2", "-c:a", "aac"],
+          join(makeTmpRoot(), "a.m4a"),
+        ),
+      );
+      await assemble(chunks, audioUri);
+      const outputPath = join(makeTmpRoot(), "out.mp4");
+      writeFileSync(outputPath, s3.objects.get("s3://bucket/renders/f/output.mp4")!);
+      const probe = spawnSync(
+        "ffprobe",
+        ["-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0", "--", outputPath],
+        { encoding: "utf-8" },
+      );
+      expect(probe.stdout.trim().split("\n").sort()).toEqual(["audio", "video"]);
+    },
+  );
+
+  it("refuses an audio URI for a v2 plan that ships its own audio", async () => {
+    const { assemble } = await planStitched(1);
+    await expect(
+      assemble(["s3://bucket/renders/f/chunks/0000.mp4"], "s3://bucket/renders/f/audio/audio.m4a"),
+    ).rejects.toMatchObject({ name: "PLAN_PROTOCOL_UNSUPPORTED" });
+  });
 
   it("rejects unknown plan protocol values", async () => {
     const tmpRoot = makeTmpRoot();
@@ -1155,6 +1208,55 @@ describe("handler dispatch", () => {
         skipChromeResolution: true,
       }),
     ).rejects.toThrow(/no recognised Action/);
+  });
+});
+
+describe("handler — audio", () => {
+  async function runAudio(config: Record<string, unknown>) {
+    const tmpRoot = makeTmpRoot();
+    const s3 = new FakeS3Client();
+    s3.objects.set("s3://bucket/project.tar.gz", await makeMinimalProjectTar());
+    const buildPlanAudio = mock(
+      async (_project: string, _config: unknown, _work: string, outputPath: string) => {
+        writeFileSync(outputPath, "AAC");
+        return { hasAudio: true };
+      },
+    );
+    const result = await handler(
+      {
+        Action: "audio",
+        ProjectS3Uri: "s3://bucket/project.tar.gz",
+        PlanOutputS3Prefix: "s3://bucket/renders/f/",
+        Config: { fps: 30, width: 640, height: 360, format: "mp4", ...config },
+      } as LambdaEvent,
+      {
+        s3: s3 as unknown as import("@aws-sdk/client-s3").S3Client,
+        primitives: { buildPlanAudio } as unknown as NonNullable<
+          Parameters<typeof handler>[1]
+        >["primitives"],
+        tmpRoot,
+        skipChromeResolution: true,
+      },
+    );
+    return { result, s3, buildPlanAudio };
+  }
+
+  it("mixes a plan's deferred audio and uploads it beside the plan", async () => {
+    const { result, s3, buildPlanAudio } = await runAudio({});
+    expect(result).toMatchObject({
+      Action: "audio",
+      HasAudio: true,
+      AudioS3Uri: "s3://bucket/renders/f/audio/audio.m4a",
+    });
+    expect(s3.objects.get("s3://bucket/renders/f/audio/audio.m4a")?.toString()).toBe("AAC");
+    expect(buildPlanAudio).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves the audio to the plan when the stitch cannot take it (cfr)", async () => {
+    const { result, s3, buildPlanAudio } = await runAudio({ cfr: true });
+    expect(result).toMatchObject({ Action: "audio", HasAudio: false, AudioS3Uri: null });
+    expect(buildPlanAudio).not.toHaveBeenCalled();
+    expect(s3.ops).toHaveLength(0);
   });
 });
 
@@ -1398,7 +1500,12 @@ async function makeMinimalPlanTar(): Promise<Buffer> {
 function makeMinimalV1PlanDir(
   dir: string,
   withAudio: boolean,
-  options: { chunkCount?: number; chunksCarryAudio?: boolean; withDeferredVideo?: boolean } = {},
+  options: {
+    chunkCount?: number;
+    chunksCarryAudio?: boolean;
+    separateAudio?: boolean;
+    withDeferredVideo?: boolean;
+  } = {},
 ): void {
   const chunkCount = options.chunkCount ?? 1;
   mkdirSync(join(dir, "meta"), { recursive: true });
@@ -1426,7 +1533,10 @@ function makeMinimalV1PlanDir(
   );
   writeFileSync(
     join(dir, "meta", "encoder.json"),
-    options.chunksCarryAudio ? JSON.stringify({ chunksCarryAudio: true }) : "{}",
+    JSON.stringify({
+      ...(options.chunksCarryAudio ? { chunksCarryAudio: true } : {}),
+      ...(options.separateAudio ? { separateAudio: true } : {}),
+    }),
   );
   if (withAudio) writeFileSync(join(dir, "audio.m4a"), "AAC");
   if (options.withDeferredVideo) writeDeferredVideo(dir);
