@@ -520,11 +520,14 @@ async function handlePlanV2(
       planOutputS3Prefix: event.PlanOutputS3Prefix,
       temporaryRoot: work,
     });
+    // The audio task shares the chunks' workers: it runs beside them only with one kept free.
+    const separateAudio =
+      config.workerConcurrency > 1 && plansSeparateAudio(config, { deferAudio: true });
     const manifest: PlanV2Manifest = await primitive(projectDir, config, publisher, {
       stagingParentDir: work,
       remoteFiles,
       chunksCarryAudio: true,
-      deferAudio: true,
+      deferAudio: separateAudio,
     });
 
     return {
@@ -534,7 +537,10 @@ async function handlePlanV2(
       PlanV2ArtifactS3Prefix: publisher.artifactPrefix,
       PlanHash: manifest.planHash,
       ChunkCount: manifest.chunkCount,
-      MaxChunkConcurrency: Math.min(config.workerConcurrency, manifest.chunkCount),
+      MaxChunkConcurrency: Math.min(
+        config.workerConcurrency - (separateAudio ? 1 : 0),
+        manifest.chunkCount,
+      ),
       TotalFrames: manifest.totalFrames,
       Fps: manifest.fps,
       Width: manifest.width,
@@ -542,6 +548,7 @@ async function handlePlanV2(
       Format: manifest.format,
       HasAudio: manifest.artifacts.some((artifact) => isPlanAudioArtifactPath(artifact.path)),
       AudioS3Uri: null,
+      SeparateAudio: separateAudio,
       FfmpegVersion: manifest.ffmpegVersion,
       ProducerVersion: manifest.producerVersion,
       DurationMs: Date.now() - started,

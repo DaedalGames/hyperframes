@@ -318,6 +318,7 @@ export class HyperframesRenderStack extends Construct {
         "MaxChunkConcurrency.$": "$.Payload.MaxChunkConcurrency",
         "Format.$": "$.Payload.Format",
         "HasAudio.$": "$.Payload.HasAudio",
+        "SeparateAudio.$": "$.Payload.SeparateAudio",
       },
       resultPath: "$.Plan",
     });
@@ -525,12 +526,20 @@ export class HyperframesRenderStack extends Construct {
       backoffRate: 2,
       maxDelay: Duration.seconds(60),
     });
+    const audioNeeded = new sfn.Choice(this, "AudioNeeded")
+      .when(sfn.Condition.booleanEquals("$.Plan.SeparateAudio", true), audio)
+      .otherwise(
+        new sfn.Pass(this, "NoAudio", {
+          result: sfn.Result.fromObject({ HasAudio: false, AudioS3Uri: null }),
+          resultPath: "$.Audio",
+        }),
+      );
     const renderV2 = new sfn.Parallel(this, "RenderV2", {
       resultSelector: { "Chunks.$": "$[0].Chunks", "Audio.$": "$[1].Audio" },
       resultPath: "$.Render",
     })
       .branch(renderChunksV2)
-      .branch(audio);
+      .branch(audioNeeded);
 
     const selectWorkerProtocol = new sfn.Choice(this, "SelectWorkerProtocol")
       .when(sfn.Condition.stringEquals("$.Plan.PlanProtocol", "v2"), renderV2.next(assembleV2))

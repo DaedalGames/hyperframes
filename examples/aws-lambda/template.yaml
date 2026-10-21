@@ -324,6 +324,7 @@ Resources:
               MaxChunkConcurrency.$: "$.Payload.MaxChunkConcurrency"
               Format.$: "$.Payload.Format"
               HasAudio.$: "$.Payload.HasAudio"
+              SeparateAudio.$: "$.Payload.SeparateAudio"
             ResultPath: $.Plan
             Retry:
               - ErrorEquals:
@@ -586,8 +587,22 @@ Resources:
                               MaxDelaySeconds: 60
                           End: true
                     End: true
-              - StartAt: Audio
+              - StartAt: AudioNeeded
                 States:
+                  AudioNeeded:
+                    Type: Choice
+                    Choices:
+                      - Variable: $.Plan.SeparateAudio
+                        BooleanEquals: true
+                        Next: Audio
+                    Default: NoAudio
+                  NoAudio:
+                    Type: Pass
+                    Result:
+                      HasAudio: false
+                      AudioS3Uri: null
+                    ResultPath: $.Audio
+                    End: true
                   Audio:
                     # The plan left its audio out: mix it here while the chunks render.
                     Type: Task

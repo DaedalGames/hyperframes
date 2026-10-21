@@ -196,11 +196,12 @@ export interface PlanV2LambdaResult extends PlanLambdaResultBase {
   PlanProtocol: "v2";
   PlanV2ManifestS3Uri: string;
   PlanV2ArtifactS3Prefix: string;
+  /** The plan left its audio to the audio task, which has a worker kept free for it. */
+  SeparateAudio: boolean;
 }
 
 export type PlanLambdaResult = PlanV1LambdaResult | PlanV2LambdaResult;
 
-/** Result of a `renderChunk` invocation. Sized ≤200 bytes per §2.4. */
 export interface AudioLambdaResult {
   Action: "audio";
   HasAudio: boolean;
@@ -209,6 +210,7 @@ export interface AudioLambdaResult {
   DurationMs: number;
 }
 
+/** Result of a `renderChunk` invocation. Sized ≤200 bytes per §2.4. */
 export interface RenderChunkLambdaResult {
   Action: "renderChunk";
   ChunkS3Uri: string;

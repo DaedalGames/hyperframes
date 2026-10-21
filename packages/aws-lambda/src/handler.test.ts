@@ -1012,7 +1012,7 @@ describe("handler dispatch", () => {
     expect(url.searchParams.get("X-Amz-Signature")).toMatch(/^[a-f0-9]{64}$/);
   });
 
-  async function planStitched(chunkCount: number, separateAudio = false) {
+  async function planStitched(chunkCount: number, separateAudio = false, workerConcurrency = 16) {
     const tmpRoot = makeTmpRoot();
     const s3 = new FakeS3Client();
     s3.objects.set("s3://bucket/project.tar.gz", await makeMinimalProjectTar());
@@ -1049,7 +1049,7 @@ describe("handler dispatch", () => {
         Action: "plan",
         ProjectS3Uri: "s3://bucket/project.tar.gz",
         PlanOutputS3Prefix: "s3://bucket/renders/f/",
-        Config: { fps: 30, width: 640, height: 360, format: "mp4" },
+        Config: { fps: 30, width: 640, height: 360, format: "mp4", workerConcurrency },
       },
       deps,
     );
@@ -1069,8 +1069,19 @@ describe("handler dispatch", () => {
         },
         deps,
       );
-    return { s3, assembleMock, assemble, planV2WithPublisherMock };
+    return { s3, assembleMock, assemble, planV2WithPublisherMock, planned };
   }
+
+  it("keeps a worker free for the audio task, and keeps the audio in a plan with one worker", async () => {
+    const planOptions = (run: Awaited<ReturnType<typeof planStitched>>) =>
+      (run.planV2WithPublisherMock.mock.calls[0] as unknown[])[3];
+    const four = await planStitched(8, true, 4);
+    expect(planOptions(four)).toMatchObject({ deferAudio: true });
+    expect([four.planned.SeparateAudio, four.planned.MaxChunkConcurrency]).toEqual([true, 3]);
+    const one = await planStitched(8, false, 1);
+    expect(planOptions(one)).toMatchObject({ deferAudio: false });
+    expect([one.planned.SeparateAudio, one.planned.MaxChunkConcurrency]).toEqual([false, 1]);
+  });
 
   it.skipIf(spawnSync("ffmpeg", ["-version"]).status !== 0)(
     "stitches mp4 chunks inside S3 instead of joining them locally",

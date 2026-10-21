@@ -270,6 +270,21 @@ describe("HyperframesRenderStack — snapshot", () => {
         "Audio.$": "$[1].Audio",
       });
       expect(sentPayload(renderV2Branch(definition, "Audio"))).toMatchObject({ Action: "audio" });
+      // Only a plan that left its audio out runs the task; any other skips its Lambda.
+      expect(renderV2Branch(definition, "AudioNeeded")).toMatchObject({
+        Type: "Choice",
+        Choices: [{ Variable: "$.Plan.SeparateAudio", BooleanEquals: true, Next: "Audio" }],
+        Default: "NoAudio",
+      });
+      expect(renderV2Branch(definition, "NoAudio")).toMatchObject({
+        Type: "Pass",
+        Result: { HasAudio: false, AudioS3Uri: null },
+        ResultPath: "$.Audio",
+        End: true,
+      });
+      expect(requireRecord(definition.States.PlanV2, "PlanV2").ResultSelector).toMatchObject({
+        "SeparateAudio.$": "$.Payload.SeparateAudio",
+      });
       expect(sentPayload(definition.States.AssembleV2)).toMatchObject({
         "ChunkS3Uris.$": "$.Render.Chunks[*].ChunkS3Uri",
       });
