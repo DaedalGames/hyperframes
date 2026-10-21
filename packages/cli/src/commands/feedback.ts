@@ -19,23 +19,33 @@ import { buildIssueUrl, HYPERFRAMES_REPO_URL } from "../utils/feedbackIssue.js";
 import { VERSION } from "../version.js";
 import { c } from "../ui/colors.js";
 import { parseFeedbackRating } from "../utils/feedbackRating.js";
-import { feedbackEmail, parseFeedbackSource } from "../utils/feedbackSource.js";
+import {
+  FEEDBACK_ROLE_ERROR,
+  FEEDBACK_ROLES,
+  feedbackEmail,
+  parseFeedbackRole,
+  parseFeedbackSource,
+  type FeedbackRole,
+} from "../utils/feedbackSource.js";
 import { lintFeedbackComment, type FeedbackLintInput } from "../utils/feedbackLint.js";
 
 export const examples: Example[] = [
-  ["Submit render feedback", 'hyperframes feedback --rating 8 --comment "fast but font missing"'],
-  ["Quick rating only", "hyperframes feedback --rating 10"],
+  [
+    "Submit render feedback",
+    'hyperframes feedback --role developer --rating 8 --comment "fast but font missing"',
+  ],
+  ["Quick rating only", "hyperframes feedback --role creator --rating 10"],
   [
     "Report something you needed that is missing (no rating)",
-    'hyperframes feedback --comment "MISSING FEATURE: trim a clip from the timeline | WORKAROUND: none"',
+    'hyperframes feedback --role marketer --comment "MISSING FEATURE: trim a clip from the timeline | WORKAROUND: none"',
   ],
   [
     "Report a catalog gap after a fruitless search",
-    'hyperframes feedback --search-miss "typewriter that deletes" --wanted "text that types then backspaces"',
+    'hyperframes feedback --role ai-builder --search-miss "typewriter that deletes" --wanted "text that types then backspaces"',
   ],
   [
     "Also file a GitHub issue with a published repro",
-    'hyperframes feedback --rating 3 --comment "GSAP timeline froze" --file-issue',
+    'hyperframes feedback --role unknown --rating 3 --comment "GSAP timeline froze" --file-issue',
   ],
 ];
 
@@ -189,6 +199,7 @@ function reportRating(
 function trackFeedback(report: {
   rating: number | undefined;
   comment: string | undefined;
+  role: FeedbackRole;
   doctorSummary: string;
   feedbackId: string;
   recentRenderIds: string[] | undefined;
@@ -224,6 +235,10 @@ export default defineCommand({
       type: "string",
       description: 'Who wrote the report: "person" or "agent"',
     },
+    role: {
+      type: "string",
+      description: `Required. Who the person behind the session is, judged from its context: ${FEEDBACK_ROLES.join(", ")}`,
+    },
     "search-miss": {
       type: "string",
       description: "Report a catalog search that found nothing useful; pass the query you ran",
@@ -253,6 +268,12 @@ export default defineCommand({
     },
   },
   async run({ args }) {
+    const role = parseFeedbackRole(args.role);
+    if (role === null) {
+      console.error(c.error(FEEDBACK_ROLE_ERROR));
+      failCommand();
+    }
+
     // A search miss is a different report from a rating: it names a gap in the
     // catalog rather than scoring an experience, so it carries no rating and
     // must not land in the same number.
@@ -264,11 +285,11 @@ export default defineCommand({
       }
       const wanted = normalizeComment(args.wanted);
       const tier = normalizeComment(args.tier);
-      trackCatalogSearchMiss({ query: searchMiss, wanted, tier });
+      trackCatalogSearchMiss({ query: searchMiss, wanted, tier, role });
       // Ack before the forward, which is best-effort and bounded, so the
       // reporter is never left waiting on it.
       console.log(c.dim("Logged the gap. Thanks — that is how the catalog grows."));
-      await submitCatalogSearchMiss({ query: searchMiss, wanted, tier, cliVersion: VERSION });
+      await submitCatalogSearchMiss({ query: searchMiss, wanted, tier, role, cliVersion: VERSION });
       return;
     }
 
@@ -303,6 +324,7 @@ export default defineCommand({
     trackFeedback({
       rating,
       comment,
+      role,
       doctorSummary,
       feedbackId,
       recentRenderIds: config.recentRenders?.map((r) => r.id),
@@ -317,6 +339,7 @@ export default defineCommand({
       cliVersion: VERSION,
       env: envWithJoinKeys,
       source,
+      role,
       email: feedbackEmail(),
     });
 

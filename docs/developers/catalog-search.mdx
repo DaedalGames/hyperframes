@@ -97,7 +97,7 @@ Meaning search runs entirely on your machine: your query is turned into a vector
 with vectors already on disk. The only network traffic is the one-time downloads above and the refresh
 of the catalog vectors, none of which carries your query.
 
-When a search finds nothing useful, the CLI prints a `hyperframes feedback --search-miss` command you
+When a search finds nothing useful, the CLI prints a `hyperframes feedback --role <role> --search-miss` command you
 can run to report the gap. That command sends the query, and only if you run it.
 
 ## How the index is built

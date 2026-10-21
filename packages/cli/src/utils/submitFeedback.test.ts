@@ -64,10 +64,17 @@ describe("submitFeedback", () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(null, { status: 202 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await submitFeedback({ rating: 5, cliVersion: "1", source: "person", email: "e".repeat(300) });
+    await submitFeedback({
+      rating: 5,
+      cliVersion: "1",
+      source: "person",
+      role: "founder",
+      email: "e".repeat(300),
+    });
 
     const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
     expect(body.source).toBe("person");
+    expect(body.role).toBe("founder");
     expect(body.email).toHaveLength(254);
   });
 
@@ -140,6 +147,7 @@ describe("submitCatalogSearchMiss", () => {
       query: "typewriter that deletes",
       wanted: "text that types then backspaces",
       tier: "on-device",
+      role: "designer",
       cliVersion: "0.7.106",
     });
 
@@ -150,6 +158,7 @@ describe("submitCatalogSearchMiss", () => {
       query: "typewriter that deletes",
       wanted: "text that types then backspaces",
       tier: "on-device",
+      role: "designer",
       cli_version: "0.7.106",
     });
   });

@@ -1009,12 +1009,14 @@ export function trackSkillsInstallSkipped(props: { reason: string }): void {
 
 export function trackFeedbackComment(props: {
   comment: string;
+  role?: string;
   doctorSummary?: string;
   feedbackId?: string;
   recentRenderIds?: string[];
 }): void {
   trackEvent("cli_feedback_comment", {
     comment: props.comment,
+    ...(props.role ? { role: props.role } : {}),
     ...(props.doctorSummary ? { doctor_summary: props.doctorSummary } : {}),
     ...(props.feedbackId ? { feedback_id: props.feedbackId } : {}),
     ...(props.recentRenderIds?.length
@@ -1027,6 +1029,8 @@ export function trackRenderFeedback(props: {
   rating: number;
   renderDurationMs?: number;
   comment?: string;
+  /** Who the person behind the session is (`feedback --role`); absent from the render-time prompt. */
+  role?: string;
   doctorSummary?: string;
   /**
    * Join key shared with the forwarded feedback report (Slack/backend): the
@@ -1044,6 +1048,7 @@ export function trackRenderFeedback(props: {
     rating: props.rating,
     rating_scale: FEEDBACK_RATING_SCALE,
     ...(props.comment ? { comment: props.comment } : {}),
+    ...(props.role ? { role: props.role } : {}),
     ...(props.renderDurationMs !== undefined ? { render_duration_ms: props.renderDurationMs } : {}),
     ...(props.doctorSummary ? { doctor_summary: props.doctorSummary } : {}),
     ...(props.feedbackId ? { feedback_id: props.feedbackId } : {}),
@@ -1067,9 +1072,11 @@ export function trackCatalogSearchMiss(props: {
   query: string;
   wanted?: string;
   tier?: string;
+  role?: string;
 }): void {
   trackEvent("cli_catalog_search_miss", {
     query: props.query,
+    ...(props.role ? { role: props.role } : {}),
     ...(props.wanted ? { wanted: props.wanted } : {}),
     ...(props.tier ? { tier: props.tier } : {}),
   });

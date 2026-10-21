@@ -51,7 +51,7 @@ export async function maybePromptRenderFeedback(opts: {
     console.log(
       c.dim("  [hyperframes] ") +
         c.dim("Agent feedback: ") +
-        c.accent('hyperframes feedback --rating <0-10> --comment "..."'),
+        c.accent('hyperframes feedback --role <role> --rating <0-10> --comment "..."'),
     );
     return;
   }

@@ -1569,13 +1569,15 @@ Send feedback about how it went. It is anonymous unless the app that launched
 the CLI attaches your email (below).
 
 ```bash
-npx hyperframes feedback --rating 10
-npx hyperframes feedback --rating 7 --comment "render succeeded but GSAP timeline didn't animate"
-npx hyperframes feedback --rating 3 --comment "GSAP timeline froze on seek" --file-issue
-npx hyperframes feedback --comment "MISSING FEATURE: trim a clip from the timeline | WORKAROUND: none"
+npx hyperframes feedback --role developer --rating 10
+npx hyperframes feedback --role developer --rating 7 --comment "render succeeded but GSAP timeline didn't animate"
+npx hyperframes feedback --role developer --rating 3 --comment "GSAP timeline froze on seek" --file-issue
+npx hyperframes feedback --role developer --comment "MISSING FEATURE: trim a clip from the timeline | WORKAROUND: none"
 ```
 
-`--rating` is 0–10. `--comment` adds free text; a `--comment` with no `--rating` is a report with no score (a missing feature, or friction in the app that launched the CLI), kept out of the rating metric. `--source person`
+`--role` is required on every report: who you are, one of `ai-builder`, `developer`, `marketer`,
+`creator`, `designer`, `founder`, `agency`, `educator`, `other` or `unknown` (an agent picks it from
+the session). `--rating` is 0–10. `--comment` adds free text; a `--comment` with no `--rating` is a report with no score (a missing feature, or friction in the app that launched the CLI), kept out of the rating metric. `--source person`
 or `--source agent` says who wrote a rating or comment report (a `--search-miss` report
 carries neither), so the team can tell a person's feedback from an agent's. `--file-issue`
 also opens a GitHub issue, `--dir` picks the project published as its repro

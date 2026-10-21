@@ -706,7 +706,7 @@ export function searchMissCommand(query: string, tier: "on-device" | "words"): s
   // CJK, which single-quoting renders no more safely and reads worse.
   const quoted = query.replace(/(["\\$`])/g, "\\$1");
   return (
-    `npx hyperframes feedback --search-miss "${quoted}" ` +
+    `npx hyperframes feedback --role <role> --search-miss "${quoted}" ` +
     `--wanted "<the move you needed>" --tier ${tier}`
   );
 }

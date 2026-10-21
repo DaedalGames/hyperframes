@@ -37,6 +37,7 @@ const {
   trackFigmaImport,
   trackRenderFeedback,
   trackFeedbackComment,
+  trackCatalogSearchMiss,
   trackRenderPreflightRejected,
   trackAuthLoginStarted,
   trackAuthLoginCompleted,
@@ -1107,6 +1108,18 @@ describe("trackFeedbackComment", () => {
     const [name, props] = trackEvent.mock.calls[0] as [string, Record<string, unknown>];
     expect(name).toBe("cli_feedback_comment");
     expect(props).toEqual({ comment: "MISSING FEATURE: trim", feedback_id: "f1" });
+  });
+});
+
+describe("feedback role", () => {
+  it.each([
+    ["cli_render_feedback", () => trackRenderFeedback({ rating: 9, role: "agency" })],
+    ["cli_feedback_comment", () => trackFeedbackComment({ comment: "x", role: "agency" })],
+    ["cli_catalog_search_miss", () => trackCatalogSearchMiss({ query: "x", role: "agency" })],
+  ])("rides on %s so feedback can be counted by who sent it", (event, track) => {
+    trackEvent.mockClear();
+    track();
+    expect(trackEvent).toHaveBeenCalledWith(event, expect.objectContaining({ role: "agency" }));
   });
 });
 

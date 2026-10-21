@@ -461,7 +461,7 @@ describe("catalog --json meaning search", () => {
 
     expect(envelope.shown).toBeGreaterThan(0);
     expect(envelope.report_gap).toBe(
-      'npx hyperframes feedback --search-miss "make a number count up" ' +
+      'npx hyperframes feedback --role <role> --search-miss "make a number count up" ' +
         '--wanted "<the move you needed>" --tier on-device',
     );
   });

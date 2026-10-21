@@ -16,15 +16,15 @@ Building something with HyperFrames? We would love to understand what you are cr
 From a HyperFrames project, run:
 
 ```bash
-npx hyperframes feedback --rating 7 --comment "The render finished, but the captions were missing."
+npx hyperframes feedback --role creator --rating 7 --comment "The render finished, but the captions were missing."
 ```
 
-The rating is from 0 to 10. The comment is optional, but a specific example is usually more useful than a score alone.
+`--role` says who you are: `ai-builder`, `developer`, `marketer`, `creator`, `designer`, `founder`, `agency`, `educator`, `other` or `unknown`. It is required, and an agent sending feedback for you picks it from the session. The rating is from 0 to 10. The comment is optional, but a specific example is usually more useful than a score alone.
 
 A comment with no rating is a report with no score, for something you needed that HyperFrames cannot do yet. It never counts in the rating:
 
 ```bash
-npx hyperframes feedback --comment "MISSING FEATURE: trim a clip from the timeline | WORKAROUND: none"
+npx hyperframes feedback --role creator --comment "MISSING FEATURE: trim a clip from the timeline | WORKAROUND: none"
 ```
 
 ## Report a reproducible bug
@@ -33,6 +33,7 @@ Use `--file-issue` when the project can be shared publicly:
 
 ```bash
 npx hyperframes feedback \
+  --role creator \
   --rating 3 \
   --comment "The timeline freezes when this GSAP scene is opened." \
   --file-issue
@@ -68,7 +69,7 @@ Do not include API keys, access tokens, credentials, private media, or customer 
 
 HyperFrames may occasionally show a short rating prompt after a render or during a Studio session. You can ignore or dismiss it.
 
-Feedback can include the rating, an optional comment, and basic environment information used to understand the problem. It does not include your composition HTML, video files, project names, file paths, or environment-variable values beyond the short agent and app names listed under [`telemetry`](/packages/cli#telemetry), such as `client=example-app/1.2.3/stable` when another app launched the CLI. When an app launches it for a signed-in person, the report can also carry that person's email, set by the app through `HYPERFRAMES_FEEDBACK_EMAIL`, and whether a person or an agent wrote it.
+Feedback can include the rating, an optional comment, your role (one word from the list above), and basic environment information used to understand the problem. It does not include your composition HTML, video files, project names, file paths, or environment-variable values beyond the short agent and app names listed under [`telemetry`](/packages/cli#telemetry), such as `client=example-app/1.2.3/stable` when another app launched the CLI. When an app launches it for a signed-in person, the report can also carry that person's email, set by the app through `HYPERFRAMES_FEEDBACK_EMAIL`, and whether a person or an agent wrote it.
 
 To turn off CLI telemetry:
 

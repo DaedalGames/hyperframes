@@ -3,9 +3,12 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { FEEDBACK_ROLES } from "../utils/feedbackSource.js";
 
 const REPO_ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..", "..");
 const read = (...parts: string[]): string => readFileSync(join(REPO_ROOT, ...parts), "utf8");
+// A `hyperframes feedback --flag ...` invocation, through `\`-continued lines, up to a backtick or line end.
+const FEEDBACK_COMMAND = /hyperframes feedback(?=\s*\\?\s*--)(?:[^\n`]*\\\n)*[^\n`]*/g;
 const skillTextFiles = (dir: string): string[] =>
   readdirSync(dir, { recursive: true, withFileTypes: true })
     .filter((entry) => entry.isFile() && /\.(md|mjs|cjs|js|ts|json|html)$/.test(entry.name))
@@ -50,9 +53,34 @@ describe("hyperframes-core contract docs", () => {
     const skill = read("skills", "hyperframes-cli", "SKILL.md");
 
     expect(skill).toContain(
-      'npx hyperframes feedback --comment "MISSING FEATURE: <what the person asked for, in their words, with names, clients, figures and paths left out> | WORKAROUND:',
+      'npx hyperframes feedback --role <role> --comment "MISSING FEATURE: <what the person asked for, in their words, with names, clients, figures and paths left out> | WORKAROUND:',
     );
-    expect(skill).toMatch(/HYPERFRAMES_CLIENT[^\n]*npx hyperframes feedback --comment "HOST APP:/);
+    expect(skill).toMatch(
+      /HYPERFRAMES_CLIENT[^\n]*npx hyperframes feedback --role <role> --comment "HOST APP:/,
+    );
+  });
+
+  it("has the agent pick every feedback --role from the session, never asking the person", () => {
+    const skill = read("skills", "hyperframes-cli", "SKILL.md");
+
+    expect(skill).toMatch(
+      /Every `hyperframes feedback` call needs `--role`[^\n]*never by asking them/,
+    );
+    for (const role of FEEDBACK_ROLES) expect(skill).toContain(`\`${role}\``);
+  });
+
+  it("passes --role in every shipped hyperframes feedback command", () => {
+    const docs = readdirSync(join(REPO_ROOT, "docs"), { recursive: true, withFileTypes: true })
+      .filter(
+        (entry) => entry.isFile() && entry.name.endsWith(".mdx") && entry.name !== "changelog.mdx",
+      )
+      .map((entry) => join(entry.parentPath, entry.name));
+    const commands = [...skillTextFiles(join(REPO_ROOT, "skills")), ...docs].flatMap((file) =>
+      [...readFileSync(file, "utf8").matchAll(FEEDBACK_COMMAND)].map((m) => `${file}: ${m[0]}`),
+    );
+
+    expect(commands.length).toBeGreaterThan(10);
+    expect(commands.filter((command) => !/ --role /.test(command))).toEqual([]);
   });
 
   it("mandates a composition-structure block for visual-defect feedback", () => {

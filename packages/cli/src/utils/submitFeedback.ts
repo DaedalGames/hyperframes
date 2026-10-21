@@ -1,5 +1,6 @@
 import { getPublishApiBaseUrl } from "./publishProject.js";
 import { FEEDBACK_RATING_SCALE } from "./feedbackRating.js";
+import type { FeedbackRole } from "./feedbackSource.js";
 
 // Match the backend DTO caps (HyperframesFeedbackRequest). Truncate here so an
 // over-long field (e.g. a pasted stack trace) is still forwarded truncated,
@@ -20,6 +21,7 @@ export async function submitFeedback(input: {
   cliVersion: string;
   env?: string;
   source?: "person" | "agent";
+  role?: FeedbackRole;
   email?: string;
 }): Promise<void> {
   try {
@@ -33,6 +35,7 @@ export async function submitFeedback(input: {
         cli_version: cap(input.cliVersion, MAX_CLI_VERSION),
         env: cap(input.env, MAX_ENV),
         source: input.source,
+        role: input.role,
         email: cap(input.email, MAX_EMAIL),
       }),
       headers: {
@@ -61,6 +64,7 @@ export async function submitCatalogSearchMiss(input: {
   query: string;
   wanted?: string;
   tier?: string;
+  role?: FeedbackRole;
   cliVersion: string;
 }): Promise<void> {
   try {
@@ -71,6 +75,7 @@ export async function submitCatalogSearchMiss(input: {
         query: cap(input.query, MAX_QUERY),
         wanted: cap(input.wanted, MAX_WANTED),
         tier: cap(input.tier, MAX_TIER),
+        role: input.role,
         cli_version: cap(input.cliVersion, MAX_CLI_VERSION),
       }),
       headers: {
