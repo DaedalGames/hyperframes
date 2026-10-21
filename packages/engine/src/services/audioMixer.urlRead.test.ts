@@ -39,7 +39,7 @@ describe.skipIf(!HAS_FFMPEG)("audio cut from a cloud-held file's URL", () => {
 
   function makeMedia(name: string, args: string[]): Buffer {
     const path = join(dir, name);
-    const made = spawnSync(getFfmpegBinary(), ["-v", "error", ...args, path]);
+    const made = spawnSync(getFfmpegBinary(), ["-v", "error", "-y", ...args, path]);
     expect(made.status).toBe(0);
     return readFileSync(path);
   }
