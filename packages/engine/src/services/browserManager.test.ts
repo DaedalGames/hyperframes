@@ -833,6 +833,22 @@ describe("resolveHeadlessShellPath", () => {
     );
   });
 
+  it("prefers HYPERFRAMES_BROWSER_PATH over PRODUCER_HEADLESS_SHELL_PATH, as the CLI does", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hyperframes-engine-browser-env-"));
+    try {
+      const cliChoice = join(dir, "chosen-browser");
+      const other = join(dir, "other-browser");
+      writeFileSync(cliChoice, "");
+      writeFileSync(other, "");
+      process.env.HYPERFRAMES_BROWSER_PATH = cliChoice;
+      process.env.PRODUCER_HEADLESS_SHELL_PATH = other;
+
+      expect(resolveHeadlessShellPath({})).toBe(cliChoice);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("uses HYPERFRAMES_BROWSER_PATH when the CLI resolved a browser explicitly", () => {
     const dir = mkdtempSync(join(tmpdir(), "hyperframes-engine-browser-env-"));
     try {

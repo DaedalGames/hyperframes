@@ -15,7 +15,11 @@ import {
 import { homedir } from "node:os";
 import { debuglog } from "node:util";
 import { basename, dirname, join, relative } from "node:path";
-import { managedChromeVersion, pickSharedShell } from "@hyperframes/engine/chrome-host-ceiling";
+import {
+  browserPathFromEnv,
+  managedChromeVersion,
+  pickSharedShell,
+} from "@hyperframes/engine/chrome-host-ceiling";
 import { normalizeErrorMessage } from "../utils/errorMessage.js";
 import { runRenderSetupWorker } from "../utils/cancellableProcess.js";
 
@@ -307,12 +311,9 @@ function whichBinary(name: string): string | undefined {
 // `compare` all ignore it and crash on the cached headless-shell instead.
 // Alias them here so every consumer of `openSettledCompositionPage` (which
 // calls `ensureBrowser` → `findFromEnv`) picks up the same escape hatch.
-// Tiebreak: HYPERFRAMES_BROWSER_PATH wins when both are set, matching the
-// CLI-native canonicalization in `render.ts` (which only sets
-// `PRODUCER_HEADLESS_SHELL_PATH` if not already present).
+// Which variable wins is browserPathFromEnv's, so the engine launches what this resolved.
 function findFromEnv(): BrowserResult | undefined {
-  const envPath =
-    process.env["HYPERFRAMES_BROWSER_PATH"] ?? process.env["PRODUCER_HEADLESS_SHELL_PATH"];
+  const envPath = browserPathFromEnv()?.path;
   if (envPath && existsSync(envPath)) {
     return { executablePath: envPath, source: "env" };
   }
