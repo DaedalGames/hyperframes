@@ -1,7 +1,8 @@
 import type { CheckDeadline } from "./checkDeadline.js";
 import { BrowserCleanupError, closeManagedBrowser } from "../browser/launch.js";
+import { collectMotionBlurDrafts, dropMotionBlurConsoleEcho } from "./checkMotionBlur.js";
 import { checkSnapshotDirectory } from "./checkSnapshotDirectory.js";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import { join, resolve } from "node:path";
 import type { Browser, Page } from "puppeteer-core";
@@ -39,6 +40,7 @@ import {
 } from "@hyperframes/studio-server/media-codec-map";
 import {
   FfmpegUnavailableError,
+  getProxyCachePath,
   resolveProxies,
 } from "@hyperframes/studio-server/proxy-transcoder";
 import { rectToBbox } from "./checkTypes.js";
@@ -56,6 +58,9 @@ import type {
   CheckSeverity,
   ContrastAuditEntry,
   ContrastCapture,
+  CraftFilm,
+  CraftFrame,
+  CraftTextPart,
   GeometryCandidateRequest,
   LayoutOptions,
   MotionSpecResolution,
@@ -77,6 +82,7 @@ interface RuntimeDraft {
   line?: number;
   count?: number;
   abortedImage?: boolean;
+  fixHint?: string;
 }
 
 type RuntimeStamp = Pick<RuntimeDraft, "time" | "timeRange">;
@@ -165,12 +171,22 @@ export async function preResolveHostileMediaProxies(
       variant: proxyVariantFor(facts),
     };
   });
-  const results = await resolveProxies(projectDir, sources);
+  const total = hostileEntries.length;
+  const toMake = sources.filter((source) => !proxyCached(projectDir, source)).length;
+  if (toMake > 0) {
+    console.error(
+      `[hyperframes] Making browser-playable copies of ${toMake} video${toMake === 1 ? "" : "s"} Chrome cannot decode. Only the first check of these files waits for this; later checks reuse the copies.`,
+    );
+  }
+  let settled = 0;
+  const results = await resolveProxies(projectDir, sources, () => {
+    settled += 1;
+    if (toMake > 0) console.error(`[hyperframes] browser-playable copies: ${settled}/${total}`);
+  });
   const failures = sources.flatMap((source, index) => {
     const result = results[index]!;
     return result.status === "rejected" ? [{ ...source, reason: result.reason }] : [];
   });
-  const total = hostileEntries.length;
   console.error(
     `[hyperframes] media proxy pre-resolve: ${total - failures.length}/${total} ready, ${failures.length} failed (${Date.now() - startedAt}ms)`,
   );
@@ -190,6 +206,17 @@ export async function preResolveHostileMediaProxies(
     );
   }
   return { findings, failedPaths: new Set(failures.map(({ pathname }) => pathname)) };
+}
+
+function proxyCached(
+  projectDir: string,
+  source: { sourcePath: string; variant: ReturnType<typeof proxyVariantFor> },
+): boolean {
+  try {
+    return existsSync(getProxyCachePath(projectDir, source.sourcePath, source.variant));
+  } catch {
+    return false;
+  }
 }
 
 interface ProxyPreResolution {
@@ -272,6 +299,8 @@ export async function runBrowserCheck(
       const message = tweenTailMessage(tail);
       drafts.push({ code: "gsap_tween_tail", severity: "warning", message, time: tail.later.end });
     }
+    const blur = await collectMotionBlurDrafts(page);
+    drafts.push(...blur);
     const sampleLog = sampleWindow(drafts);
     const driver = createPageDriver(page, clock, sampleLog);
     const result = await runGrid(driver, options, motion, helpers);
@@ -283,7 +312,7 @@ export async function runBrowserCheck(
       ...result,
       timings: { ...result.timings, launchSettleMs },
       runtimeFindings: dropFailedProxyEchoes(
-        keepBrokenImageAborts(merged, broken),
+        dropMotionBlurConsoleEcho(keepBrokenImageAborts(merged, broken), blur),
         failedPaths,
       ).map((draft) => runtimeFinding(draft, rootAnchor)),
     };
@@ -707,9 +736,9 @@ function wireNetworkListeners(page: Page, drafts: RuntimeDraft[], clock: Runtime
   });
 }
 
-function createPageDriver(
+export function createPageDriver(
   page: Page,
-  clock: RuntimeClock,
+  clock: RuntimeClock = createRuntimeClock(),
   sampleLog?: SampleWindow,
 ): CheckAuditDriver {
   return {
@@ -749,6 +778,15 @@ function createPageDriver(
       return issues;
     },
     collectLayoutGeometry: () => collectLayoutGeometry(page),
+    captureFrame: (scope) => captureFrame(page, scope),
+    framesDiffer: (first, second) =>
+      page
+        .evaluate(
+          (a, b) => Reflect.apply(Reflect.get(window, "__hyperframesFramesDiffer"), window, [a, b]),
+          first,
+          second,
+        )
+        .then((differ) => differ === true),
     collectSeekClock: () => collectSeekClock(page),
     collectRotationSample: (time) => collectRotationSample(page, time),
     collectOffPivotRotationSample: (time) => collectOffPivotRotationSample(page, time),
@@ -757,7 +795,62 @@ function createPageDriver(
       collectMotionFrame(page, time, selectors, scopes),
     anchorMotionIssues: (issues) => anchorLayoutIssues(page, issues),
     collectContrast: (time, annotations) => collectContrast(page, time, annotations),
+    collectCraftFrame: (time) => collectCraftFrame(page, time),
+    collectCraftFilm: () => collectCraftFilm(page),
   };
+}
+
+async function collectCraftFrame(page: Page, time: number): Promise<CraftFrame> {
+  const raw = await page.evaluate(() => {
+    const sample = Reflect.get(window, "__hyperframesCraftSample");
+    return typeof sample === "function" ? Reflect.apply(sample, window, []) : null;
+  });
+  const record = isRecord(raw) ? raw : {};
+  const parts = Reflect.get(record, "parts");
+  return {
+    time,
+    parts: Array.isArray(parts) ? parts.flatMap(parseCraftTextPart) : [],
+    held: booleanValue(record, "held") ?? false,
+    painted: booleanValue(record, "painted") ?? true,
+    signature: stringValue(record, "signature") ?? "",
+  };
+}
+
+async function collectCraftFilm(page: Page): Promise<CraftFilm> {
+  const raw = await page.evaluate(() => {
+    const film = Reflect.get(window, "__hyperframesCraftFilm");
+    return typeof film === "function" ? Reflect.apply(film, window, []) : null;
+  });
+  return { soundSources: (isRecord(raw) ? numberValue(raw, "soundSources") : null) ?? 0 };
+}
+
+const CRAFT_PART_NUMBERS = ["key", "block", "opacity", "fontPx"] as const;
+const CRAFT_PART_STRINGS = ["selector", "blockSelector", "sourceFile", "text"] as const;
+const CRAFT_RECT_NUMBERS = ["left", "top", "width", "height"] as const;
+
+function parseCraftTextPart(value: unknown): CraftTextPart[] {
+  if (!isRecord(value)) return [];
+  const nums = requiredNumbers(value, CRAFT_PART_NUMBERS);
+  const strings = requiredStrings(value, CRAFT_PART_STRINGS);
+  const rect = recordField(value, "rect");
+  const box = rect ? requiredNumbers(rect, CRAFT_RECT_NUMBERS) : null;
+  const captions = booleanValue(value, "captions");
+  return nums && strings && box && captions !== null
+    ? [{ ...nums, ...strings, rect: box, captions }]
+    : [];
+}
+
+function requiredStrings<K extends string>(
+  value: Record<string, unknown>,
+  keys: readonly K[],
+): { [P in K]: string } | null {
+  const out = {} as { [P in K]: string };
+  for (const key of keys) {
+    const entry = stringValue(value, key);
+    if (entry === null) return null;
+    out[key] = entry;
+  }
+  return out;
 }
 
 async function hasNoTimelineDeclaration(page: Page): Promise<boolean> {
@@ -975,6 +1068,51 @@ async function collectOverlapGrid(page: Page, times: number[]): Promise<Anchored
       })),
     ),
   );
+}
+
+async function captureFrame(page: Page, scope?: string): Promise<string> {
+  if (!scope) return page.screenshot({ encoding: "base64", type: "png" });
+  try {
+    const box = await page.evaluate(isolateScopePaint, scope);
+    if (!box || box.width < 1 || box.height < 1) return "";
+    return await page.screenshot({
+      encoding: "base64",
+      type: "png",
+      clip: box,
+      omitBackground: true,
+    });
+  } finally {
+    await page.evaluate(restoreScopePaint);
+  }
+}
+
+// Liveness signs only the scope's subtree, so its frame must show only that paint: anything else behind or
+// over the box (a moving background, grain, the page canvas) would read as the scope moving; the canvas stays clear.
+function isolateScopePaint(
+  scope: string,
+): { x: number; y: number; width: number; height: number } | null {
+  let target: Element | null = null;
+  try {
+    target = document.querySelector(scope);
+  } catch {
+    return null;
+  }
+  if (!target) return null;
+  const visibility = getComputedStyle(target).visibility;
+  target.setAttribute("data-hf-capture-scope", "");
+  const style = document.createElement("style");
+  style.id = "__hf_capture_scope_style";
+  style.textContent = `:not([data-hf-capture-scope], [data-hf-capture-scope] *) { visibility: hidden !important; }
+    :root:not([data-hf-capture-scope]), body:not([data-hf-capture-scope]) { background: none !important; }
+    [data-hf-capture-scope] { visibility: ${visibility} !important; }`;
+  document.head.append(style);
+  const rect = target.getBoundingClientRect();
+  return { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+}
+
+function restoreScopePaint(): void {
+  document.getElementById("__hf_capture_scope_style")?.remove();
+  document.querySelector("[data-hf-capture-scope]")?.removeAttribute("data-hf-capture-scope");
 }
 
 async function collectLayoutGeometry(page: Page): Promise<string> {
@@ -1218,20 +1356,23 @@ function anchorsInPage(values: AnchorRequest[]): CheckAnchor[] {
 }
 
 async function resolveRootAnchor(page: Page): Promise<CheckAnchor> {
+  const selector = await page.evaluate(
+    (explicit) => (document.querySelector(explicit) ? explicit : "[data-composition-id]"),
+    '[data-composition-id][data-root="true"]',
+  );
   const anchors = await resolveAnchors(page, [
-    { selector: "[data-composition-id]", time: 0, bbox: await compositionBbox(page) },
+    { selector, time: 0, bbox: await compositionBbox(page, selector) },
   ]);
   return anchors[0] ?? fallbackAnchor(undefined);
 }
 
-async function compositionBbox(page: Page): Promise<CheckBbox> {
-  return page.evaluate(() => {
-    const element = document.querySelector("[data-composition-id]");
-    const rect = element?.getBoundingClientRect();
+async function compositionBbox(page: Page, selector: string): Promise<CheckBbox> {
+  return page.evaluate((root) => {
+    const rect = document.querySelector(root)?.getBoundingClientRect();
     return rect
       ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
       : { x: 0, y: 0, width: 0, height: 0 };
-  });
+  }, selector);
 }
 
 async function collectContrast(
@@ -1701,6 +1842,7 @@ function runtimeFinding(draft: RuntimeDraft, root: CheckAnchor): CheckFinding {
     ...(draft.timeRange ? { timeRange: draft.timeRange } : {}),
     url: draft.url,
     line: draft.line,
+    ...(draft.fixHint ? { fixHint: draft.fixHint } : {}),
   };
 }
 
