@@ -33,8 +33,7 @@ export function layoutAfterTrackInsert(
   const { elements, trackOrder } = deps;
   const editKey = keyOf(element);
   const targetTrack = insertTrackValue(trackOrder, insertRow);
-  // Foreign display rows, the opposite zone, and unmoved rows the runtime timed (a wrapper
-  // the file leaves untimed) must not affect this topology or be renumbered by it.
+  // Foreign display rows and the opposite zone must not affect this topology.
   const writableZone = classifyZone(element);
   const moving = (src: TimelineElement) => keyOf(src) === editKey || !!multi?.keys.has(keyOf(src));
   const writable = (src: TimelineElement): boolean =>

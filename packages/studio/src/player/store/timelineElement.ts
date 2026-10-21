@@ -72,7 +72,6 @@ export interface TimelineElement {
   timelineLocked?: boolean;
   /** Set by data-hidden on the host element — hides the clip in preview and render. */
   hidden?: boolean;
-  /** Timed by the preview runtime for discovery only: the file gives it no start or track. */
   runtimeStamped?: boolean;
   /** Value of data-timeline-role attribute — used to identify music vs. voiceover. */
   timelineRole?: string;
