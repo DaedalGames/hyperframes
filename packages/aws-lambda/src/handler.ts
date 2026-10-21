@@ -408,16 +408,7 @@ async function handlePlan(event: PlanEvent, deps?: HandlerDeps): Promise<PlanLam
   const config = await planConfig(event, deps);
   const s3 = deps?.s3 ?? getS3Client();
   const primitive = deps?.primitives?.plan ?? plan;
-
-  // The producer's probe stage launches Chromium whenever the composition
-  // needs a runtime duration probe or has unresolved sub-compositions, so
-  // plan has to resolve Chrome the same way renderChunk does. Without this
-  // the probe throws "An `executablePath` or `channel` must be specified
-  // for `puppeteer-core`" the moment runProbeStage calls puppeteer.launch.
-  if (!deps?.skipChromeResolution && !process.env.PRODUCER_HEADLESS_SHELL_PATH) {
-    const chromePath = await resolveChromeExecutablePath();
-    process.env.PRODUCER_HEADLESS_SHELL_PATH = chromePath;
-  }
+  await ensureChromePath(deps);
 
   const work = mkdtempSync(join(deps?.tmpRoot ?? tmpdir(), "hf-lambda-plan-"));
   const planDir = join(work, "plan");
@@ -508,9 +499,7 @@ async function handlePlanV2(
   const config = await planConfig(event, deps);
   const s3 = deps?.s3 ?? getS3Client();
   const primitive = deps?.primitives?.planV2WithPublisher ?? planV2WithPublisher;
-  if (!deps?.skipChromeResolution && !process.env.PRODUCER_HEADLESS_SHELL_PATH) {
-    process.env.PRODUCER_HEADLESS_SHELL_PATH = await resolveChromeExecutablePath();
-  }
+  await ensureChromePath(deps);
 
   const work = mkdtempSync(join(deps?.tmpRoot ?? tmpdir(), "hf-lambda-plan-v2-"));
   try {
@@ -558,6 +547,15 @@ async function handlePlanV2(
   }
 }
 
+/**
+ * Points the engine at the bundled Chrome (unpacked into /tmp once per container) before any stage
+ * launches it; a caller-set PRODUCER_HEADLESS_SHELL_PATH, such as the SAM-local smoke's, wins.
+ */
+async function ensureChromePath(deps?: HandlerDeps): Promise<void> {
+  if (deps?.skipChromeResolution || process.env.PRODUCER_HEADLESS_SHELL_PATH) return;
+  process.env.PRODUCER_HEADLESS_SHELL_PATH = await resolveChromeExecutablePath();
+}
+
 // ── Audio ───────────────────────────────────────────────────────────────────
 
 async function handleAudio(event: AudioEvent, deps?: HandlerDeps): Promise<AudioLambdaResult> {
@@ -571,9 +569,7 @@ async function handleAudio(event: AudioEvent, deps?: HandlerDeps): Promise<Audio
   // The plan mixed it (non-mp4, cfr): the assembler reads it from the manifest.
   if (!plansSeparateAudio(event.Config, { deferAudio: true })) return none();
   const s3 = deps?.s3 ?? getS3Client();
-  if (!deps?.skipChromeResolution && !process.env.PRODUCER_HEADLESS_SHELL_PATH) {
-    process.env.PRODUCER_HEADLESS_SHELL_PATH = await resolveChromeExecutablePath();
-  }
+  await ensureChromePath(deps);
   const work = mkdtempSync(join(deps?.tmpRoot ?? tmpdir(), "hf-lambda-audio-"));
   try {
     const { projectDir, remoteFiles } = await fetchProject(s3, event.ProjectS3Uri, work, true);
@@ -608,18 +604,7 @@ async function handleRenderChunk(
   const started = Date.now();
   const s3 = deps?.s3 ?? getS3Client();
   const primitive = deps?.primitives?.renderChunk ?? renderChunk;
-
-  // Sparticuz decompresses Chromium into /tmp on first call; warm starts
-  // skip the work (path already cached). Guard the env-var mutation too so
-  // a caller-supplied PRODUCER_HEADLESS_SHELL_PATH (e.g. the SAM-local
-  // RIE smoke) wins over the auto-resolution.
-  if (!deps?.skipChromeResolution && !process.env.PRODUCER_HEADLESS_SHELL_PATH) {
-    const chromePath = await resolveChromeExecutablePath();
-    // The OSS engine resolves Chrome via `PRODUCER_HEADLESS_SHELL_PATH`
-    // first (see `browserManager.resolveHeadlessShellPath`); set it before
-    // invoking the primitive so launch picks up the bundled binary.
-    process.env.PRODUCER_HEADLESS_SHELL_PATH = chromePath;
-  }
+  await ensureChromePath(deps);
 
   const work = mkdtempSync(join(deps?.tmpRoot ?? tmpdir(), "hf-lambda-chunk-"));
   const planTar = join(work, "plan.tar.gz");
@@ -677,9 +662,7 @@ async function handleRenderChunkV2(
   const started = Date.now();
   const s3 = deps?.s3 ?? getS3Client();
   const primitive = deps?.primitives?.renderChunk ?? renderChunk;
-  if (!deps?.skipChromeResolution && !process.env.PRODUCER_HEADLESS_SHELL_PATH) {
-    process.env.PRODUCER_HEADLESS_SHELL_PATH = await resolveChromeExecutablePath();
-  }
+  await ensureChromePath(deps);
   const work = mkdtempSync(join(deps?.tmpRoot ?? tmpdir(), "hf-lambda-chunk-v2-"));
   try {
     const { planDir } = await downloadAndMaterializePlanV2(
