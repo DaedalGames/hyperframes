@@ -1552,6 +1552,15 @@ npx hyperframes browser clear            # remove the cached download
 `$(npx hyperframes browser path)`. Use `--force` when a download was
 interrupted and left a partial file behind.
 
+A host can supply its own Chromium launcher instead. Set
+`HYPERFRAMES_BROWSER_LAUNCHER` to an ES module that exports
+`launch(options, puppeteer)` and returns a Puppeteer `Browser` whose `process()`
+is the browser it started. Every render, check and snapshot then starts its
+browser through that module, and nothing is downloaded. The launcher takes
+precedence over `HYPERFRAMES_BROWSER_PATH` and `PRODUCER_HEADLESS_SHELL_PATH`.
+Its browser is never headless-shell, so it does not use BeginFrame capture.
+When the variable is unset, browsers start as they always have.
+
 ### `docs`
 
 Read documentation in the terminal.

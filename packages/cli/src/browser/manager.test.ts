@@ -273,6 +273,7 @@ describe("findBrowser — cache resolution", () => {
       value: "x64",
       configurable: true,
     });
+    delete process.env["HYPERFRAMES_BROWSER_LAUNCHER"];
     delete process.env["HYPERFRAMES_BROWSER_PATH"];
     delete process.env["PRODUCER_HEADLESS_SHELL_PATH"];
     installChildProcessMocks();
@@ -1194,6 +1195,21 @@ describe("findBrowser — cache resolution", () => {
 
     expect(result?.executablePath).toBe(hfPath);
     expect(result?.source).toBe("env");
+  });
+
+  it("returns a launcher module over both paths, with nothing looked up or downloaded", async () => {
+    const hfPath = "/opt/hf/chrome-headless-shell";
+    installFsMocks({ existing: new Set([hfPath]) });
+    installPuppeteerBrowsersMock();
+    process.env["HYPERFRAMES_BROWSER_LAUNCHER"] = "/host/launcher.mjs";
+    process.env["HYPERFRAMES_BROWSER_PATH"] = hfPath;
+
+    const { ensureBrowser } = await import("./manager.js");
+
+    await expect(ensureBrowser({ preferManagedChrome: true })).resolves.toEqual({
+      executablePath: "/host/launcher.mjs",
+      source: "launcher",
+    });
   });
 
   it("does NOT warn on macOS when falling back to system Chrome", async () => {

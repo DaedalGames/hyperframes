@@ -286,6 +286,23 @@ async function chromeLaunchOutcome(
   }
 }
 
+/** A launcher module is started by its host, so it has no binary to run `--version` on. */
+async function foundChromeOutcome(
+  info: BrowserResult,
+  signal?: AbortSignal,
+): Promise<EnvironmentCheckOutcome> {
+  const found: EnvironmentCheckOutcome = {
+    name: "Chrome",
+    ok: true,
+    level: "ok",
+    detail: `${info.source}: ${info.executablePath}`,
+    path: info.executablePath,
+  };
+  return info.source === "launcher"
+    ? found
+    : chromeLaunchOutcome(info.executablePath, found, signal);
+}
+
 async function checkChrome(
   browserPath?: string,
   signal?: AbortSignal,
@@ -330,19 +347,7 @@ async function checkChrome(
     info = undefined;
     failure = normalizeErrorMessage(error);
   }
-  if (info) {
-    return chromeLaunchOutcome(
-      info.executablePath,
-      {
-        name: "Chrome",
-        ok: true,
-        level: "ok",
-        detail: `${info.source}: ${info.executablePath}`,
-        path: info.executablePath,
-      },
-      signal,
-    );
-  }
+  if (info) return foundChromeOutcome(info, signal);
 
   return {
     name: "Chrome",

@@ -354,6 +354,26 @@ describe("runEnvironmentChecks — Chrome shared libraries (Linux/WSL)", () => {
     expect(result.outcomes.find((o) => o.name === "Chrome")).toMatchObject({ ok: true });
   });
 
+  it("passes a launcher module without running it as a browser binary", async () => {
+    vi.spyOn(manager, "findBrowser").mockResolvedValue({
+      executablePath: "/host/launcher.mjs",
+      source: "launcher",
+    });
+
+    const result = await runEnvironmentChecks({ includeBrowser: true });
+
+    expect(result.outcomes.find((o) => o.name === "Chrome")).toMatchObject({
+      ok: true,
+      detail: "launcher: /host/launcher.mjs",
+    });
+    expect(result.browser?.executablePath).toBe("/host/launcher.mjs");
+    expect(runProcess).not.toHaveBeenCalledWith(
+      "/host/launcher.mjs",
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
   it("resolveRenderBrowser returns the browser the render check found", async () => {
     vi.spyOn(manager, "findBrowser").mockResolvedValue({
       executablePath: process.execPath,

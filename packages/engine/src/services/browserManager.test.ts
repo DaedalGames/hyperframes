@@ -872,6 +872,21 @@ describe("resolveHeadlessShellPath", () => {
     }
   });
 
+  it("resolves no headless shell when a launcher module starts the browser", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hyperframes-engine-browser-env-"));
+    try {
+      const shell = join(dir, "chrome-headless-shell");
+      writeFileSync(shell, "");
+      process.env.PRODUCER_HEADLESS_SHELL_PATH = shell;
+      process.env.HYPERFRAMES_BROWSER_LAUNCHER = join(dir, "launcher.mjs");
+
+      expect(resolveHeadlessShellPath({})).toBeUndefined();
+    } finally {
+      delete process.env.HYPERFRAMES_BROWSER_LAUNCHER;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("uses HYPERFRAMES_BROWSER_PATH when the CLI resolved a browser explicitly", () => {
     const dir = mkdtempSync(join(tmpdir(), "hyperframes-engine-browser-env-"));
     try {

@@ -1,6 +1,9 @@
 import { spawnSync } from "node:child_process";
 import { debuglog } from "node:util";
 import { release } from "node:os";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import type { Browser, LaunchOptions, PuppeteerNode } from "puppeteer-core";
 
 /** Chrome 151 dropped macOS 12 and older (Darwin < 22); 150 is the last major that launches there. */
 const MACOS_12_LAST_CHROME_MAJOR = 150;
@@ -93,13 +96,42 @@ export function pickSharedShell(
   return undefined;
 }
 
-/** The browser binary an env var names. The CLI and the engine both resolve it here, HYPERFRAMES_BROWSER_PATH first. */
-export function browserPathFromEnv(
-  env: NodeJS.ProcessEnv = process.env,
-): { name: "HYPERFRAMES_BROWSER_PATH" | "PRODUCER_HEADLESS_SHELL_PATH"; path: string } | undefined {
-  for (const name of ["HYPERFRAMES_BROWSER_PATH", "PRODUCER_HEADLESS_SHELL_PATH"] as const) {
+/** The browser an env var names. The CLI and the engine both resolve it here: a launcher module first, then a
+ * binary, HYPERFRAMES_BROWSER_PATH before PRODUCER_HEADLESS_SHELL_PATH. */
+export function browserPathFromEnv(env: NodeJS.ProcessEnv = process.env):
+  | {
+      name:
+        | "HYPERFRAMES_BROWSER_LAUNCHER"
+        | "HYPERFRAMES_BROWSER_PATH"
+        | "PRODUCER_HEADLESS_SHELL_PATH";
+      path: string;
+    }
+  | undefined {
+  for (const name of [
+    "HYPERFRAMES_BROWSER_LAUNCHER",
+    "HYPERFRAMES_BROWSER_PATH",
+    "PRODUCER_HEADLESS_SHELL_PATH",
+  ] as const) {
     const path = env[name];
     if (path) return { name, path };
   }
   return undefined;
+}
+
+/** Starts a render browser. With HYPERFRAMES_BROWSER_LAUNCHER set, the module it names starts it instead:
+ * `export async function launch(options, puppeteer)` returns a Browser whose `process()` is the browser it started. */
+export async function launchRenderBrowser(
+  puppeteer: PuppeteerNode,
+  options: LaunchOptions,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<Browser> {
+  const path = env.HYPERFRAMES_BROWSER_LAUNCHER;
+  if (!path) return puppeteer.launch(options);
+  const launcher: { launch?: unknown } = await import(pathToFileURL(resolve(path)).href);
+  if (typeof launcher.launch !== "function") {
+    throw new Error(
+      `HYPERFRAMES_BROWSER_LAUNCHER="${path}" does not export launch(options, puppeteer).`,
+    );
+  }
+  return launcher.launch(options, puppeteer);
 }

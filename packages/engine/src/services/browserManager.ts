@@ -18,6 +18,7 @@ import {
   compareBrowserVersionsDescending,
   exceedsChromeCeiling,
   isManagedChromeDir,
+  launchRenderBrowser,
   pickSharedShell,
 } from "./chromeHostCeiling.js";
 import { DEFAULT_CONFIG, type EngineConfig } from "../config.js";
@@ -120,7 +121,7 @@ async function probeHardwareWebGlInfo(
     };
     probeBrowser = options.probeLifecycle
       ? await options.probeLifecycle.launch(ppt, launchOptions)
-      : await ppt.launch(launchOptions);
+      : await launchRenderBrowser(ppt, launchOptions);
     return await rejectAfter(
       readWebGlInfo(probeBrowser),
       GPU_PROBE_TIMEOUT_MS,
@@ -253,6 +254,7 @@ export function resolveHeadlessShellPath(
     return config.chromePath;
   }
   const fromEnv = browserPathFromEnv();
+  if (fromEnv?.name === "HYPERFRAMES_BROWSER_LAUNCHER") return undefined;
   if (fromEnv) {
     if (!existsSync(fromEnv.path)) {
       throw new Error(
@@ -855,7 +857,7 @@ async function launchBrowser(
   let captureMode = fingerprint.requestedCaptureMode;
   let browser: Browser | undefined;
   try {
-    browser = await ppt.launch({
+    browser = await launchRenderBrowser(ppt, {
       ...sigintLaunchOptions(),
       headless: true,
       args: [...fingerprint.args],
@@ -888,7 +890,7 @@ async function launchBrowser(
             `${probe.detail}; falling back to screenshot mode.`,
         );
         captureMode = "screenshot";
-        browser = await ppt.launch({
+        browser = await launchRenderBrowser(ppt, {
           ...sigintLaunchOptions(),
           headless: true,
           args: stripBeginFrameFlags([...fingerprint.args]),

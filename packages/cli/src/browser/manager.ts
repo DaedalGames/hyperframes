@@ -216,7 +216,7 @@ function releaseBrowserInstallLock(ownerToken: string): void {
   rmSync(INSTALL_LOCK_DIR, { recursive: true, force: true });
 }
 
-export type BrowserSource = "env" | "cache" | "system" | "download";
+export type BrowserSource = "launcher" | "env" | "cache" | "system" | "download";
 
 export interface BrowserResult {
   executablePath: string;
@@ -299,11 +299,15 @@ function whichBinary(name: string): string | undefined {
 
 // A caller-supplied browser, named by HYPERFRAMES_BROWSER_PATH or PRODUCER_HEADLESS_SHELL_PATH (the engine's
 // and the deploy docs' name). check, snapshot and compare honour it as render does; which name wins is
-// browserPathFromEnv's, so the engine launches what this resolved.
+// browserPathFromEnv's, so the engine launches what this resolved. A HYPERFRAMES_BROWSER_LAUNCHER module starts
+// the browser itself, so nothing is looked up or downloaded.
 function findFromEnv(): BrowserResult | undefined {
-  const envPath = browserPathFromEnv()?.path;
-  if (envPath && existsSync(envPath)) {
-    return { executablePath: envPath, source: "env" };
+  const fromEnv = browserPathFromEnv();
+  if (fromEnv?.name === "HYPERFRAMES_BROWSER_LAUNCHER") {
+    return { executablePath: fromEnv.path, source: "launcher" };
+  }
+  if (fromEnv && existsSync(fromEnv.path)) {
+    return { executablePath: fromEnv.path, source: "env" };
   }
   return undefined;
 }
