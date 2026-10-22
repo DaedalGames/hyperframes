@@ -508,7 +508,7 @@ jobs:
         timeout-minutes: 40
         continue-on-error: true
         run: |
-                    for ($i = 0; $i -lt 3; $i++) {
+          for ($i = 0; $i -lt 3; $i++) {
             Write-Host "=== run $i"
             bun run --cwd packages/cli test -- --maxWorkers=2 --reporter=verbose
           }
