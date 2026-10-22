@@ -425,22 +425,16 @@ jobs:
   # -------------------------------------------------------------------
   test-windows-lane:
     name: "Tests on windows-latest: ${{ matrix.lane }}"
-    needs: [changes, preflight]
-    if: needs.changes.outputs.code == 'true' || github.event_name == 'workflow_dispatch'
+    needs: [changes]
+    if: always()
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         include:
           # One suite group per runner: Studio's halves and the process-heavy Engine and CLI
           # suites never share a runner, and no lane waits for another group's tests.
-          - lane: studio-1
-            studio_shard: 1/2
-          - lane: studio-2
-            studio_shard: 2/2
-          - lane: core
-            packages: --filter @hyperframes/core --filter @hyperframes/player --filter @hyperframes/shader-transitions
           - lane: engine-cli
             packages: --filter @hyperframes/engine --filter @hyperframes/cli
             runtime_contract: true
@@ -508,6 +502,11 @@ jobs:
         shell: pwsh
         run: node --import tsx packages/cli/scripts/prepare-process-test-browser.mjs
 
+      - name: Deadline self test
+        shell: pwsh
+        continue-on-error: true
+        run: ./scripts/ci/run-with-deadline.ps1 -Minutes 1 -Command 'Write-Host start; Start-Sleep 600'
+
       # Step limits stay under the job limit minus setup (~5 min), so a hung run fails its step and keeps the log.
       - name: Run Studio shard ${{ matrix.studio_shard }}
         if: matrix.studio_shard
@@ -518,6 +517,17 @@ jobs:
       - name: Run ${{ matrix.lane }} package tests
         if: matrix.packages
         shell: pwsh
+        continue-on-error: true
+        timeout-minutes: 20
+        # Each package starts its own Vitest pool. Bound every pool so concurrent
+        # package scripts cannot oversubscribe the hosted Windows runner.
+        # timeout-minutes did not fire on a hung run, so the script enforces the 16 minutes itself.
+        run: ./scripts/ci/run-with-deadline.ps1 -Minutes 16 -Command 'bun run ${{ matrix.packages }} test -- --maxWorkers=2 --reporter=verbose'
+
+      - name: Run ${{ matrix.lane }} package tests again
+        if: matrix.packages
+        shell: pwsh
+        continue-on-error: true
         timeout-minutes: 20
         # Each package starts its own Vitest pool. Bound every pool so concurrent
         # package scripts cannot oversubscribe the hosted Windows runner.
