@@ -12,10 +12,9 @@ import {
 } from "../src/sdk/prebuiltHandler.js";
 import { pinHandlerZip, pinReleaseAsset } from "./pin-handler-zip.js";
 
-const realTemplate = readFileSync(
-  join(import.meta.dir, "..", "..", "..", "examples", "aws-lambda", "template.yaml"),
-  "utf-8",
-);
+const examples = join(import.meta.dir, "..", "..", "..", "examples", "aws-lambda");
+const realTemplate = readFileSync(join(examples, "template.yaml"), "utf-8");
+const videoTemplate = readFileSync(join(examples, "video-function.yaml"), "utf-8");
 const dirs: string[] = [];
 
 function fixtureRepo(): { root: string; pkgDir: string } {
@@ -33,6 +32,7 @@ function fixtureRepo(): { root: string; pkgDir: string } {
   );
   mkdirSync(join(root, "examples", "aws-lambda"), { recursive: true });
   writeFileSync(join(root, "examples", "aws-lambda", "template.yaml"), realTemplate);
+  writeFileSync(join(root, "examples", "aws-lambda", "video-function.yaml"), videoTemplate);
   return { root, pkgDir };
 }
 
@@ -72,6 +72,10 @@ describe("pinHandlerZip", () => {
     const template = readFileSync(pinned!.templatePath, "utf-8");
     expect(template).toContain("      CodeUri: handler.zip\n");
     expect(template).not.toContain("packages/aws-lambda/dist/handler.zip\n");
+    expect(template).toContain("      TemplateURL: video-function.yaml\n");
+    expect(readFileSync(join(pkgDir, "prebuilt", "video-function.yaml"), "utf-8")).toBe(
+      videoTemplate,
+    );
   });
 
   it("pins a zip a previous run already attached to the release", () => {

@@ -360,7 +360,7 @@ describe("HyperframesRenderStack — snapshot", () => {
         action,
         functionName:
           action === "renderChunk"
-            ? ["HasVideoFunction", "VideoFunction.Arn", "RenderFunction.Arn"]
+            ? ["HasVideoFunction", "VideoFunctionStack.Outputs.FunctionArn", "RenderFunction.Arn"]
             : "RenderFunction.Arn",
       });
     }
@@ -368,7 +368,21 @@ describe("HyperframesRenderStack — snapshot", () => {
     const invoke = JSON.stringify(
       requireRecordProperty(samRole, "Properties", "SAM role properties").Policies,
     );
-    expect(invoke).toContain('["RenderFunction.Arn",["HasVideoFunction","VideoFunction.Arn"');
+    expect(invoke).toContain(
+      '["RenderFunction.Arn",["HasVideoFunction","VideoFunctionStack.Outputs.FunctionArn"',
+    );
+  });
+
+  it("gives the nested arm64 video function every environment variable the render function gets", () => {
+    const sam = readExampleTemplate("template.yaml");
+    const render = [
+      ...envNames(sam, "Globals", "Function", "Environment", "Variables"),
+      ...envNames(sam, "Resources", "RenderFunction", "Properties", "Environment", "Variables"),
+    ];
+    const video = readExampleTemplate("video-function.yaml");
+    expect(
+      envNames(video, "Resources", "Function", "Properties", "Environment", "Variables").sort(),
+    ).toEqual([...new Set(render)].sort());
   });
 
   it("lets the render function abort the multipart uploads its S3 stitch starts", () => {
@@ -689,17 +703,28 @@ function policyStatements(policy: unknown): Record<string, unknown>[] {
   return document.Statement as Record<string, unknown>[];
 }
 
-function readSamResources(): Record<string, unknown> {
+function readExampleTemplate(file: string): Record<string, unknown> {
   const source = readFileSync(
-    new URL("../../../../examples/aws-lambda/template.yaml", import.meta.url),
+    new URL(`../../../../examples/aws-lambda/${file}`, import.meta.url),
     "utf8",
   );
   // CloudFormation intrinsic tags are irrelevant to classifier parity. The
   // YAML parser preserves their scalar values while this option suppresses
   // warnings for the intentionally unresolved `!Ref`/`!GetAtt` tags.
   const parsed: unknown = parseYaml(source, { logLevel: "silent" });
-  const root = requireRecord(parsed, "SAM template");
-  return requireRecordProperty(root, "Resources", "SAM resources");
+  return requireRecord(parsed, file);
+}
+
+function readSamResources(): Record<string, unknown> {
+  return requireRecordProperty(readExampleTemplate("template.yaml"), "Resources", "SAM resources");
+}
+
+function envNames(root: Record<string, unknown>, ...path: string[]): string[] {
+  const variables = path.reduce<Record<string, unknown>>(
+    (node, key) => requireRecordProperty(node, key, key),
+    root,
+  );
+  return Object.keys(variables);
 }
 
 function readSamDefinition(): { States: Record<string, unknown> } {
