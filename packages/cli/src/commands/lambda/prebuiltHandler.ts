@@ -120,10 +120,9 @@ export async function stagePrebuiltHandler(deps: StageDeps = defaultDeps): Promi
     deps,
   );
   const dir = dirname(zip);
-  // The template and the nested templates it deploys (video-function.yaml).
-  const templates = dirname(pinned.templatePath);
-  for (const file of readdirSync(templates).filter((name) => name.endsWith(".yaml"))) {
-    copyFileSync(join(templates, file), join(dir, file));
+  const templateDir = dirname(pinned.templatePath);
+  for (const file of readdirSync(templateDir).filter((name) => name.endsWith(".yaml"))) {
+    copyFileSync(join(templateDir, file), join(dir, file));
   }
   return dir;
 }
