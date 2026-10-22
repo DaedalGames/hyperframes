@@ -345,8 +345,8 @@ describe("HyperframesRenderStack — snapshot", () => {
     }
   });
 
-  it("sends only renderChunk to the SAM template's optional arm64 video function", () => {
-    // Plan, audio and assemble encode audio; on the x86 function that audio stays byte-identical.
+  it("runs plan and renderChunk on the SAM template's optional arm64 video function", () => {
+    // A chunk refuses a plan made with another ffmpeg build; audio and assemble stay on x86.
     const targets = Object.values(lambdaTasks(readSamDefinition().States)).map((task) => ({
       action: sentPayload(task).Action,
       functionName: requireRecordProperty(requireRecord(task, "task"), "Parameters", "task params")
@@ -359,7 +359,7 @@ describe("HyperframesRenderStack — snapshot", () => {
       expect({ action, functionName }).toEqual({
         action,
         functionName:
-          action === "renderChunk"
+          action === "plan" || action === "renderChunk"
             ? ["HasVideoFunction", "VideoFunctionStack.Outputs.FunctionArn", "RenderFunction.Arn"]
             : "RenderFunction.Arn",
       });
