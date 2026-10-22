@@ -1,8 +1,5 @@
-/**
- * How many cores this process may use, for worker count, extraction slots and shader threads.
- * A pod limited to 6 cores on a 32-vCPU node sees 32 from `os.cpus()`, and Node's
- * `availableParallelism()` honours cpusets but not CFS quotas, so the cgroup quota is read here.
- */
+// Cores this process may use. `os.cpus()` and `availableParallelism()` ignore a cgroup CPU quota,
+// so a container limited to 6 cores on a 32-vCPU host would size its work for 32.
 
 import { readFileSync } from "fs";
 import { availableParallelism } from "os";
