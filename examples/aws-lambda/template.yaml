@@ -3,7 +3,7 @@ Transform: AWS::Serverless-2016-10-31
 Description: >-
   HyperFrames distributed rendering — Step Functions standard workflow with
   one Lambda function handling Plan, RenderChunk (fan-out via Map state),
-  and Assemble, or RenderChunk on an optional arm64 image. One S3 bucket, alarms for runaway concurrency, Lambda
+  and Assemble, or Plan and RenderChunk on an optional arm64 image. One S3 bucket, alarms for runaway concurrency, Lambda
   errors, and Step Functions execution failures.
 
   Built from the handler ZIP at packages/aws-lambda/dist/handler.zip.
@@ -274,7 +274,13 @@ Resources:
             Type: Task
             Resource: arn:aws:states:::lambda:invoke
             Parameters:
-              FunctionName: !GetAtt RenderFunction.Arn
+              # Chunks must run the ffmpeg build the plan records, so the plan runs where they do.
+              FunctionName:
+                !If [
+                  HasVideoFunction,
+                  !GetAtt VideoFunctionStack.Outputs.FunctionArn,
+                  !GetAtt RenderFunction.Arn,
+                ]
               Payload:
                 Action: plan
                 PlanProtocol: v1
@@ -333,7 +339,12 @@ Resources:
             Type: Task
             Resource: arn:aws:states:::lambda:invoke
             Parameters:
-              FunctionName: !GetAtt RenderFunction.Arn
+              FunctionName:
+                !If [
+                  HasVideoFunction,
+                  !GetAtt VideoFunctionStack.Outputs.FunctionArn,
+                  !GetAtt RenderFunction.Arn,
+                ]
               Payload:
                 Action: plan
                 PlanProtocol: v2

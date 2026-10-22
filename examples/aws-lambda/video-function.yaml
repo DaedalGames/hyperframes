@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  HyperFrames arm64 chunk renderer: the render handler as a container image, invoked for renderChunk
-  only. Nested in template.yaml when VideoImageUri is set; plain CloudFormation, because `sam deploy`
+  HyperFrames arm64 video renderer: the render handler as a container image, invoked for plan and
+  renderChunk. Nested in template.yaml when VideoImageUri is set; plain CloudFormation, because `sam deploy`
   demands an image repository for any top-level image function, even one whose Condition is false.
 
 Parameters:
@@ -58,6 +58,10 @@ Resources:
                 Resource:
                   - !Sub "arn:${AWS::Partition}:s3:::${RenderBucket}"
                   - !Sub "arn:${AWS::Partition}:s3:::${RenderBucket}/*"
+              # The plan sizes an unreserved render to the account's concurrency.
+              - Effect: Allow
+                Action: lambda:GetAccountSettings
+                Resource: "*"
       Tags:
         - Key: Project
           Value: !Ref ProjectName
@@ -68,7 +72,7 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub "${ProjectName}-video"
-      Description: HyperFrames distributed render handler on arm64, invoked for renderChunk only.
+      Description: HyperFrames distributed render handler on arm64, invoked for plan and renderChunk.
       PackageType: Image
       Code:
         ImageUri: !Ref ImageUri
