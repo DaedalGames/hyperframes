@@ -345,6 +345,32 @@ describe("HyperframesRenderStack — snapshot", () => {
     }
   });
 
+  it("sends only renderChunk to the SAM template's optional arm64 video function", () => {
+    // Plan, audio and assemble encode audio; on the x86 function that audio stays byte-identical.
+    const targets = Object.values(lambdaTasks(readSamDefinition().States)).map((task) => ({
+      action: sentPayload(task).Action,
+      functionName: requireRecordProperty(requireRecord(task, "task"), "Parameters", "task params")
+        .FunctionName,
+    }));
+    expect(new Set(targets.map((target) => target.action))).toEqual(
+      new Set(["plan", "renderChunk", "audio", "assemble"]),
+    );
+    for (const { action, functionName } of targets) {
+      expect({ action, functionName }).toEqual({
+        action,
+        functionName:
+          action === "renderChunk"
+            ? ["HasVideoFunction", "VideoFunction.Arn", "RenderFunction.Arn"]
+            : "RenderFunction.Arn",
+      });
+    }
+    const samRole = requireRecord(readSamResources().RenderStateMachineRole, "SAM role");
+    const invoke = JSON.stringify(
+      requireRecordProperty(samRole, "Properties", "SAM role properties").Policies,
+    );
+    expect(invoke).toContain('["RenderFunction.Arn",["HasVideoFunction","VideoFunction.Arn"');
+  });
+
   it("lets the render function abort the multipart uploads its S3 stitch starts", () => {
     const cdkPolicies = JSON.stringify(SYNTHED.template.findResources("AWS::IAM::Policy"));
     expect(cdkPolicies).toContain("s3:Abort*");
