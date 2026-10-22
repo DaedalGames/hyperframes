@@ -30,11 +30,17 @@ git -C "$SRC/x264" checkout -q "$x264_commit"
 license x264 "$SRC/x264/COPYING"
 
 fetch x265_4.1.tar.gz
+# 8-bit x265 with the 10-bit library linked in (x265's multilib layout): HDR renders encode yuv420p10le.
 # SVE2 kernels need -march=armv9-a, which the base's gcc 11 does not know (x86 ignores the flag).
-cmake -S "$SRC/x265_4.1/source" -B "$SRC/x265-build" -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_INSTALL_PREFIX="$DEPS" -DENABLE_SHARED=OFF -DENABLE_CLI=OFF -DENABLE_SVE2=OFF
-cmake --build "$SRC/x265-build" -j"$JOBS"
-cmake --install "$SRC/x265-build"
+x265=(-S "$SRC/x265_4.1/source" -DCMAKE_BUILD_TYPE=Release -DENABLE_SHARED=OFF -DENABLE_CLI=OFF -DENABLE_SVE2=OFF)
+cmake "${x265[@]}" -B "$SRC/x265-10" -DHIGH_BIT_DEPTH=ON -DEXPORT_C_API=OFF
+cmake --build "$SRC/x265-10" -j"$JOBS"
+cmake "${x265[@]}" -B "$SRC/x265-8" -DCMAKE_INSTALL_PREFIX="$DEPS" -DLINKED_10BIT=ON \
+  -DEXTRA_LIB="$SRC/x265-10/libx265.a"
+cmake --build "$SRC/x265-8" -j"$JOBS"
+cmake --install "$SRC/x265-8"
+printf 'CREATE %s\nADDLIB %s\nADDLIB %s\nSAVE\nEND\n' "$DEPS/lib/libx265.a" \
+  "$SRC/x265-8/libx265.a" "$SRC/x265-10/libx265.a" | ar -M
 license x265 "$SRC/x265_4.1/COPYING"
 
 fetch libvpx-1.15.0.tar.gz
