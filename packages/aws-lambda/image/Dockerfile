@@ -1,5 +1,5 @@
-# Native ffmpeg for the Lambda video function, built on the Lambda Node 22 base it runs on:
-#   docker buildx build --platform linux/arm64 --target artifact --output type=local,dest=out packages/aws-lambda/ffmpeg
+# The arm64 Lambda video function's native ffmpeg, built on the Lambda Node 22 base it runs on:
+#   docker buildx build --platform linux/arm64 --target artifact --output type=local,dest=out packages/aws-lambda/image
 # The artifact stage depends on the check stage, so no tarball comes out of a build whose codecs fail.
 ARG BASE=public.ecr.aws/lambda/nodejs:22@sha256:d138eff445f6ea04c51091d8e6cbb064d5663e850cddfa62396061586f98b126
 
@@ -10,8 +10,8 @@ RUN rpm -qa --qf '%{NAME}\n' | sort >/build-base-rpms.txt && \
       gcc gcc-c++ make cmake meson ninja-build autoconf automake libtool pkgconf-pkg-config diffutils \
       git xz bzip2 tar gzip which patchelf gnutls-devel zlib-devel $([ "$(uname -m)" = x86_64 ] && echo nasm) && \
     microdnf clean all && mkdir /build && mv /build-base-rpms.txt /build/base-rpms.txt
-COPY sources.txt build.sh /build/
-RUN bash /build/build.sh
+COPY sources.txt build-ffmpeg.sh /build/
+RUN bash /build/build-ffmpeg.sh
 
 FROM ${BASE} AS certs
 # certtool, not openssl: the base's openssl-libs cannot run the repo's openssl CLI.
@@ -26,8 +26,8 @@ RUN microdnf install -y --nodocs --releasever=2023.12.20260914 gnutls-utils && m
 FROM ${BASE} AS check
 COPY --from=build /opt/hf-media /opt/hf-media
 COPY --from=certs /certs /certs
-COPY check.sh /check.sh
-RUN cp /certs/ca.crt /etc/pki/ca-trust/source/anchors/ && update-ca-trust && bash /check.sh >/check.txt
+COPY check-ffmpeg.sh /check-ffmpeg.sh
+RUN cp /certs/ca.crt /etc/pki/ca-trust/source/anchors/ && update-ca-trust && bash /check-ffmpeg.sh >/check.txt
 
 FROM scratch AS artifact
 COPY --from=build /out/ /

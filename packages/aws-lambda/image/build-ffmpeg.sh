@@ -58,8 +58,10 @@ ninja -C "$SRC/dav1d-build" install
 license dav1d "$SRC/dav1d-1.5.1/COPYING"
 
 fetch ffmpeg-7.0.2.tar.xz
-(cd "$SRC/ffmpeg-7.0.2" && ./configure --prefix="$PREFIX" --pkg-config-flags=--static \
-  --extra-cflags="-I$DEPS/include" --extra-ldflags="-L$DEPS/lib" --extra-libs="-lstdc++ -lpthread -lm" \
+# No --static pkg-config: gnutls.pc then names a libgmp.a from its own RPM build tree. The deps above
+# exist only as .a, so they link statically anyway; --extra-libs carries their private libraries.
+(cd "$SRC/ffmpeg-7.0.2" && ./configure --prefix="$PREFIX" \
+  --extra-cflags="-I$DEPS/include" --extra-ldflags="-L$DEPS/lib" --extra-libs="-lstdc++ -lpthread -lm -ldl" \
   --enable-gpl --enable-version3 --disable-debug --disable-doc --disable-ffplay --disable-autodetect \
   --enable-gnutls --enable-zlib --enable-libx264 --enable-libx265 --enable-libvpx --enable-libopus \
   --enable-libzimg --enable-libdav1d && make -j"$JOBS" && make install)
