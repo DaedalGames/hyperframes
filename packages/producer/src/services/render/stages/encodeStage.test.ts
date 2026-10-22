@@ -36,6 +36,9 @@ mock.module("@hyperframes/engine", () => ({
   DEFAULT_CONFIG: { ffmpegEncodeTimeout: 600_000 },
   encodeFramesChunkedConcat: encodeFramesChunkedConcatMock,
   encodeFramesFromDir: encodeFramesFromDirMock,
+  encodeVideoInput: () => {
+    throw Error("Unexpected graph encoder in directory-stage test");
+  },
   frameFileExtension: (format: string | undefined) => (format === "png" ? "png" : "jpg"),
   formatFfmpegError: (code: number | null, stderr: string) => `${String(code)} ${stderr}`,
   getEncoderPreset: () => ({

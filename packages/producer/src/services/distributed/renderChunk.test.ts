@@ -37,7 +37,7 @@ import {
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   type CaptureOptions,
   type CaptureSession,
@@ -1461,4 +1461,111 @@ describe("extractDeferredVideoFramesForChunk", () => {
     expect(caught).toBeInstanceOf(RenderChunkValidationError);
     expect((caught as RenderChunkValidationError).code).toBe(MISSING_PLAN_ARTIFACT);
   });
+});
+
+describe("opt-in layered chunk route", () => {
+  it.each([false, true])(
+    "executes native pixels or refuses a filtered video, filter=%s",
+    async (filtered) => {
+      if (!hasChrome) throw Error("Chrome required for layered route proof");
+      const root = mkdtempSync(join(tmpdir(), "hf-layered-route-"));
+      const previous = process.env.PRODUCER_FORCE_SCREENSHOT;
+      process.env.PRODUCER_FORCE_SCREENSHOT = "true";
+      try {
+        const project = join(root, "project");
+        mkdirSync(project);
+        writeFileSync(
+          join(project, "gsap.js"),
+          readFileSync(
+            resolve(import.meta.dirname, "../../../../core/node_modules/gsap/dist/gsap.min.js"),
+          ),
+        );
+        const video = spawnSync(
+          "ffmpeg",
+          [
+            "-nostdin",
+            "-v",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=red:s=64x36:r=25:d=1.2",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            join(project, "clip.mp4"),
+          ],
+          { timeout: 15000 },
+        );
+        expect(video.status).toBe(0);
+        writeFileSync(
+          join(project, "index.html"),
+          `<!doctype html><style>
+      body{margin:0;background:black}main{position:relative;width:160px;height:120px;overflow:hidden}
+      video{position:absolute;inset:0;width:160px;height:120px;object-fit:cover;${filtered ? "filter:blur(1px)" : ""}}
+      #label{position:absolute;left:5px;top:5px;color:white;z-index:auto}
+      </style><main data-composition-id="main" data-width="160" data-height="120" data-duration="1.2">
+      <video id="clip" src="clip.mp4" muted data-has-audio="false" data-start="0" data-duration="1.2"></video><div id="label">Caption</div></main>
+      <script src="gsap.js"></script><script>
+      let probeUpdates=0;
+      const timeline=gsap.timeline({paused:true,onUpdate:()=>{
+        if(Math.abs(timeline.time()-.04)<1e-8 && ++probeUpdates>1)
+          document.getElementById('clip').style.transform='rotate(5deg)';
+      }}).to({}, {duration:1.2});
+      window.__timelines={main:timeline};gsap.ticker.sleep();
+      </script>`,
+        );
+        const planDir = join(root, "plan");
+        const v2Dir = join(root, "v2-plan");
+        await planV2(
+          project,
+          { fps: 25, width: 160, height: 120, format: "mp4", chunkSize: 30, maxParallelChunks: 1 },
+          v2Dir,
+        );
+        materializePlanV2Target(v2Dir, { role: "chunk", chunkIndex: 0 }, planDir);
+        const videos = JSON.parse(readFileSync(join(planDir, "meta/videos.json"), "utf8"));
+        expect(videos.extracted[0].deferredRange).toBeDefined();
+        const output = join(root, "layered.mp4");
+        const result = await renderChunk(planDir, 0, output, { layeredComposite: true });
+        expect(result.renderPath).toBe(filtered ? "existing" : "layered");
+        expect(result.framesEncoded).toBe(30);
+        const pixel = spawnSync(
+          "ffmpeg",
+          [
+            "-nostdin",
+            "-v",
+            "error",
+            "-i",
+            output,
+            "-vf",
+            "format=rgb24,crop=1:1:80:60",
+            "-frames:v",
+            "1",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgb24",
+            "-",
+          ],
+          { timeout: 15000 },
+        );
+        expect(pixel.status).toBe(0);
+        expect(pixel.stdout.length).toBe(3);
+        expect(pixel.stdout[0]).toBeGreaterThan(220);
+        expect(pixel.stdout[1]).toBeLessThan(30);
+        expect(pixel.stdout[2]).toBeLessThan(30);
+        const repeat = await renderChunk(planDir, 0, join(root, "repeat.mp4"), {
+          layeredComposite: !filtered,
+        });
+        expect(repeat.sha256).toBe(result.sha256);
+      } finally {
+        if (previous === undefined) delete process.env.PRODUCER_FORCE_SCREENSHOT;
+        else process.env.PRODUCER_FORCE_SCREENSHOT = previous;
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+    90000,
+  );
 });

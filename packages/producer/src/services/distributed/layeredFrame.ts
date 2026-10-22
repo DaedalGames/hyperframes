@@ -25,6 +25,7 @@ export async function readLayeredFrameState(page: Page): Promise<LayeredFrameSta
         if (cached) return cached;
         const style = getComputedStyle(node);
         const rect = node.getBoundingClientRect();
+        const pseudos = ["::before", "::after"].map((pseudo) => getComputedStyle(node, pseudo));
         const matrix = new DOMMatrix(style.transform === "none" ? undefined : style.transform);
         const facts: LayeredNodeState = {
           tag: node.tagName.toUpperCase(),
@@ -41,6 +42,10 @@ export async function readLayeredFrameState(page: Page): Promise<LayeredFrameSta
           matrix: { is2D: matrix.is2D, a: matrix.a, b: matrix.b, c: matrix.c, d: matrix.d },
           filter: style.filter,
           clipPath: style.clipPath,
+          legacyClip: style.clip,
+          zoom: style.zoom,
+          contentVisibility: style.contentVisibility,
+          imageRendering: style.imageRendering,
           maskImage: style.getPropertyValue("mask-image"),
           mixBlendMode: style.mixBlendMode,
           backdropFilter: style.getPropertyValue("backdrop-filter"),
@@ -52,9 +57,16 @@ export async function readLayeredFrameState(page: Page): Promise<LayeredFrameSta
             style.borderBottomRightRadius,
             style.borderBottomLeftRadius,
           ],
-          pseudoContents: ["::before", "::after"].map(
-            (pseudo) => getComputedStyle(node, pseudo).content,
-          ),
+          pseudoContents: pseudos.map((style) => style.content),
+          pseudoEffects: pseudos.map((style) => ({
+            mixBlendMode: style.mixBlendMode,
+            backdropFilter: style.getPropertyValue("backdrop-filter"),
+            perspective: style.perspective,
+            transformStyle: style.transformStyle,
+          })),
+          pseudoZIndices: pseudos
+            .filter((style) => style.content !== "none" && style.content !== "normal")
+            .map((style) => style.zIndex),
           objectFit: style.objectFit,
           objectPosition: style.objectPosition,
           boxShadow: style.boxShadow,
@@ -102,7 +114,7 @@ export async function readLayeredFrameState(page: Page): Promise<LayeredFrameSta
       };
       const ancestors = readAncestors(root);
       if (ancestors === null) return { kind: "scene_limit" };
-      const proxies = new Set<Element>();
+      const proxies = new Map<Element, string>();
       const videoStates = videos.map((video) => {
         const id = video.getAttribute(renderIdAttr) || video.id;
         const proxy = document.getElementById(`${prefix}${id}${suffix}`);
@@ -111,7 +123,7 @@ export async function readLayeredFrameState(page: Page): Promise<LayeredFrameSta
           proxy.parentElement === root &&
           proxy.complete &&
           proxy.naturalWidth > 0;
-        if (proxy) proxies.add(proxy);
+        if (proxy) proxies.set(proxy, id);
         return {
           id,
           direct: root !== null && video.parentElement === root,
@@ -119,17 +131,41 @@ export async function readLayeredFrameState(page: Page): Promise<LayeredFrameSta
           proxy: proxy ? read(proxy) : null,
         };
       });
+      const unsupportedRules = (rules: CSSRuleList): boolean =>
+        [...rules].some((rule) => {
+          if (rule instanceof CSSStyleRule && /::(?!before\b|after\b)/i.test(rule.selectorText))
+            return true;
+          if (rule instanceof CSSImportRule && rule.styleSheet !== null)
+            return unsupportedRules(rule.styleSheet.cssRules);
+          if (rule instanceof CSSGroupingRule || rule instanceof CSSStyleRule)
+            return unsupportedRules(rule.cssRules);
+          return false;
+        });
       return {
         kind: "observed",
         root: root ? read(root) : null,
         rootText: root ? hasText(root) : false,
+        unsupportedPseudo: [...document.styleSheets, ...document.adoptedStyleSheets].some((sheet) =>
+          unsupportedRules(sheet.cssRules),
+        ),
         ancestors,
         nodes: nodes.map(read),
         videos: videoStates,
-        children: (root === null ? [] : [...root.children]).map((child) => ({
-          node: read(child),
-          proxy: proxies.has(child),
-        })),
+        children: (root === null ? [] : [...root.children]).map((child) => {
+          const videoId = proxies.get(child);
+          const facts = {
+            node: read(child),
+            descendantZIndices: [
+              ...read(child).pseudoZIndices,
+              ...[...child.querySelectorAll("*")].flatMap((node) => {
+                const facts = read(node);
+                return [facts.zIndex, ...facts.pseudoZIndices];
+              }),
+            ],
+          };
+          if (videoId === undefined) return { ...facts, kind: "dom" as const };
+          return { ...facts, kind: "video" as const, videoId };
+        }),
       };
     },
     {

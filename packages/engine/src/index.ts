@@ -135,6 +135,7 @@ export {
   getCapturePerfSummary,
   percentileOf,
   prepareCaptureSessionForReuse,
+  prepareFrameForCapture,
   deriveBeginFrameProbeTimeTicks,
   type CaptureSession,
   isTransientBrowserError,
@@ -178,6 +179,8 @@ export {
 // ── Encoding ───────────────────────────────────────────────────────────────────
 export {
   buildEncoderArgs,
+  encodeVideoInput,
+  type EncoderGraphInput,
   encodeFramesFromDir,
   buildConcatArgs,
   concatVideoFiles,
@@ -194,7 +197,12 @@ export {
   type GpuEncoder,
   type PackageHlsOptions,
 } from "./services/chunkEncoder.js";
-export type { EncoderOptions, EncodeResult, MuxResult } from "./services/chunkEncoder.types.js";
+export type {
+  EncoderOptions,
+  EncodeResult,
+  MuxResult,
+  EncoderFilterGraph,
+} from "./services/chunkEncoder.types.js";
 
 export {
   spawnStreamingEncoder,
@@ -387,6 +395,7 @@ export { psnrDb, resolveDeVerifyMinDb } from "./utils/psnr.js";
 
 export {
   decodePng,
+  encodePng,
   decodePngToRgb48le,
   blitRgba8OverRgb48le,
   blitRgb48leRegion,

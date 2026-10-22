@@ -1,6 +1,26 @@
 import type { HdrTransfer } from "../utils/hdr.js";
 import type { Fps } from "@hyperframes/core";
 
+export interface EncoderFilterGraph {
+  graph: string;
+  outputLabel: string;
+}
+
+export type EncoderGraphInput = {
+  kind: "graph";
+  args: string[];
+  graph: EncoderFilterGraph;
+  frames: number;
+};
+
+export type EncoderInput =
+  | EncoderGraphInput
+  | {
+      kind: "frames";
+      directory: string;
+      pattern: string;
+    };
+
 export interface EncoderOptions {
   /** Frame rate as an exact rational; see `Fps` in @hyperframes/core. */
   fps: Fps;

@@ -2818,11 +2818,6 @@ async function captureFrameErrorDiagnostics(
   }
 }
 
-/**
- * Internal helper: seek timeline and inject video frames.
- * Shared by captureFrame (disk) and captureFrameToBuffer (buffer).
- * Returns timing breakdown for perf tracking.
- */
 export async function waitForPendingSeekCompletion(page: Pick<Page, "evaluate">): Promise<void> {
   await page.evaluate(async () => {
     const waitForCompletion = (
@@ -2857,7 +2852,8 @@ async function seekPageTimeline(
   );
 }
 
-async function prepareFrameForCapture(
+/** Seek, inject and await a frame without reading pixels, for capture or layered certification. */
+export async function prepareFrameForCapture(
   session: CaptureSession,
   frameIndex: number,
   time: number,

@@ -2,7 +2,13 @@ import { describe, expect, it } from "bun:test";
 import { createLayeredChunkObserver, createLayeredChunkClassifier } from "./layeredEligibility.js";
 import type { LayeredFrame } from "./layeredFrameState.js";
 
-const frame: LayeredFrame = { kind: "candidate", signature: "video-rect-A", videoCount: 2 };
+const frame: LayeredFrame = {
+  kind: "candidate",
+  signature: "video-rect-A",
+  videoCount: 2,
+  layers: [],
+  geometry: { videos: [], clips: [] },
+};
 
 describe("whole-chunk layered eligibility", () => {
   it("preserves a null injector without observing the page", () => {

@@ -1,9 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { CaptureFailure, classifyCaptureFailure, isFatalCaptureFailure } from "./captureFailure.js";
+import {
+  CaptureFailure,
+  classifyCaptureFailure,
+  isFatalCaptureFailure,
+  isTransientBrowserError,
+} from "./captureFailure.js";
 
 describe("classifyCaptureFailure", () => {
   it.each([
     ["Target closed", "transient_browser"],
+    [
+      'Execution context is not available in detached frame or worker "about:blank" (are you trying to evaluate?)',
+      "transient_browser",
+    ],
     ["Runtime.callFunctionOn timed out after 30000ms", "protocol_timeout"],
     ["Runtime.evaluate timed out", "protocol_timeout"],
     ["Network.enable timed out. Increase the protocolTimeout setting.", "protocol_timeout"],
@@ -26,6 +35,12 @@ describe("classifyCaptureFailure", () => {
     ["Protocol error (Page.captureScreenshot): waiting for debugger timed out", "protocol_timeout"],
   ] as const)("classifies %s as %s", (message, kind) => {
     expect(classifyCaptureFailure(new Error(message)).kind).toBe(kind);
+  });
+
+  it("keeps unrelated execution-context errors outside browser retries", () => {
+    expect(
+      isTransientBrowserError(new Error("Execution context is not available in author code")),
+    ).toBe(false);
   });
 
   it("lets the composed signal authoritatively classify cancellation", () => {

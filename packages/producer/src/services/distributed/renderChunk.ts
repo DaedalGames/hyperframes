@@ -55,14 +55,16 @@ import {
   initializeSession,
   measureVideoShownBoxes,
   probeBeginFrameLiveness,
+  prepareCaptureSessionForReuse,
   readWebGlVendorInfoFromCanvas,
   resolveConfig,
   type ShownBox,
 } from "@hyperframes/engine";
 import { defaultLogger } from "../../logger.js";
+import { captureCertifiedLayers } from "./layeredCapture.js";
 import { createLayeredChunkObserver } from "./layeredEligibility.js";
 import { applyRenderWarningPolicy, collectVideoMetadataHints } from "../renderOrchestrator.js";
-import { runEncodeStage } from "../render/stages/encodeStage.js";
+import { runEncodeStage, type EncodeStageBackend } from "../render/stages/encodeStage.js";
 import { runCaptureStage } from "../render/stages/captureStage.js";
 import { createCapturePlan } from "../render/capturePlan.js";
 import {
@@ -188,6 +190,7 @@ export interface ChunkResult {
 
 /** Result returned by the built-in renderer, which always observes its mode. */
 export interface EffectiveChunkResult extends ChunkResult {
+  renderPath: "existing" | "layered";
   captureMode: CaptureMode;
   frameRange: ChunkFrameRange;
 }
@@ -199,6 +202,7 @@ export interface ChunkFrameRange {
 }
 
 export interface RenderChunkOptions {
+  layeredComposite?: boolean;
   observeLayeredEligibility?: boolean;
   /**
    * Render only these frames of the chunk, e.g. to retry a slow chunk as
@@ -712,6 +716,14 @@ export async function renderChunk(
 
     // ── Browser + warmup ──
     let session: CaptureSession | null = null;
+    let layeredCapture: Extract<
+      Awaited<ReturnType<typeof captureCertifiedLayers>>,
+      { kind: "captured" }
+    > | null = null;
+    const attemptLayered =
+      options?.layeredComposite === true &&
+      plan.dimensions.format !== "png-sequence" &&
+      (planVideos?.extracted.length ?? 0) > 0;
     let outputKind: "file" | "frame-dir";
     let framesEncoded = 0;
     // Stage wall-clock split for the cost model: per-chunk fixed overhead
@@ -727,76 +739,88 @@ export async function renderChunk(
     let shownBoxes: Map<string, ShownBox> | undefined;
     let extraction: Promise<unknown> | undefined;
     try {
-      if (chunkWorkerCount === 1 || !forceScreenshotForChunk) {
-        // Sequential capture reuses this session. Parallel BeginFrame capture
-        // uses it only for the composition liveness preflight.
-        // SwiftShader assertion runs BEFORE initializeSession (which
-        // navigates to the composition); on failure we tear down without
-        // ever touching the composition URL. We pass
-        // `readWebGlVendorInfoFromCanvas` rather than letting
-        // `assertSwiftShader` use its default `chrome://gpu` reader —
-        // `chrome-headless-shell` serves chrome:// pages as empty documents,
-        // which would trip a false-negative even when the GL backend is in
-        // fact SwiftShader. The canvas + WEBGL_debug_renderer_info probe
-        // works on any page (we navigate to about:blank inside the helper).
-        const bootStarted = Date.now();
-        session = await createVerifiedDistributedCaptureSession(
+      const bootSession = async (config: EngineConfig) => {
+        const started = Date.now();
+        const created = await createVerifiedDistributedCaptureSession(
           fileServer.url,
           framesDir,
           captureOptions,
-          cfg,
+          config,
         );
-        sessionBootMs = Date.now() - bootStarted;
-        // Measured before extraction so each video is extracted at the size it is drawn.
-        shownBoxes = await measureVideoShownBoxes(
-          session.page,
+        sessionBootMs += Date.now() - started;
+        return created;
+      };
+      const measureShownBoxes = (created: CaptureSession) =>
+        measureVideoShownBoxes(
+          created.page,
           [...shownFrames.keys()],
           chunkFrameNumbers.map((frame) => (frame * chunkFps.den) / chunkFps.num),
         );
-        // `discardWarmupCapture` is intentionally NOT called: every frame
-        // seeks fresh DOM, so `lastFrameCache` is never read; priming it
-        // would deadlock Chrome's compositor by issuing a second beginFrame
-        // at a `frameTimeTicks` it had just advanced to.
-        const browserSelectedScreenshot = session.launchCaptureMode === "screenshot";
-        const beginFrameStalled =
-          !browserSelectedScreenshot && (await beginFrameSessionNeedsScreenshotFallback(session));
-        if (browserSelectedScreenshot) {
-          forceScreenshotForChunk = true;
-          log.warn(
-            "[renderChunk] Browser capability probe selected screenshot capture for the entire chunk",
-            { chunkIndex },
-          );
-          if (chunkWorkerCount > 1) {
+      const prepareOrdinarySession = async () => {
+        if (chunkWorkerCount === 1 || !forceScreenshotForChunk) {
+          // Sequential capture reuses this session. Parallel BeginFrame capture
+          // uses it only for the composition liveness preflight.
+          // SwiftShader assertion runs BEFORE initializeSession (which
+          // navigates to the composition); on failure we tear down without
+          // ever touching the composition URL. We pass
+          // `readWebGlVendorInfoFromCanvas` rather than letting
+          // `assertSwiftShader` use its default `chrome://gpu` reader —
+          // `chrome-headless-shell` serves chrome:// pages as empty documents,
+          // which would trip a false-negative even when the GL backend is in
+          // fact SwiftShader. The canvas + WEBGL_debug_renderer_info probe
+          // works on any page (we navigate to about:blank inside the helper).
+          session = await bootSession(cfg);
+          // Measured before extraction so each video is extracted at the size it is drawn.
+          shownBoxes = await measureShownBoxes(session);
+          // `discardWarmupCapture` is intentionally NOT called: every frame
+          // seeks fresh DOM, so `lastFrameCache` is never read; priming it
+          // would deadlock Chrome's compositor by issuing a second beginFrame
+          // at a `frameTimeTicks` it had just advanced to.
+          const browserSelectedScreenshot = session.launchCaptureMode === "screenshot";
+          const beginFrameStalled =
+            !browserSelectedScreenshot && (await beginFrameSessionNeedsScreenshotFallback(session));
+          if (browserSelectedScreenshot) {
+            forceScreenshotForChunk = true;
+            log.warn(
+              "[renderChunk] Browser capability probe selected screenshot capture for the entire chunk",
+              { chunkIndex },
+            );
+            if (chunkWorkerCount > 1) {
+              await closeCaptureSession(session);
+              session = null;
+            }
+          } else if (beginFrameStalled) {
+            forceScreenshotForChunk = true;
+            log.warn(
+              "[renderChunk] BeginFrame liveness probe failed; using screenshot capture for the entire chunk",
+              { chunkIndex },
+            );
+            await closeCaptureSession(session).catch(() => {});
+            session = null;
+            if (chunkWorkerCount === 1) {
+              const screenshotCfg: EngineConfig = {
+                ...cfg,
+                forceScreenshot: true,
+                forceScreenshotExplicitlyOptedOut: false,
+              };
+              session = await bootSession(screenshotCfg);
+            }
+          } else if (chunkWorkerCount > 1) {
             await closeCaptureSession(session);
             session = null;
           }
-        } else if (beginFrameStalled) {
-          forceScreenshotForChunk = true;
-          log.warn(
-            "[renderChunk] BeginFrame liveness probe failed; using screenshot capture for the entire chunk",
-            { chunkIndex },
-          );
-          await closeCaptureSession(session).catch(() => {});
-          session = null;
-          if (chunkWorkerCount === 1) {
-            const screenshotBootStarted = Date.now();
-            const screenshotCfg: EngineConfig = {
-              ...cfg,
-              forceScreenshot: true,
-              forceScreenshotExplicitlyOptedOut: false,
-            };
-            session = await createVerifiedDistributedCaptureSession(
-              fileServer.url,
-              framesDir,
-              captureOptions,
-              screenshotCfg,
-            );
-            sessionBootMs += Date.now() - screenshotBootStarted;
-          }
-        } else if (chunkWorkerCount > 1) {
-          await closeCaptureSession(session);
-          session = null;
         }
+      };
+      if (attemptLayered) {
+        session = await bootSession({
+          ...cfg,
+          forceScreenshot: true,
+          forceScreenshotExplicitlyOptedOut: false,
+        });
+        // Certification owns the range's only authored seek pass. Without a
+        // preflight size sweep, deferred extraction conservatively keeps source size.
+      } else {
+        await prepareOrdinarySession();
       }
 
       // Build the immutable frame lookup once. Each browser session/worker gets
@@ -838,116 +862,149 @@ export async function renderChunk(
       const createChunkVideoFrameInjector = createChunkVideoFrameInjectorFactory(videoFrameLookup);
 
       const captureStarted = Date.now();
-      captureMode = await runCaptureWithScreenshotFallback({
-        forceScreenshot: forceScreenshotForChunk,
-        // fallow-ignore-next-line complexity
-        run: async (forceScreenshot) => {
-          const layeredObserver =
-            options?.observeLayeredEligibility === true
-              ? createLayeredChunkObserver(range, resolveRenderFpsConfig(job.config.fps).value)
-              : null;
-          const createCaptureInjector =
-            layeredObserver === null
-              ? createChunkVideoFrameInjector
-              : () => layeredObserver.wrap(createChunkVideoFrameInjector());
-          const captureCfg: EngineConfig =
-            cfg.forceScreenshot === forceScreenshot
-              ? cfg
-              : {
-                  ...cfg,
-                  forceScreenshot,
-                  forceScreenshotExplicitlyOptedOut: !forceScreenshot,
-                };
-          if (chunkWorkerCount === 1 && session === null) {
-            session = await createVerifiedDistributedCaptureSession(
-              fileServer.url,
-              framesDir,
-              captureOptions,
-              captureCfg,
-            );
-          }
-          const capturePlan = createCapturePlan({
-            workerCount: chunkWorkerCount,
-            forceScreenshot,
-            useStreamingEncode: false,
-            useLayeredComposite: false,
-            usePageSideCompositing: false,
-            hasHdrContent: false,
-            needsAlpha: plan.dimensions.format !== "mp4",
-          });
-          if (capturePlan.kind !== "sdr_disk") {
-            throw new Error(`Distributed chunk requires sdr_disk plan; got ${capturePlan.kind}`);
-          }
-
-          // runCaptureStage owns and closes any probe session it receives,
-          // including error paths. Clear our defensive handle before await.
-          const captureSession = session;
+      if (attemptLayered && videoFrameLookup !== null) {
+        if (session === null) throw Error("Layered capture session missing");
+        prepareCaptureSessionForReuse(session, framesDir, createChunkVideoFrameInjector());
+        const candidate = await captureCertifiedLayers({
+          session,
+          table: await videoFrameLookup,
+          range,
+          directory: join(workDir, "layered"),
+        });
+        log.info("[renderChunk] layered composite", {
+          chunkIndex,
+          kind: candidate.kind,
+          preparedPassMs: "preparedPassMs" in candidate ? candidate.preparedPassMs : 0,
+          ...(candidate.kind === "fallback"
+            ? { reason: candidate.reason }
+            : {
+                prepassMs: candidate.certificate.prepassMs,
+                domCaptures: candidate.domCaptures,
+                domTimings: candidate.domTimings,
+                fullReads: candidate.certificate.fullReads,
+              }),
+        });
+        if (candidate.kind === "captured") {
+          layeredCapture = candidate;
+          captureMode = "screenshot";
+        } else {
+          await closeCaptureSession(session);
           session = null;
-          await runCaptureStage({
-            fileServer,
-            workDir,
-            framesDir,
-            job,
-            totalFrames: framesInChunk,
-            cfg: captureCfg,
-            plan: capturePlan,
-            log,
-            probeSession: captureSession,
-            captureAttempts,
-            // This sink records each worker's effective capture mode so a
-            // fallback remains observable to adapters and smoke tests.
-            dedupPerfs: capturePerfs,
-            buildCaptureOptions: () => captureOptions,
-            createRenderVideoFrameInjector: createCaptureInjector,
-            abortSignal: undefined,
-            assertNotAborted: () => {},
-            frameRange: range,
-          });
-
-          if (layeredObserver !== null) {
-            log.info("[renderChunk] layered eligibility", {
-              chunkIndex,
-              ...layeredObserver.decision(),
-              renderPath: "existing",
+          await prepareOrdinarySession();
+        }
+      }
+      if (layeredCapture === null) {
+        captureMode = await runCaptureWithScreenshotFallback({
+          forceScreenshot: forceScreenshotForChunk,
+          // fallow-ignore-next-line complexity
+          run: async (forceScreenshot) => {
+            const layeredObserver =
+              options?.observeLayeredEligibility === true
+                ? createLayeredChunkObserver(range, resolveRenderFpsConfig(job.config.fps).value)
+                : null;
+            const createCaptureInjector =
+              layeredObserver === null
+                ? createChunkVideoFrameInjector
+                : () => layeredObserver.wrap(createChunkVideoFrameInjector());
+            const captureCfg: EngineConfig =
+              cfg.forceScreenshot === forceScreenshot
+                ? cfg
+                : {
+                    ...cfg,
+                    forceScreenshot,
+                    forceScreenshotExplicitlyOptedOut: !forceScreenshot,
+                  };
+            if (chunkWorkerCount === 1 && session === null) {
+              session = await createVerifiedDistributedCaptureSession(
+                fileServer.url,
+                framesDir,
+                captureOptions,
+                captureCfg,
+              );
+            }
+            const capturePlan = createCapturePlan({
+              workerCount: chunkWorkerCount,
+              forceScreenshot,
+              useStreamingEncode: false,
+              useLayeredComposite: false,
+              usePageSideCompositing: false,
+              hasHdrContent: false,
+              needsAlpha: plan.dimensions.format !== "mp4",
             });
-          }
+            if (capturePlan.kind !== "sdr_disk") {
+              throw new Error(`Distributed chunk requires sdr_disk plan; got ${capturePlan.kind}`);
+            }
 
-          const observedModes = new Set(capturePerfs.map((perf) => perf.captureMode));
-          if (observedModes.size !== 1 || ![...observedModes].every(isCaptureMode)) {
-            throw new Error(
-              `[renderChunk] capture workers reported invalid or inconsistent modes: ` +
-                `${[...observedModes].join(",") || "<none>"}`,
+            // runCaptureStage owns and closes any probe session it receives,
+            // including error paths. Clear our defensive handle before await.
+            const captureSession = session;
+            session = null;
+            await runCaptureStage({
+              fileServer,
+              workDir,
+              framesDir,
+              job,
+              totalFrames: framesInChunk,
+              cfg: captureCfg,
+              plan: capturePlan,
+              log,
+              probeSession: captureSession,
+              captureAttempts,
+              // This sink records each worker's effective capture mode so a
+              // fallback remains observable to adapters and smoke tests.
+              dedupPerfs: capturePerfs,
+              buildCaptureOptions: () => captureOptions,
+              createRenderVideoFrameInjector: createCaptureInjector,
+              abortSignal: undefined,
+              assertNotAborted: () => {},
+              frameRange: range,
+            });
+
+            if (layeredObserver !== null) {
+              log.info("[renderChunk] layered eligibility", {
+                chunkIndex,
+                ...layeredObserver.decision(),
+                renderPath: "existing",
+              });
+            }
+
+            const observedModes = new Set(capturePerfs.map((perf) => perf.captureMode));
+            if (observedModes.size !== 1 || ![...observedModes].every(isCaptureMode)) {
+              throw new Error(
+                `[renderChunk] capture workers reported invalid or inconsistent modes: ` +
+                  `${[...observedModes].join(",") || "<none>"}`,
+              );
+            }
+            const [observedMode] = observedModes;
+            if (!observedMode || !isCaptureMode(observedMode)) {
+              throw new Error("[renderChunk] capture completed without an observed mode");
+            }
+            return observedMode;
+          },
+          resetForScreenshotRetry: () => {
+            // A mode switch is a whole-chunk retry. Do not allow successfully
+            // captured BeginFrame files or attempt telemetry to mix with the
+            // screenshot result.
+            rmSync(workDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+            mkdirSync(framesDir, { recursive: true });
+            capturePerfs.length = 0;
+            captureAttempts.length = 0;
+            job.framesRendered = 0;
+          },
+          onFallback: (error) => {
+            log.warn(
+              "[renderChunk] BeginFrame capture failed; retrying the entire chunk once in screenshot mode",
+              {
+                chunkIndex,
+                error: error instanceof Error ? error.message : String(error),
+              },
             );
-          }
-          const [observedMode] = observedModes;
-          if (!observedMode || !isCaptureMode(observedMode)) {
-            throw new Error("[renderChunk] capture completed without an observed mode");
-          }
-          return observedMode;
-        },
-        resetForScreenshotRetry: () => {
-          // A mode switch is a whole-chunk retry. Do not allow successfully
-          // captured BeginFrame files or attempt telemetry to mix with the
-          // screenshot result.
-          rmSync(workDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
-          mkdirSync(framesDir, { recursive: true });
-          capturePerfs.length = 0;
-          captureAttempts.length = 0;
-          job.framesRendered = 0;
-        },
-        onFallback: (error) => {
-          log.warn(
-            "[renderChunk] BeginFrame capture failed; retrying the entire chunk once in screenshot mode",
-            {
-              chunkIndex,
-              error: error instanceof Error ? error.message : String(error),
-            },
-          );
-        },
-      }).catch(async (captureError: unknown) => {
-        await deferredVideoFrames;
-        throw captureError;
-      });
+          },
+        }).catch(async (captureError: unknown) => {
+          await deferredVideoFrames;
+          throw captureError;
+        });
+      }
       await deferredVideoFrames;
       captureStageMs = Date.now() - captureStarted;
       applyRenderWarningPolicy(
@@ -988,6 +1045,20 @@ export async function renderChunk(
       }
 
       const encodeStarted = Date.now();
+      const backend: EncodeStageBackend =
+        layeredCapture === null
+          ? { enableChunkedEncode: false }
+          : {
+              graphInput: {
+                kind: "graph",
+                args: layeredCapture.inputArgs,
+                graph: layeredCapture.graph,
+                frames: framesInChunk,
+              },
+              enableChunkedEncode: false,
+              isPngSequence: false,
+              isGif: false,
+            };
       await runEncodeStage({
         job,
         log,
@@ -1016,7 +1087,6 @@ export async function renderChunk(
         // Distributed chunks emit a single ffmpeg call per chunk; the
         // in-process per-chunk-within-chunk path would re-split our
         // already-chunked work.
-        enableChunkedEncode: false,
         chunkedEncodeSize: framesInChunk,
         abortSignal: undefined,
         assertNotAborted: () => {},
@@ -1025,6 +1095,7 @@ export async function renderChunk(
         // round-trips losslessly.
         lockGopForChunkConcat: !isPngSequence,
         gopSize: framesInChunk,
+        ...backend,
       });
       if (encoder.chunksCarryAudio) {
         const audioScratchPath = `${outputChunkPath}.audio.m4a`;
@@ -1068,6 +1139,8 @@ export async function renderChunk(
     if (!captureMode) {
       throw new Error("[renderChunk] capture stage completed without reporting a capture mode");
     }
+    const workers = layeredCapture === null ? chunkWorkerCount : 1;
+    const renderPath = layeredCapture === null ? "existing" : "layered";
     const sha256 = hashChunkOutput(outputChunkPath, outputKind);
     const durationMs = Date.now() - start;
     const perfPath = `${outputChunkPath}.perf.json`;
@@ -1082,7 +1155,8 @@ export async function renderChunk(
       sessionBootMs,
       captureStageMs,
       encodeStageMs,
-      workers: chunkWorkerCount,
+      workers,
+      renderPath,
       captureMode,
       // Device-pixel box each video's frames were extracted to cover; a video not listed kept full size.
       videoShownBoxes: Object.fromEntries(shownBoxes ?? []),
@@ -1116,7 +1190,8 @@ export async function renderChunk(
       sessionBootMs,
       captureStageMs,
       encodeStageMs,
-      workers: chunkWorkerCount,
+      workers,
+      renderPath,
       captureMode,
       perfPath,
     };

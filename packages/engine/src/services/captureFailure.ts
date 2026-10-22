@@ -46,6 +46,7 @@ const TRANSIENT_BROWSER_ERROR_PATTERNS = [
   /browser has disconnected/i,
   /Page crashed/i,
   /Execution context was destroyed/i,
+  /Execution context is not available in detached frame or worker\b/i,
   /Cannot find context with specified id/i,
   /Failed to launch the browser process/i,
   /Navigation timeout of \d+ ms exceeded/i,

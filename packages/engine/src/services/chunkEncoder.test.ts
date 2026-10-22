@@ -1,3 +1,4 @@
+import { encodePng } from "../utils/alphaBlit.js";
 import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -2055,4 +2056,109 @@ describe.skipIf(!HAS_FFMPEG)("buildEncoderArgs SDR colour", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   }, 30_000);
+});
+
+describe("encoder input filter graph", () => {
+  it("keeps the shared color conversion and closed GOP after compositing", () => {
+    const args = buildEncoderArgs(
+      {
+        ...tinyEncodeOptions,
+        quality: 18,
+        preset: "medium",
+        lockGopForChunkConcat: true,
+        gopSize: 121,
+      },
+      ["-i", "a.png"],
+      "output.mp4",
+      null,
+      { graph: "[0:v]format=rgba[layered]", outputLabel: "layered" },
+    );
+    expect(args).not.toContain("-vf");
+    expect(args[args.indexOf("-map") + 1]).toBe("[__hf_encoded_video]");
+    expect(args[args.indexOf("-filter_complex") + 1]).toContain(
+      `[layered]${SDR_CAPTURE_TO_BT709_FILTER}`,
+    );
+    expect(args[args.indexOf("-g") + 1]).toBe("121");
+    expect(args[args.indexOf("-crf") + 1]).toBe("18");
+    expect(args.at(-1)).toBe("output.mp4");
+  });
+  it("rejects a malformed graph output label", () => {
+    expect(() =>
+      buildEncoderArgs(tinyEncodeOptions, ["-i", "a.png"], "output.mp4", null, {
+        graph: "null",
+        outputLabel: "x];bad",
+      }),
+    ).toThrow("Invalid encoder input filter label");
+  });
+  it("executes the graph before the ordinary encoder on real pixels", () => {
+    const { root } = createFrameFixture();
+    const image = (width: number, height: number, red: number, blue: number) => {
+      const rgba = Buffer.alloc(width * height * 4);
+      for (let index = 0; index < rgba.length; index += 4) {
+        rgba[index] = red;
+        rgba[index + 2] = blue;
+        rgba[index + 3] = 255;
+      }
+      return encodePng(width, height, rgba);
+    };
+    const red = join(root, "red.png"),
+      blue = join(root, "blue.png"),
+      output = join(root, "composite.mp4");
+    writeFileSync(red, image(32, 32, 255, 0));
+    writeFileSync(blue, image(8, 8, 0, 255));
+    const args = buildEncoderArgs(
+      { ...tinyEncodeOptions, width: 32, height: 32, quality: 0, pixelFormat: "yuv444p" },
+      [
+        "-nostdin",
+        "-filter_complex_threads",
+        "1",
+        "-i",
+        red,
+        "-i",
+        blue,
+        "-frames:v",
+        "1",
+        "-threads",
+        "1",
+      ],
+      output,
+      null,
+      {
+        graph:
+          "[0:v]format=rgba[base];[1:v]format=rgba[small];[base][small]overlay=x=8:y=8:format=rgb:alpha=straight[layered]",
+        outputLabel: "layered",
+      },
+    );
+    const encoded = spawnSync(getFfmpegBinary(), args, {
+      timeout: 15000,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    expect(encoded.status, String(encoded.stderr)).toBe(0);
+    const decoded = spawnSync(
+      getFfmpegBinary(),
+      [
+        "-nostdin",
+        "-v",
+        "error",
+        "-i",
+        output,
+        "-frames:v",
+        "1",
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "rgb24",
+        "pipe:1",
+      ],
+      { timeout: 15000, stdio: ["ignore", "pipe", "pipe"] },
+    );
+    expect(decoded.status, String(decoded.stderr)).toBe(0);
+    expect(decoded.stdout.length).toBe(32 * 32 * 3);
+    const background = (5 * 32 + 5) * 3,
+      overlay = (12 * 32 + 12) * 3;
+    expect(decoded.stdout[background]).toBeGreaterThan(240);
+    expect(decoded.stdout[background + 2]).toBeLessThan(10);
+    expect(decoded.stdout[overlay]).toBeLessThan(10);
+    expect(decoded.stdout[overlay + 2]).toBeGreaterThan(240);
+  }, 30000);
 });

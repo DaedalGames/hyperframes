@@ -47,6 +47,8 @@ import { dirname, join } from "node:path";
 import {
   encodeFramesChunkedConcat,
   encodeFramesFromDir,
+  encodeVideoInput,
+  type EncoderGraphInput,
   formatFfmpegError,
   getEncoderPreset,
   MIXED_AUDIO_FILENAME,
@@ -74,7 +76,7 @@ import { reportEncodeProgress, updateJobStatus } from "../shared.js";
 import { encoderFailureError } from "../encoderInterruption.js";
 import { frameFileExtension } from "@hyperframes/engine";
 
-export interface EncodeStageInput {
+interface EncodeStageBase {
   job: RenderJob;
   log: ProducerLogger;
   /** Output path: a directory for png-sequence, a file for everything else. */
@@ -111,8 +113,6 @@ export interface EncodeStageInput {
   preset: ReturnType<typeof getEncoderPreset>;
   effectiveQuality: number;
   effectiveBitrate: string | undefined;
-  /** Producer config — enables the chunked-concat encoder when on. */
-  enableChunkedEncode: boolean;
   chunkedEncodeSize: number;
   /** Already-resolved engine config from the orchestrator; direct callers fall back below. */
   engineConfig?: Pick<EngineConfig, "ffmpegEncodeTimeout" | "vp9CpuUsed"> &
@@ -138,6 +138,17 @@ export interface EncodeStageInput {
    */
   gopSize?: number;
 }
+
+export type EncodeStageBackend =
+  | { graphInput?: never; enableChunkedEncode: boolean }
+  | {
+      graphInput: EncoderGraphInput;
+      enableChunkedEncode: false;
+      isPngSequence: false;
+      isGif: false;
+    };
+
+export type EncodeStageInput = EncodeStageBase & EncodeStageBackend;
 
 export interface EncodeStageResult {
   /** Wall-clock ms for the encode (or png-copy) phase. */
@@ -298,6 +309,7 @@ export function canEncodeWhileCapturing(
   cpuCount: number,
 ): boolean {
   return (
+    input.graphInput === undefined &&
     workerCount > 1 &&
     workerCount < cpuCount &&
     !input.isPngSequence &&
@@ -427,6 +439,63 @@ export function encodeWhileCapturing(
   };
 }
 
+async function encodeStageVideo(
+  input: EncodeStageInput,
+  engineCfg: ReturnType<typeof resolveEngineConfig>,
+  onFramesEncoded: (frames: number) => void,
+) {
+  const { job, framesDir, videoOnlyPath, abortSignal, enableChunkedEncode, chunkedEncodeSize } =
+    input;
+  // ffmpegEncodeTimeout is a total wall-clock cap, not an inactivity timeout.
+  // A fixed ten-minute cap reliably kills long high-quality disk-frame encodes
+  // that are still making progress. High-quality CPU presets are substantially
+  // slower, so reserve 24x source duration there while retaining the established
+  // 4x budget for draft/standard and preserving larger operator overrides.
+  const baseScaledEncodeTimeout = Math.ceil((job.duration ?? 0) * 4_000);
+  const scaledEncodeTimeout = baseScaledEncodeTimeout * (job.config.quality === "high" ? 6 : 1);
+  const videoEngineCfg =
+    scaledEncodeTimeout > engineCfg.ffmpegEncodeTimeout
+      ? { ...engineCfg, ffmpegEncodeTimeout: scaledEncodeTimeout }
+      : engineCfg;
+
+  const frameExt = frameFileExtension(input.captureImageFormat);
+  const framePattern = `frame_%06d.${frameExt}`;
+  const encoderOpts = videoEncoderOptions(input, engineCfg);
+  let encodeResult: EncodeResult;
+  if (input.graphInput !== undefined) {
+    encodeResult = await encodeVideoInput(
+      input.graphInput,
+      videoOnlyPath,
+      encoderOpts,
+      abortSignal,
+      videoEngineCfg,
+      onFramesEncoded,
+    );
+  } else {
+    encodeResult = enableChunkedEncode
+      ? await encodeFramesChunkedConcat(
+          framesDir,
+          framePattern,
+          videoOnlyPath,
+          encoderOpts,
+          chunkedEncodeSize,
+          abortSignal,
+          videoEngineCfg,
+          onFramesEncoded,
+        )
+      : await encodeFramesFromDir(
+          framesDir,
+          framePattern,
+          videoOnlyPath,
+          encoderOpts,
+          abortSignal,
+          videoEngineCfg,
+          onFramesEncoded,
+        );
+  }
+  return encodeResult;
+}
+
 export async function runEncodeStage(input: EncodeStageInput): Promise<EncodeStageResult> {
   const {
     job,
@@ -439,8 +508,6 @@ export async function runEncodeStage(input: EncodeStageInput): Promise<EncodeSta
     audioOutputPath,
     isPngSequence,
     isGif,
-    enableChunkedEncode,
-    chunkedEncodeSize,
     abortSignal,
     assertNotAborted,
     onProgress,
@@ -511,41 +578,7 @@ export async function runEncodeStage(input: EncodeStageInput): Promise<EncodeSta
   // ── Stage 5: Encode ───────────────────────────────────────────────
   const onFramesEncoded = startEncodeProgress(job, "Encoding video", onProgress);
 
-  // ffmpegEncodeTimeout is a total wall-clock cap, not an inactivity timeout.
-  // A fixed ten-minute cap reliably kills long high-quality disk-frame encodes
-  // that are still making progress. High-quality CPU presets are substantially
-  // slower, so reserve 24x source duration there while retaining the established
-  // 4x budget for draft/standard and preserving larger operator overrides.
-  const baseScaledEncodeTimeout = Math.ceil((job.duration ?? 0) * 4_000);
-  const scaledEncodeTimeout = baseScaledEncodeTimeout * (job.config.quality === "high" ? 6 : 1);
-  const videoEngineCfg =
-    scaledEncodeTimeout > engineCfg.ffmpegEncodeTimeout
-      ? { ...engineCfg, ffmpegEncodeTimeout: scaledEncodeTimeout }
-      : engineCfg;
-
-  const frameExt = frameFileExtension(input.captureImageFormat);
-  const framePattern = `frame_%06d.${frameExt}`;
-  const encoderOpts = videoEncoderOptions(input, engineCfg);
-  const encodeResult = enableChunkedEncode
-    ? await encodeFramesChunkedConcat(
-        framesDir,
-        framePattern,
-        videoOnlyPath,
-        encoderOpts,
-        chunkedEncodeSize,
-        abortSignal,
-        videoEngineCfg,
-        onFramesEncoded,
-      )
-    : await encodeFramesFromDir(
-        framesDir,
-        framePattern,
-        videoOnlyPath,
-        encoderOpts,
-        abortSignal,
-        videoEngineCfg,
-        onFramesEncoded,
-      );
+  const encodeResult = await encodeStageVideo(input, engineCfg, onFramesEncoded);
   assertNotAborted();
 
   if (!encodeResult.success) {

@@ -44,11 +44,23 @@ import {
 } from "../utils/runFfmpeg.js";
 import { extractAudioMetadata } from "../utils/ffprobe.js";
 import { type Fps, fpsToFfmpegArg, fpsToNumber } from "@hyperframes/core";
-import type { EncoderOptions, EncodeResult, MuxResult } from "./chunkEncoder.types.js";
+import type {
+  EncoderOptions,
+  EncodeResult,
+  MuxResult,
+  EncoderFilterGraph,
+  EncoderInput,
+} from "./chunkEncoder.types.js";
 import { appendVp9CpuUsedArg } from "./vp9Options.js";
 import { appendRenderProvenanceArgs } from "../utils/renderProvenance.js";
 
-export type { EncoderOptions, EncodeResult, MuxResult } from "./chunkEncoder.types.js";
+export type {
+  EncoderOptions,
+  EncodeResult,
+  MuxResult,
+  EncoderGraphInput,
+  EncoderInput,
+} from "./chunkEncoder.types.js";
 
 export const ENCODER_PRESETS = {
   draft: { preset: "ultrafast", quality: 28, codec: "h264" as const },
@@ -229,11 +241,23 @@ export function lockedGopCodecParams(codec: "h264" | "h265", gopSize: number): s
   return codec === "h264" ? shared : `keyint=${gopSize}:min-keyint=${gopSize}:${shared}`;
 }
 
+function connectInputFilterGraph(args: string[], input: EncoderFilterGraph | undefined): string[] {
+  if (input === undefined) return args;
+  if (!/^[A-Za-z0-9_]+$/.test(input.outputLabel))
+    throw new Error("Invalid encoder input filter label");
+  const outputFilterIndex = args.indexOf("-vf");
+  const outputFilter = outputFilterIndex < 0 ? "null" : args.splice(outputFilterIndex, 2)[1];
+  const graph = `${input.graph};[${input.outputLabel}]${outputFilter}[__hf_encoded_video]`;
+  args.splice(args.length - 1, 0, "-filter_complex", graph, "-map", "[__hf_encoded_video]");
+  return args;
+}
+
 export function buildEncoderArgs(
   options: EncoderOptions,
   inputArgs: string[],
   outputPath: string,
   gpuEncoder: GpuEncoder = null,
+  inputGraph?: EncoderFilterGraph,
 ): string[] {
   const {
     fps,
@@ -416,7 +440,7 @@ export function buildEncoderArgs(
     args.push("-vf", SDR_RGB_TO_TAGGED_BT709_FILTER);
     args.push("-pix_fmt", pixelFormat);
     appendRenderProvenanceArgs(args, outputPath);
-    return [...args, "-y", outputPath];
+    return connectInputFilterGraph([...args, "-y", outputPath], inputGraph);
   }
 
   // Color space metadata — tags the output so players interpret colors correctly.
@@ -506,7 +530,7 @@ export function buildEncoderArgs(
   appendRenderProvenanceArgs(args, outputPath);
 
   args.push("-y", outputPath);
-  return args;
+  return connectInputFilterGraph(args, inputGraph);
 }
 
 const framesReader = (onFrames?: (frames: number) => void) =>
@@ -542,13 +566,35 @@ export async function encodeFramesFromDir(
   config?: Partial<Pick<EngineConfig, "ffmpegEncodeTimeout">>,
   onFramesEncoded?: (frames: number) => void,
 ): Promise<EncodeResult> {
+  return encodeVideoInput(
+    { kind: "frames", directory: framesDir, pattern: framePattern },
+    outputPath,
+    options,
+    signal,
+    config,
+    onFramesEncoded,
+  );
+}
+
+export async function encodeVideoInput(
+  input: EncoderInput,
+  outputPath: string,
+  options: EncoderOptions,
+  signal?: AbortSignal,
+  config?: Partial<Pick<EngineConfig, "ffmpegEncodeTimeout">>,
+  onFramesEncoded?: (frames: number) => void,
+): Promise<EncodeResult> {
   const startTime = Date.now();
 
   const outputDir = dirname(outputPath);
   if (!existsSync(outputDir)) mkdirSync(outputDir, { recursive: true });
 
-  const files = readdirSync(framesDir).filter((f) => f.match(/\.(jpg|jpeg|png)$/i));
-  const frameCount = files.length;
+  const frameCount =
+    input.kind === "graph"
+      ? input.frames
+      : readdirSync(input.directory).filter((f) => f.match(/\.(jpg|jpeg|png)$/i)).length;
+  if (input.kind === "graph" && (!Number.isSafeInteger(frameCount) || frameCount <= 0))
+    throw Error("Invalid encoder frame count");
 
   if (frameCount === 0) {
     return {
@@ -566,9 +612,17 @@ export async function encodeFramesFromDir(
     gpuEncoder = await getCachedGpuEncoder();
   }
 
-  const inputPath = join(framesDir, framePattern);
-  const inputArgs = ["-framerate", fpsToFfmpegArg(options.fps), "-i", inputPath];
-  const args = buildEncoderArgs(options, inputArgs, outputPath, gpuEncoder);
+  const inputArgs =
+    input.kind === "graph"
+      ? input.args
+      : ["-framerate", fpsToFfmpegArg(options.fps), "-i", join(input.directory, input.pattern)];
+  const args = buildEncoderArgs(
+    options,
+    inputArgs,
+    outputPath,
+    gpuEncoder,
+    input.kind === "graph" ? input.graph : undefined,
+  );
   const encodeTimeout = config?.ffmpegEncodeTimeout ?? DEFAULT_CONFIG.ffmpegEncodeTimeout;
   let framesRead = 0;
   const result = await runFfmpeg(args, {
@@ -597,8 +651,9 @@ export async function encodeFramesFromDir(
       framesEncoded: 0,
       fileSize: 0,
       error: appendEncodeTimeoutMessage(
-        frameReadFailure(result.stderr, framePattern, 0, framesRead, frameCount) +
-          formatFfmpegError(result.exitCode, result.stderr),
+        (input.kind === "frames"
+          ? frameReadFailure(result.stderr, input.pattern, 0, framesRead, frameCount)
+          : "") + formatFfmpegError(result.exitCode, result.stderr),
         result.terminationReason === "deadline",
         encodeTimeout,
       ),
