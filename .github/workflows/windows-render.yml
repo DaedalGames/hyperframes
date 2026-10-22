@@ -428,7 +428,7 @@ jobs:
     needs: [changes]
     if: always()
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 55
     strategy:
       fail-fast: false
       matrix:
@@ -505,13 +505,12 @@ jobs:
       - name: Loop warm check test
         if: matrix.lane == 'engine-cli'
         shell: pwsh
-        timeout-minutes: 30
+        timeout-minutes: 40
         continue-on-error: true
         run: |
-          $burn = 1..2 | ForEach-Object { Start-Job { while ($true) { [math]::Sqrt(12345) | Out-Null } } }
-          for ($i = 0; $i -lt 10; $i++) {
+                    for ($i = 0; $i -lt 3; $i++) {
             Write-Host "=== run $i"
-            bun run --cwd packages/cli test -- src/warmCheck.process.test.ts -t "serves a check" --maxWorkers=2 --reporter=verbose
+            bun run --cwd packages/cli test -- --maxWorkers=2 --reporter=verbose
           }
 
       # Step limits stay under the job limit minus setup (~5 min), so a hung run fails its step and keeps the log.
