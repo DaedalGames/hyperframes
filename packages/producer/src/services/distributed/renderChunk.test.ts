@@ -18,7 +18,7 @@
  * available on the host — CI runs the real check inside `Dockerfile.test`.
  */
 
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it, spyOn } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -219,10 +219,12 @@ describe("renderChunk()", () => {
       // there against an image where chrome://gpu works.
       const outA = join(runRoot, "chunk-a");
       const outB = join(runRoot, "chunk-b");
+      const info = spyOn(defaultLogger, "info");
       let a, b;
       try {
         a = await renderChunk(planDir, 0, outA);
       } catch (err) {
+        info.mockRestore();
         const message = err instanceof Error ? err.message : String(err);
         if (HOST_CHROME_FAILURE_PATTERNS.test(message)) {
           console.warn(
@@ -234,7 +236,31 @@ describe("renderChunk()", () => {
         }
         throw err;
       }
-      b = await renderChunk(planDir, 0, outB);
+      try {
+        b = await renderChunk(planDir, 0, outB);
+        expect(
+          info.mock.calls
+            .filter(([message]) => message === "[renderChunk] layered eligibility")
+            .map(([, meta]) => meta),
+        ).toEqual([
+          {
+            chunkIndex: 0,
+            kind: "fallback",
+            reason: "no_video",
+            frameIndex: 0,
+            renderPath: "existing",
+          },
+          {
+            chunkIndex: 0,
+            kind: "fallback",
+            reason: "no_video",
+            frameIndex: 0,
+            renderPath: "existing",
+          },
+        ]);
+      } finally {
+        info.mockRestore();
+      }
 
       // png-sequence chunks produce a directory of frames, not a single file.
       expect(a.outputKind).toBe("frame-dir");

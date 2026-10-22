@@ -60,6 +60,7 @@ import {
   type ShownBox,
 } from "@hyperframes/engine";
 import { defaultLogger } from "../../logger.js";
+import { createLayeredChunkObserver } from "./layeredEligibility.js";
 import { applyRenderWarningPolicy, collectVideoMetadataHints } from "../renderOrchestrator.js";
 import { runEncodeStage } from "../render/stages/encodeStage.js";
 import { runCaptureStage } from "../render/stages/captureStage.js";
@@ -840,6 +841,10 @@ export async function renderChunk(
         forceScreenshot: forceScreenshotForChunk,
         // fallow-ignore-next-line complexity
         run: async (forceScreenshot) => {
+          const layeredObserver = createLayeredChunkObserver(
+            range,
+            resolveRenderFpsConfig(job.config.fps).value,
+          );
           const captureCfg: EngineConfig =
             cfg.forceScreenshot === forceScreenshot
               ? cfg
@@ -888,10 +893,17 @@ export async function renderChunk(
             // fallback remains observable to adapters and smoke tests.
             dedupPerfs: capturePerfs,
             buildCaptureOptions: () => captureOptions,
-            createRenderVideoFrameInjector: createChunkVideoFrameInjector,
+            createRenderVideoFrameInjector: () =>
+              layeredObserver.wrap(createChunkVideoFrameInjector()),
             abortSignal: undefined,
             assertNotAborted: () => {},
             frameRange: range,
+          });
+
+          log.info("[renderChunk] layered eligibility", {
+            chunkIndex,
+            ...layeredObserver.decision(),
+            renderPath: "existing",
           });
 
           const observedModes = new Set(capturePerfs.map((perf) => perf.captureMode));
