@@ -41,7 +41,6 @@ async function answerRefusedFrameWithPage(c: Context, next: Next) {
  */
 export function createStudioApi(adapter: StudioApiAdapter): Hono {
   const api = new Hono();
-  // A refused frame shows no runtime and no error, so the player would wait on it; the page it gets says why.
   api.use("/projects/:id/preview/*", answerRefusedFrameWithPage);
   api.use("/projects/:id/preview", answerRefusedFrameWithPage);
   api.use(async function answerProjectDirMissingAfterErrorHandlers(c, next) {
