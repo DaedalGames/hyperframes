@@ -126,6 +126,7 @@ describe("browser layered frame facts", () => {
         document.querySelector("img")!.style.transform = t === 0.04 ? "rotate(5deg)" : "none";
       }, time);
     });
+    if (hook === null) throw new Error("Expected video hook");
     for (const time of [0, 0.04, 0.08]) await hook(page, time);
     expect(observer.decision()).toEqual({
       kind: "fallback",
@@ -141,6 +142,7 @@ describe("browser layered frame facts", () => {
     const hook = observer.wrap(async (_page, time, held) => {
       calls.push([time, held ?? -1]);
     });
+    if (hook === null) throw new Error("Expected video hook");
     for (const frame of [10, 12, 11]) await hook(page, frame / 25, 0);
     expect(calls).toEqual([
       [0.4, 0],
@@ -170,7 +172,9 @@ describe("browser layered frame facts", () => {
   it("does not certify fractional frame samples as complete integer frames", async () => {
     await fixture();
     const observer = createLayeredChunkObserver({ startFrame: 0, endFrame: 1 }, 25);
-    await observer.wrap(null)(page, 0.01);
+    const hook = observer.wrap(async () => {});
+    if (hook === null) throw new Error("Expected video hook");
+    await hook(page, 0.01);
     expect(observer.decision()).toEqual({
       kind: "fallback",
       reason: "unsupported_sampling",
@@ -178,14 +182,58 @@ describe("browser layered frame facts", () => {
     });
   });
 
+  it("falls back on the infinite CSS transform that still screenshots successfully", async () => {
+    await fixture(
+      "",
+      '<div style="position:absolute;z-index:2;--progress:0;transform:scale(calc(1 / var(--progress)))">bad transform</div>',
+    );
+    const before = Buffer.from(await page.screenshot());
+    const observer = createLayeredChunkObserver({ startFrame: 0, endFrame: 1 }, 25);
+    const hook = observer.wrap(async () => {});
+    if (hook === null) throw new Error("Expected video hook");
+    await expect(readLayeredFrame(page)).rejects.toThrow("DOMMatrix");
+    await hook(page, 0);
+    expect(observer.decision()).toEqual({
+      kind: "fallback",
+      reason: "observation_error",
+      frameIndex: 0,
+    });
+    expect(Buffer.from(await page.screenshot()).equals(before)).toBe(true);
+  });
+
+  it("propagates seek completion failure outside the observation boundary", async () => {
+    await fixture();
+    await page.evaluate(() =>
+      Object.defineProperty(window, "__hfWaitForSeekCompletion", {
+        configurable: true,
+        value: async () => {
+          throw new Error("seek failed");
+        },
+      }),
+    );
+    try {
+      const observer = createLayeredChunkObserver({ startFrame: 0, endFrame: 1 }, 25);
+      const hook = observer.wrap(async () => {});
+      if (hook === null) throw new Error("Expected video hook");
+      await expect(hook(page, 0)).rejects.toThrow("seek failed");
+      expect(observer.decision()).toEqual({
+        kind: "fallback",
+        reason: "incomplete_frames",
+        frameIndex: null,
+      });
+    } finally {
+      await page.evaluate(() => Reflect.deleteProperty(window, "__hfWaitForSeekCompletion"));
+    }
+  });
+
   it("propagates injector failure without claiming eligibility", async () => {
     await fixture();
     const observer = createLayeredChunkObserver({ startFrame: 0, endFrame: 1 }, 25);
-    await expect(
-      observer.wrap(async () => {
-        throw new Error("inject failed");
-      })(page, 0),
-    ).rejects.toThrow("inject failed");
+    const hook = observer.wrap(async () => {
+      throw new Error("inject failed");
+    });
+    if (hook === null) throw new Error("Expected video hook");
+    await expect(hook(page, 0)).rejects.toThrow("inject failed");
     expect(observer.decision()).toEqual({
       kind: "fallback",
       reason: "incomplete_frames",

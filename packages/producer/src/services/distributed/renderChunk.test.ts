@@ -40,6 +40,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   type CaptureOptions,
+  type CaptureSession,
   extractVideoFramesRange,
   VideoSourceExtractionError,
 } from "@hyperframes/engine";
@@ -199,6 +200,56 @@ describe("renderChunk()", () => {
   // on slower CI workers.
   const TIMEOUT_MS = 60_000;
 
+  it.each([false, true])(
+    "keeps the null capture hook with layered observation requested=%s",
+    async (requested) => {
+      if (!hasChrome) throw new Error("Chrome required for layered observation wiring proof");
+      const sessions: CaptureSession[] = [];
+      const original = distributedCaptureSessionDependencies.createCaptureSession;
+      const create = spyOn(
+        distributedCaptureSessionDependencies,
+        "createCaptureSession",
+      ).mockImplementation(async (...args) => {
+        const session = await original(...args);
+        sessions.push(session);
+        return session;
+      });
+      const info = spyOn(defaultLogger, "info");
+      try {
+        const options = requested ? { observeLayeredEligibility: true } : undefined;
+        const result = await renderChunk(
+          planDir,
+          0,
+          join(runRoot, `observation-${requested}`),
+          options,
+        );
+        expect(result.framesEncoded).toBeGreaterThan(0);
+        expect(sessions.length).toBeGreaterThan(0);
+        expect(sessions.every((session) => session.onBeforeCapture === null)).toBe(true);
+        const decisions = info.mock.calls
+          .filter(([message]) => message === "[renderChunk] layered eligibility")
+          .map(([, meta]) => meta);
+        if (requested) {
+          expect(decisions).toEqual([
+            {
+              chunkIndex: 0,
+              kind: "fallback",
+              reason: "no_video",
+              frameIndex: null,
+              renderPath: "existing",
+            },
+          ]);
+        } else {
+          expect(decisions).toEqual([]);
+        }
+      } finally {
+        create.mockRestore();
+        info.mockRestore();
+      }
+    },
+    TIMEOUT_MS,
+  );
+
   it(
     "produces a byte-identical chunk on a second invocation (byte-identical-retry contract)",
     async () => {
@@ -219,12 +270,10 @@ describe("renderChunk()", () => {
       // there against an image where chrome://gpu works.
       const outA = join(runRoot, "chunk-a");
       const outB = join(runRoot, "chunk-b");
-      const info = spyOn(defaultLogger, "info");
       let a, b;
       try {
         a = await renderChunk(planDir, 0, outA);
       } catch (err) {
-        info.mockRestore();
         const message = err instanceof Error ? err.message : String(err);
         if (HOST_CHROME_FAILURE_PATTERNS.test(message)) {
           console.warn(
@@ -236,31 +285,7 @@ describe("renderChunk()", () => {
         }
         throw err;
       }
-      try {
-        b = await renderChunk(planDir, 0, outB);
-        expect(
-          info.mock.calls
-            .filter(([message]) => message === "[renderChunk] layered eligibility")
-            .map(([, meta]) => meta),
-        ).toEqual([
-          {
-            chunkIndex: 0,
-            kind: "fallback",
-            reason: "no_video",
-            frameIndex: 0,
-            renderPath: "existing",
-          },
-          {
-            chunkIndex: 0,
-            kind: "fallback",
-            reason: "no_video",
-            frameIndex: 0,
-            renderPath: "existing",
-          },
-        ]);
-      } finally {
-        info.mockRestore();
-      }
+      b = await renderChunk(planDir, 0, outB);
 
       // png-sequence chunks produce a directory of frames, not a single file.
       expect(a.outputKind).toBe("frame-dir");

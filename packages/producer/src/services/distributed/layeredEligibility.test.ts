@@ -1,10 +1,16 @@
 import { describe, expect, it } from "bun:test";
-import { createLayeredChunkClassifier } from "./layeredEligibility.js";
+import { createLayeredChunkObserver, createLayeredChunkClassifier } from "./layeredEligibility.js";
 import type { LayeredFrame } from "./layeredFrameState.js";
 
 const frame: LayeredFrame = { kind: "candidate", signature: "video-rect-A", videoCount: 2 };
 
 describe("whole-chunk layered eligibility", () => {
+  it("preserves a null injector without observing the page", () => {
+    const observer = createLayeredChunkObserver({ startFrame: 20, endFrame: 23 }, 25);
+    expect(observer.wrap(null)).toBeNull();
+    expect(observer.decision()).toEqual({ kind: "fallback", reason: "no_video", frameIndex: null });
+  });
+
   it("requires every absolute frame, independently of worker completion order", () => {
     const classifier = createLayeredChunkClassifier({ startFrame: 20, endFrame: 23 });
     classifier.observe(22, frame);

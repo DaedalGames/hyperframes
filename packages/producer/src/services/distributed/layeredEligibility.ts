@@ -32,6 +32,9 @@ export function createLayeredChunkClassifier({ startFrame, endFrame }: ChunkFram
   }
 
   return {
+    excludeNoVideo(): void {
+      failure = { kind: "fallback", reason: "no_video", frameIndex: null };
+    },
     observe(frameIndex: number, frame: LayeredFrame): void {
       if (!inRange(frameIndex)) return;
       observed.add(frameIndex);
@@ -58,9 +61,13 @@ export function createLayeredChunkObserver(range: ChunkFrameRange, fps: number) 
   const classifier = createLayeredChunkClassifier({ startFrame, endFrame });
   if (!Number.isFinite(fps) || fps <= 0) throw new Error("Invalid layered chunk FPS");
   return {
-    wrap(inject: BeforeCaptureHook | null): BeforeCaptureHook {
+    wrap(inject: BeforeCaptureHook | null): BeforeCaptureHook | null {
+      if (inject === null) {
+        classifier.excludeNoVideo();
+        return null;
+      }
       return async (page, time, heldVideoTime) => {
-        await inject?.(page, time, heldVideoTime);
+        await inject(page, time, heldVideoTime);
         const frameIndex = Math.round(time * fps);
         const decision = classifier.decision();
         if (
@@ -74,7 +81,13 @@ export function createLayeredChunkObserver(range: ChunkFrameRange, fps: number) 
           return;
         }
         await waitForPendingSeekCompletion(page);
-        classifier.observe(frameIndex, await readLayeredFrame(page));
+        let frame: LayeredFrame;
+        try {
+          frame = await readLayeredFrame(page);
+        } catch {
+          frame = { kind: "fallback", reason: "observation_error" };
+        }
+        classifier.observe(frameIndex, frame);
       };
     },
     decision: classifier.decision,

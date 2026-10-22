@@ -1,4 +1,5 @@
 export type LayeredFallbackReason =
+  | "observation_error"
   | "unsupported_sampling"
   | "scene_complexity"
   | "no_video"
