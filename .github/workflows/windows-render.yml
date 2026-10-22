@@ -544,6 +544,15 @@ jobs:
         shell: pwsh
         run: bunx vitest run scripts/catalog/catalog-payload-assets.file-race.test.ts scripts/catalog/catalog-payload-assets.cache-race.test.ts --maxWorkers=2
 
+      - name: Upload test step log
+        if: always() && matrix.packages
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: test-step-log-${{ matrix.lane }}
+          path: ${{ runner.temp }}/deadline-step.log
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Run runtime contract test
         if: matrix.runtime_contract
         shell: pwsh

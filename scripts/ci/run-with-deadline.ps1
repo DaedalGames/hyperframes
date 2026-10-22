@@ -5,7 +5,7 @@ param(
   [Parameter(Mandatory)][string]$Command
 )
 $ErrorActionPreference = 'Stop'
-$log = Join-Path $env:RUNNER_TEMP "deadline-$PID.log"
+$log = Join-Path $env:RUNNER_TEMP "deadline-step.log"
 $null = New-Item $log -ItemType File
 $child = Start-Process pwsh -ArgumentList '-NoProfile', '-Command', "$Command *>> '$log'" -PassThru -WindowStyle Hidden
 $read = 0
