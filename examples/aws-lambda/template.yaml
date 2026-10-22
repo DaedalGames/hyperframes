@@ -68,9 +68,9 @@ Parameters:
     Type: String
     Default: ""
     Description: >-
-      Optional arm64 image (`<ECR repository URI>@sha256:<digest>`) that renders
-      the chunks. Plan, audio and assemble stay on the x86 render function, so
-      every audio encode matches the x86 output. Empty: one x86 function does it all.
+      Optional arm64 image (`<ECR repository URI>@sha256:<digest>`) that runs the
+      plan and renders the chunks. Audio and assemble stay on the x86 render
+      function. Empty: one x86 function does it all.
 
 Conditions:
   HasReservedConcurrency: !Not [!Equals [!Ref ReservedConcurrency, -1]]
