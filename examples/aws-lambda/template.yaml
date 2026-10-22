@@ -85,11 +85,9 @@ Globals:
     # terminate at the Step Functions → Lambda boundary instead of
     # following into per-function spans.
     Tracing: Active
-    # Cost-allocation tags. Setting these at the Globals level applies
-    # to every AWS::Serverless::Function in the template — there's
-    # only one today, but the contract is portable to multi-function
-    # variants. Bucket + state-machine carry the same tags resource-
-    # locally because Globals only covers functions.
+    # Cost-allocation tags for every AWS::Serverless::Function (the render
+    # function and the optional video function). Bucket + state-machine carry
+    # the same tags resource-locally because Globals only covers functions.
     Tags:
       Project: !Ref ProjectName
       HyperFramesComponent: lambda-renderer
