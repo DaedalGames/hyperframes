@@ -1,3 +1,4 @@
+import { resolveCompositionViewportFromHtml } from "./compositionViewport.js";
 import { normalizeErrorMessage } from "./errorMessage.js";
 import { c } from "../ui/colors.js";
 
@@ -26,7 +27,7 @@ export async function bundleWithLocalizedFonts(
   return localizeFonts(html, projectDir);
 }
 
-type FontInjector = (html: string, options: { stylesheetBaseDir: string }) => Promise<string>;
+type FontInjector = typeof import("@hyperframes/core/fonts/embed").injectDeterministicFontFaces;
 
 /**
  * Load the render pipeline's `injectDeterministicFontFaces` through the CLI's
@@ -82,7 +83,10 @@ export async function localizeWithProducer(
   const inject = await loadInjector();
   if (!inject) return html;
   try {
-    return await inject(html, { stylesheetBaseDir: projectDir });
+    return await inject(html, {
+      stylesheetBaseDir: projectDir,
+      mediaContext: { viewport: resolveCompositionViewportFromHtml(html), deviceScaleFactor: 1 },
+    });
   } catch (err) {
     const message = `Font localization failed; capturing with remote/fallback fonts instead: ${normalizeErrorMessage(err)}`;
     if (!warnedFontLocalizationFailures.has(message)) {

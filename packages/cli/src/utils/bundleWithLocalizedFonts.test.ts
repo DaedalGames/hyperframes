@@ -52,8 +52,22 @@ describe("localizeWithProducer", () => {
     const warn = vi.fn();
     const out = await localizeWithProducer("<html></html>", "/project", async () => inject, warn);
     expect(out).toBe("<html></html><!--fonts-->");
-    expect(inject).toHaveBeenCalledWith("<html></html>", { stylesheetBaseDir: "/project" });
+    expect(inject).toHaveBeenCalledWith("<html></html>", {
+      stylesheetBaseDir: "/project",
+      mediaContext: { viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 },
+    });
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("passes the CLI's resolved composition viewport to the injector", async () => {
+    const inject = vi.fn(async (html: string) => html);
+    const html =
+      '<section data-composition-id="main" data-width="8192" data-height="720"></section>';
+    await localizeWithProducer(html, "/project", async () => inject, vi.fn());
+    expect(inject).toHaveBeenCalledWith(html, {
+      stylesheetBaseDir: "/project",
+      mediaContext: { viewport: { width: 4096, height: 720 }, deviceScaleFactor: 1 },
+    });
   });
 
   it("fails open silently when producer is unavailable (module absent → null)", async () => {
