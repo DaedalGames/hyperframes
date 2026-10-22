@@ -30,9 +30,11 @@ git -C "$SRC/x264" checkout -q "$x264_commit"
 license x264 "$SRC/x264/COPYING"
 
 fetch x265_4.1.tar.gz
+# SVE2 kernels need -march=armv9-a, which the base's gcc 11 does not know (x86 ignores the flag).
 cmake -S "$SRC/x265_4.1/source" -B "$SRC/x265-build" -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_INSTALL_PREFIX="$DEPS" -DENABLE_SHARED=OFF -DENABLE_CLI=OFF
-cmake --build "$SRC/x265-build" -j"$JOBS" && cmake --install "$SRC/x265-build"
+  -DCMAKE_INSTALL_PREFIX="$DEPS" -DENABLE_SHARED=OFF -DENABLE_CLI=OFF -DENABLE_SVE2=OFF
+cmake --build "$SRC/x265-build" -j"$JOBS"
+cmake --install "$SRC/x265-build"
 license x265 "$SRC/x265_4.1/COPYING"
 
 fetch libvpx-1.15.0.tar.gz
