@@ -10,6 +10,7 @@ import {
   createChunkVideoFrameInjectorFactory,
   createVerifiedDistributedCaptureSession,
   type ChunkResult,
+  observedChunkCaptureMode,
   runCaptureWithScreenshotFallback,
   shouldRetryChunkCaptureWithScreenshot,
 } from "./renderChunk.js";
@@ -269,5 +270,32 @@ describe("beginFrameSessionNeedsScreenshotFallback", () => {
       }),
     ).toBe(false);
     expect(probes).toBe(1);
+  });
+});
+
+describe("a chunk whose workers launched in different capture modes", () => {
+  const mixed = [{ captureMode: "beginframe" }, { captureMode: "screenshot" }, { captureMode: "beginframe" }];
+
+  it("is retried whole in screenshot mode, so every worker then agrees", async () => {
+    const modes: string[] = [];
+    const result = await runCaptureWithScreenshotFallback({
+      forceScreenshot: false,
+      run: async (forceScreenshot) => {
+        modes.push(forceScreenshot ? "screenshot" : "beginframe");
+        return observedChunkCaptureMode(forceScreenshot ? [{ captureMode: "screenshot" }] : mixed);
+      },
+      resetForScreenshotRetry: () => {},
+    });
+
+    expect(result).toBe("screenshot");
+    expect(modes).toEqual(["beginframe", "screenshot"]);
+  });
+
+  it("still rejects a chunk with no workers or an unknown mode", () => {
+    expect(() => observedChunkCaptureMode([])).toThrow(/invalid mode/);
+    expect(() => observedChunkCaptureMode([{ captureMode: "gpu" }])).toThrow(/invalid mode/);
+    expect(shouldRetryChunkCaptureWithScreenshot(new Error("capture workers reported an invalid mode: gpu"))).toBe(
+      false,
+    );
   });
 });
