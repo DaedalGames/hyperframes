@@ -530,7 +530,7 @@ jobs:
         # Each package starts its own Vitest pool. Bound every pool so concurrent
         # package scripts cannot oversubscribe the hosted Windows runner.
         # timeout-minutes did not fire on a hung run, so the script enforces the 16 minutes itself.
-        run: ./scripts/ci/run-with-deadline.ps1 -Minutes 16 -Command 'bun run ${{ matrix.packages }} test -- --maxWorkers=2 --reporter=verbose'
+        run: ./scripts/ci/run-with-deadline.ps1 -Minutes 16 -Command 'bun run ${{ matrix.packages }} test -- --maxWorkers=1 --reporter=verbose'
 
       - name: Verify waveform cache writes on Windows
         if: matrix.lane == 'engine-cli'
