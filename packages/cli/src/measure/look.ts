@@ -1,6 +1,7 @@
 // The look of a stretch of film as numbers, ported from the Studio's look-stats.mjs: mean luma and contrast
 // (0–255), mean saturation (0–1, HSV), the share of black-and-white frames (under 2% of mid-tone pixels carry
 // colour, so a colour face in a white room is not black and white) and warmth (mean R − B, negative is cool).
+import { ratio } from "./stats.js";
 import { readClip, round, type Clip, type Roi } from "./media.js";
 
 export interface Look {
@@ -60,13 +61,17 @@ export interface LookComparison {
   warmth_diff: number;
 }
 
+// Under these, a level is none at all: black frames, a flat field, grey footage.
+const LEVEL_FLOOR = { luma: 0.5, contrast: 0.5, saturation: 0.01 };
+
 /** Yours over the reference's: ratios near 1 and differences near 0 are the same look. */
 export function compareLook(ref: Look, yours: Look): LookComparison {
-  const ratio = (k: "luma" | "contrast" | "saturation") => round(yours[k] / (ref[k] || 1e-9), 2);
+  const of = (k: "luma" | "contrast" | "saturation") =>
+    round(ratio(yours[k], ref[k], LEVEL_FLOOR[k]), 2);
   return {
-    luma_ratio: ratio("luma"),
-    contrast_ratio: ratio("contrast"),
-    saturation_ratio: ratio("saturation"),
+    luma_ratio: of("luma"),
+    contrast_ratio: of("contrast"),
+    saturation_ratio: of("saturation"),
     bw_share_diff: round(yours.bw_share - ref.bw_share, 2),
     warmth_diff: round(yours.warmth - ref.warmth, 1),
   };

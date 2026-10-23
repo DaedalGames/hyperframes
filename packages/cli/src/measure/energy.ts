@@ -1,9 +1,11 @@
 // Motion where the pixels differ (a regenerated shot, another person): both clips on one 12 fps grid, since mixed
 // 24/30 fps skews per-frame differences.
 import { meanAbsDiff, readClip, round, type Clip, type Roi } from "./media.js";
-import { pearson } from "./stats.js";
+import { pearson, ratio } from "./stats.js";
 
 const ENERGY_RATE = 12;
+// Grey levels a frame changes by from compression alone.
+const STILL = 0.05;
 
 export function energyCurve(clip: Clip, roi?: Roi): number[] {
   const { frames } = readClip(clip, { fps: ENERGY_RATE, width: 270, gray: true, roi });
@@ -35,7 +37,7 @@ export function compareEnergy(ref: number[], yours: number[]): EnergyComparison 
   return {
     r: best[0] === -2 ? null : round(best[0]),
     lag_s: round(best[1] / ENERGY_RATE, 2),
-    peak_ratio: round(Math.max(...yours, 0) / (Math.max(...ref, 0) || 1e-9), 2),
-    mean_ratio: round(mean(yours) / (mean(ref) || 1e-9), 2),
+    peak_ratio: round(ratio(Math.max(...yours, 0), Math.max(...ref, 0), STILL), 2),
+    mean_ratio: round(ratio(mean(yours), mean(ref), STILL), 2),
   };
 }

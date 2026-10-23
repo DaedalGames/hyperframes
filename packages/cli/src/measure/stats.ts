@@ -12,3 +12,9 @@ export function pearson(a: number[], b: number[], minN = 2): number | null {
   }
   return da && db ? num / Math.sqrt(da * db) : null;
 }
+
+/** yours / ref, with two values both at or under `floor` the same (1): two still or two grey clips match. */
+export function ratio(yours: number, ref: number, floor: number): number {
+  if (Math.abs(yours) <= floor && Math.abs(ref) <= floor) return 1;
+  return yours / (ref || 1e-9);
+}

@@ -115,6 +115,29 @@ describe.skipIf(noTools)("diffVideos", () => {
     expect(steady.pass).toBe(true);
   });
 
+  it("passes a regenerated segment of grey footage or a still shot against itself", async () => {
+    const grey = clip("grey.mp4", [
+      ...["-f", "lavfi", "-i", "testsrc2=d=2:r=30:s=160x90"],
+      "-vf",
+      "hue=s=0",
+    ]);
+    const still = clip("still.mp4", ["-f", "lavfi", "-i", "color=c=0x336699:s=160x90:r=30:d=2"]);
+    const segments = [{ id: "S01", start: 0, end: 2, title: "", pixels: "regenerated" as const }];
+    for (const [name, v] of [
+      ["grey", grey],
+      ["still", still],
+    ] as const) {
+      const r = await diffVideos({
+        reference: v,
+        yours: v,
+        segments,
+        outDir: join(dir, `regen-${name}`),
+      });
+      expect(r.segments![0]!.pass).toBe(true);
+      expect(r.pass).toBe(true);
+    }
+  });
+
   it("finds a wrong element by its cell when the whole frame still scores high", async () => {
     // An 80x60 box over a 320x180 frame for one second: about 0.94 whole-frame SSIM.
     const yours = clip("box.mp4", [
