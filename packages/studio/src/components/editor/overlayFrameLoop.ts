@@ -14,7 +14,12 @@
  * wake sources below, and `requestOverlayFrames` is the door for anything else.
  *
  * `IDLE_POLL_MS` is the safety net, and the reason a missed wake source is a
- * quarter second of staleness rather than a permanently frozen overlay.
+ * quarter second of staleness rather than a permanently frozen overlay. It
+ * backs off to `MAX_IDLE_POLL_MS` while nothing happens: every poll is a frame
+ * request, and each one restarts the display's vsync for a few frames, so a
+ * steady quarter-second poll kept an idle editor's GPU process waking about
+ * 65 times a second. A missed wake is likeliest just after activity (a CSS
+ * transition no event reports), which is when the poll is still fast.
  */
 
 /**
@@ -28,13 +33,16 @@
 import { usePlayerStore } from "../../player/store/playerStore";
 
 const AWAKE_MS = 400;
-/** How often a parked loop runs one frame anyway, in case a wake was missed. */
+/** How soon after the last wake a parked loop runs one frame anyway, in case a wake was missed. */
 export const IDLE_POLL_MS = 250;
+/** The longest a parked loop waits between polls; each idle poll doubles the wait up to this. */
+export const MAX_IDLE_POLL_MS = 4000;
 
 const subscribers = new Set<() => void>();
 
 let frameId: number | null = null;
 let idleTimerId: ReturnType<typeof setTimeout> | null = null;
+let idlePollMs = IDLE_POLL_MS;
 let awakeUntil = 0;
 let listenersAttached = false;
 let stopBootWake: (() => void) | null = null;
@@ -137,10 +145,14 @@ function schedule(): void {
     frameId = requestAnimationFrame(runFrame);
     return;
   }
+  // A hidden page draws nothing to keep current; `visibilitychange` wakes the loop when it shows again.
+  if (typeof document !== "undefined" && document.hidden) return;
+  const wait = idlePollMs;
+  idlePollMs = Math.min(idlePollMs * 2, MAX_IDLE_POLL_MS);
   idleTimerId = setTimeout(() => {
     idleTimerId = null;
     frameId = requestAnimationFrame(runFrame);
-  }, IDLE_POLL_MS);
+  }, wait);
 }
 
 /** Longest idle slice, so input that arrives during one waits at most this long for its frame. */
@@ -167,6 +179,7 @@ export function runWhenInputIdle(step: (timeLeft: () => number) => boolean): voi
 /** Something moved, or might have. Run frames at full rate for a moment. */
 export function requestOverlayFrames(): void {
   awakeUntil = performance.now() + AWAKE_MS;
+  idlePollMs = IDLE_POLL_MS;
   if (idleTimerId != null) {
     clearTimeout(idleTimerId);
     idleTimerId = null;
@@ -199,8 +212,9 @@ function detachListeners(): void {
 
 /**
  * Run `update` on the shared loop. The subscriber must be a pure poll: it is
- * called on an ordinary animation frame while the editor is active and roughly
- * four times a second while it is not.
+ * called on an ordinary animation frame while the editor is active, then at
+ * most four times a second, backing off to once every four seconds while it
+ * stays idle.
  */
 export function subscribeOverlayFrame(update: () => void): () => void {
   subscribers.add(update);
@@ -230,6 +244,7 @@ export function resetOverlayFrameLoopForTests(): void {
   frameId = null;
   idleTimerId = null;
   awakeUntil = 0;
+  idlePollMs = IDLE_POLL_MS;
   lastPreviewFrame = null;
   lastPreviewPlaying = null;
   detachListeners();
