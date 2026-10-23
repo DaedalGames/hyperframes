@@ -523,6 +523,48 @@ jobs:
           $cmd = "& { while (`$true) { '--- ' + (Get-Date -Format o) + ' freeMB=' + [int]((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory/1024); Get-CimInstance Win32_PerfFormattedData_PerfProc_Process | Where-Object Name -ne '_Total' | Sort-Object PercentProcessorTime -Descending | Select-Object -First 6 Name,IDProcess,PercentProcessorTime | Format-Table -HideTableHeaders | Out-String; Start-Sleep 3 } }"
           Start-Process pwsh -ArgumentList '-NoProfile','-Command',"$cmd *>> '$f'" -WindowStyle Hidden
 
+      - name: Patch diagnostics
+        if: matrix.lane == 'engine-cli'
+        shell: pwsh
+        run: |
+          @'
+          import { readFileSync, writeFileSync } from "node:fs";
+          function edit(p, from, to) {
+            const s = readFileSync(p, "utf8");
+            if (!s.includes(from)) throw new Error("anchor " + p);
+            writeFileSync(p, s.replace(from, to));
+          }
+          edit(
+            "packages/cli/src/capture/navigateForCapture.ts",
+            `    const navigation = page.goto(url, { waitUntil: "domcontentloaded", timeout: 0 });`,
+            `    const trace: string[] = [];
+              const t0 = Date.now();
+              const note = (what: string) => trace.push(String(Date.now() - t0) + "ms " + what);
+              (cdp as any).on("*", (name: any) => note(String(name)));
+              page.on("request", (r) => note("page.request " + r.url()));
+              page.on("requestfailed", (r) => note("page.requestfailed " + r.url() + " " + r.failure()?.errorText));
+              page.on("response", (r) => note("page.response " + r.status()));
+              page.on("framenavigated", (f) => note("framenavigated " + f.url()));
+              note("goto " + url + " pageurl=" + page.url());
+              const navigation = page.goto(url, { waitUntil: "domcontentloaded", timeout: 0 });`,
+          );
+          edit(
+            "packages/cli/src/capture/navigateForCapture.ts",
+            "Navigation timeout: Chrome did not send the page request within ${coldChromeFirstRequestTimeoutMs} ms`",
+            "Navigation timeout: Chrome did not send the page request within ${coldChromeFirstRequestTimeoutMs} ms\\nTRACE\\n${trace.join(\"\\n\")}`",
+          );
+          edit(
+            "packages/cli/src/browser/chromeOrphans.process.test.ts",
+            "const alive = (pids: Iterable<number>) => [...pids].filter(testProcessIsAlive);",
+            `const alive = (pids: Iterable<number>) => {
+            const live = [...pids].filter(testProcessIsAlive);
+            if (live.length && Date.now() % 1000 < 30) console.error("ALIVE " + JSON.stringify(live) + " OF " + JSON.stringify([...pids]));
+            return live;
+          };`,
+          );
+          '@ | Set-Content -Encoding utf8 patch-diag.mjs
+          node patch-diag.mjs
+
       - name: Sample disk and cpu
         if: matrix.lane == 'engine-cli'
         shell: pwsh
