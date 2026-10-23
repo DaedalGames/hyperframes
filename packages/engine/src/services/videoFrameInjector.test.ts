@@ -24,7 +24,11 @@ vi.mock("./screenshotService.js", () => ({
   syncVideoFrameVisibility: syncVideoFrameVisibilityMock,
 }));
 
-import { __testing, createVideoFrameInjector, frameCacheBytesLimitMb } from "./videoFrameInjector.js";
+import {
+  __testing,
+  createVideoFrameInjector,
+  frameCacheBytesLimitMbPerWorker,
+} from "./videoFrameInjector.js";
 import { type ExtractedFrames, FrameLookupTable } from "./videoFrameExtractor.js";
 import { type BeforeCaptureHook } from "./frameCapture.js";
 import { DEFAULT_CONFIG } from "../config.js";
@@ -473,8 +477,8 @@ describe("createVideoFrameInjector extraction-cache lease renewal", () => {
 
 describe("frame cache budget across workers", () => {
   it("gives each worker an equal part of the total, never under 64 MB", () => {
-    expect(frameCacheBytesLimitMb({ frameDataUriCacheBytesLimitMb: 1500 })).toBe(1500);
-    expect(frameCacheBytesLimitMb({ frameDataUriCacheBytesLimitMb: 1500, workers: 6 })).toBe(250);
-    expect(frameCacheBytesLimitMb({ frameDataUriCacheBytesLimitMb: 1500, workers: 100 })).toBe(64);
+    expect(frameCacheBytesLimitMbPerWorker({ frameDataUriCacheBytesLimitMb: 1500 })).toBe(1500);
+    expect(frameCacheBytesLimitMbPerWorker({ frameDataUriCacheBytesLimitMb: 1500, workers: 6 })).toBe(250);
+    expect(frameCacheBytesLimitMbPerWorker({ frameDataUriCacheBytesLimitMb: 1500, workers: 100 })).toBe(64);
   });
 });

@@ -26,7 +26,6 @@ export interface VideoFrameInjectorOptions extends Partial<
   Pick<EngineConfig, "frameDataUriCacheLimit" | "frameDataUriCacheBytesLimitMb">
 > {
   frameSrcResolver?: (framePath: string) => string | null;
-  /** Injectors sharing `frameDataUriCacheBytesLimitMb`; each keeps an equal part of it. */
   workers?: number;
 }
 
@@ -169,9 +168,9 @@ const CACHE_TOUCH_THROTTLE_MS = 5 * 60 * 1000;
 
 export const __testing = { createFrameSourceCache, CACHE_TOUCH_THROTTLE_MS };
 
-/** One injector's part of the cache budget: every worker holds its own cache on the one Node heap. */
-export function frameCacheBytesLimitMb(config?: VideoFrameInjectorOptions): number {
-  const total = config?.frameDataUriCacheBytesLimitMb ?? DEFAULT_CONFIG.frameDataUriCacheBytesLimitMb;
+export function frameCacheBytesLimitMbPerWorker(config?: VideoFrameInjectorOptions): number {
+  const total =
+    config?.frameDataUriCacheBytesLimitMb ?? DEFAULT_CONFIG.frameDataUriCacheBytesLimitMb;
   return Math.max(64, Math.floor(total / Math.max(1, config?.workers ?? 1)));
 }
 
@@ -189,7 +188,7 @@ export function createVideoFrameInjector(
     32,
     config?.frameDataUriCacheLimit ?? DEFAULT_CONFIG.frameDataUriCacheLimit,
   );
-  const bytesLimit = frameCacheBytesLimitMb(config) * 1024 * 1024;
+  const bytesLimit = frameCacheBytesLimitMbPerWorker(config) * 1024 * 1024;
   const frameCache = createFrameSourceCache(entryLimit, bytesLimit, config?.frameSrcResolver);
   const lastInjectedFrameByVideo = new Map<string, number>();
   const lastCacheTouchByDir = new Map<string, number>();
