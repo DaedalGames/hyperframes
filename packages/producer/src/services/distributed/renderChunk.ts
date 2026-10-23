@@ -833,7 +833,11 @@ export async function renderChunk(
           : null;
       // A capture can fail before any session reads it; the failure is rethrown below.
       videoFrameLookup?.catch(() => {});
-      const createChunkVideoFrameInjector = createChunkVideoFrameInjectorFactory(videoFrameLookup);
+      const createChunkVideoFrameInjector = createChunkVideoFrameInjectorFactory(videoFrameLookup, {
+        frameDataUriCacheLimit: cfg.frameDataUriCacheLimit,
+        frameDataUriCacheBytesLimitMb: cfg.frameDataUriCacheBytesLimitMb,
+        workers: chunkWorkerCount,
+      });
 
       const captureStarted = Date.now();
       captureMode = await runCaptureWithScreenshotFallback({
