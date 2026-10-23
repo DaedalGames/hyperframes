@@ -52,8 +52,9 @@ describe("createCompositor", () => {
   it("keeps no crop for a mover that does not travel a pixel, and draws only the background", () => {
     const c = createCompositor(100, 100);
     const movers = [mover(10, 10, slide(0, 0.5))];
-    const kept = c.crop(capture, movers);
+    const kept = c.plan(movers);
     expect(kept).toEqual([false]);
+    c.crop(capture, movers, kept);
     const out = fakeContext();
     expect(c.draw(background, out as never, movers, kept)).toEqual({ blurred: 0, taps: 0 });
     expect(out.drawImage).toHaveBeenCalledTimes(1);
@@ -63,8 +64,9 @@ describe("createCompositor", () => {
   it("crops a moving mover once and lays one tap per draw over the background", () => {
     const c = createCompositor(1000, 100);
     const movers = [mover(10, 10, slide(0, 100))];
-    const kept = c.crop(capture, movers);
+    const kept = c.plan(movers);
     expect(kept).toEqual([true]);
+    c.crop(capture, movers, kept);
     const crop = offscreen.at(-1);
     expect(crop?.drawImage).toHaveBeenCalledWith(capture, 0, 0, 1000, 100);
     const out = fakeContext();
@@ -83,13 +85,14 @@ describe("createCompositor", () => {
 
   it("leaves a mover sharp when its box is too big to copy every frame", () => {
     const c = createCompositor(100, 100);
-    expect(c.crop(capture, [mover(1000, 1000, slide(0, 100))])).toEqual([false]);
+    expect(c.plan([mover(1000, 1000, slide(0, 100))])).toEqual([false]);
   });
 
   it("works in device pixels: scaled buffers, transforms and dirty rect", () => {
     const c = createCompositor(1000, 100, 2);
     const movers = [mover(10, 10, slide(0, 100))];
-    const kept = c.crop(capture, movers);
+    const kept = c.plan(movers);
+    c.crop(capture, movers, kept);
     const crop = offscreen.at(-1);
     // now = translate(50, 0): the inverse maps the capture into the mover's local space.
     expect(crop?.setTransform.mock.calls.at(-1)?.map((v: number) => v + 0)).toEqual([
