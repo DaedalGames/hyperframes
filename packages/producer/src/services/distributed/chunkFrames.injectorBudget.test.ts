@@ -1,28 +1,25 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, describe, expect, it, mock } from "bun:test";
 
-const created = vi.hoisted(() => [] as unknown[]);
-vi.mock("@hyperframes/engine", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@hyperframes/engine")>()),
-  createVideoFrameInjector: vi.fn((_lookup: unknown, options: unknown) => {
+const real = await import("@hyperframes/engine");
+const created: unknown[] = [];
+mock.module("@hyperframes/engine", () => ({
+  ...real,
+  createVideoFrameInjector: (_lookup: unknown, options: unknown) => {
     created.push(options);
     return async () => {};
-  }),
+  },
 }));
+afterAll(() => mock.module("@hyperframes/engine", () => real));
 
-import { createFrameLookupTable } from "@hyperframes/engine";
-import { createChunkVideoFrameInjectorFactory } from "./chunkFrames.js";
+const { createChunkVideoFrameInjectorFactory } = await import("./chunkFrames.js");
 
 const budget = { frameDataUriCacheLimit: 256, frameDataUriCacheBytesLimitMb: 1500, workers: 4 };
 
 describe("chunk video frame injector budget", () => {
   it("hands the shared cache budget to every injector it builds", async () => {
-    created.length = 0;
-    const lookup = createFrameLookupTable([], []);
+    const lookup = real.createFrameLookupTable([], []);
     createChunkVideoFrameInjectorFactory(lookup, budget)();
-    await createChunkVideoFrameInjectorFactory(Promise.resolve(lookup), budget)()?.(
-      {} as never,
-      0,
-    );
+    await createChunkVideoFrameInjectorFactory(Promise.resolve(lookup), budget)()?.({} as never, 0);
     expect(created).toEqual([budget, budget]);
   });
 });
