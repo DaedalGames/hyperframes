@@ -2,7 +2,7 @@ import { defineCommand } from "citty";
 import type { Example } from "../_examples.js";
 import { jsonArg, num, runMeasure } from "../../measure/command.js";
 import { compareEnergy, energyCurve } from "../../measure/energy.js";
-import { Fix, parseRoi, probeVideo, round, videoClip, type Roi } from "../../measure/media.js";
+import { parseRoi, probeVideo, round, videoClip, type Roi } from "../../measure/media.js";
 
 export const examples: Example[] = [
   [
@@ -36,7 +36,6 @@ export default defineCommand({
       const start = num(args.start, "--start", 0);
       const yoursStart = num(args["yours-start"], "--yours-start", start);
       const seconds = num(args.seconds, "--seconds", a.duration - start);
-      if (seconds <= 0.5) throw new Fix("the window is under half a second", "--seconds 2 or more");
       const roi = args.roi === undefined ? undefined : parseRoi(args.roi, a.width, a.height);
       const k = b.width / a.width;
       const scaled = (r: Roi): Roi => [
@@ -59,7 +58,7 @@ export default defineCommand({
         window_s: round(seconds, 3),
         ...r,
         reading:
-          "mean_ratio is how much yours moves (0.8–1.25 is the same amount); r near 1 at a small lag_s is the same action at the same time",
+          "mean_ratio is how much yours moves (0.8–1.25 is the same amount); r near 1 at a small lag_s is the same action at the same time; r is null when the window is too short to correlate",
       };
     });
   },

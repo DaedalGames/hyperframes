@@ -187,7 +187,9 @@ export function readClip(clip: Clip, opts: Omit<ReadOptions, "start" | "seconds"
   if (fps) filters.push(`fps=${fps}`);
   let [w, h] = [clip.width, clip.height];
   if (roi) {
-    filters.push(`crop=${roi[2]}:${roi[3]}:${roi[0]}:${roi[1]}`);
+    // exact=1: on 4:2:0 video ffmpeg otherwise rounds an odd size or offset to even, and the frames no longer
+    // match the w×h this reader slices them by.
+    filters.push(`crop=${roi[2]}:${roi[3]}:${roi[0]}:${roi[1]}:exact=1`);
     [w, h] = [roi[2], roi[3]];
   }
   if (width && width !== w) {

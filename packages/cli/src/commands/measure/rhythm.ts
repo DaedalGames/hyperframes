@@ -35,6 +35,7 @@ export default defineCommand({
     start: { type: "string", description: "Window start in seconds (default 0)" },
     end: { type: "string", description: "Window end in seconds (default: the end)" },
     roi: roiArg,
+    // fallow-ignore-next-line code-duplication
     ...compareArgs("A second video (your render) measured at the original's still level"),
     json: jsonArg,
   },

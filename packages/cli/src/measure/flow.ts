@@ -203,6 +203,8 @@ export function compareFlow(ref: FlowRow[], yours: FlowRow[]) {
   return {
     frames: n,
     original_still: still,
+    original_energy: round(re, 3),
+    yours_energy: round(ye, 3),
     energy_ratio: ratio === null ? null : round(ratio, 3),
     motion_corr: c === null ? null : round(c, 3),
     lag_frames: lag,

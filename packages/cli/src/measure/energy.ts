@@ -12,8 +12,9 @@ export function energyCurve(clip: Clip, roi?: Roi): number[] {
 }
 
 export interface EnergyComparison {
-  /** Pearson r of the two curves at the best lag within ±1 s; only meaningful when the action is the same. */
-  r: number;
+  /** Pearson r of the two curves at the best lag within ±1 s; only meaningful when the action is the same. Null
+   * when the window is too short to correlate (under about 0.75 s), where the ratios still hold. */
+  r: number | null;
   lag_s: number;
   peak_ratio: number;
   /** Amount of movement, yours over the reference's. */
@@ -34,7 +35,7 @@ export function compareEnergy(ref: number[], yours: number[]): EnergyComparison 
   }
   const mean = (v: number[]) => v.reduce((s, x) => s + x, 0) / (v.length || 1);
   return {
-    r: round(best[0] === -2 ? 0 : best[0]),
+    r: best[0] === -2 ? null : round(best[0]),
     lag_s: round(best[1] / ENERGY_RATE, 2),
     peak_ratio: round(Math.max(...yours, 0) / (Math.max(...ref, 0) || 1e-9), 2),
     mean_ratio: round(mean(yours) / (mean(ref) || 1e-9), 2),
