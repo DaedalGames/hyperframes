@@ -240,7 +240,9 @@ describe("parseCompositionEntryArg", () => {
 
   it("rejects an absolute path outside the project", () => {
     const outsideStat = makeStat({ "/elsewhere/x.html": "file", [PROJECT]: "directory" });
-    const err = expectCompositionErr(parseCompositionEntryArg("/elsewhere/x.html", PROJECT, outsideStat));
+    const err = expectCompositionErr(
+      parseCompositionEntryArg("/elsewhere/x.html", PROJECT, outsideStat),
+    );
     expect(err.kind).toBe("outside-project");
   });
 
@@ -258,24 +260,27 @@ describe("parseCompositionEntryArg", () => {
   });
 });
 
-describe.skipIf(process.platform === "win32")("parseCompositionEntryArg through a symlinked project path", () => {
-  it("accepts an absolute entry spelled with the alias of the project directory", () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "hyperframes-entry-alias-")));
-    try {
-      const project = join(root, "project");
-      mkdirSync(project);
-      writeFileSync(join(project, "entry.html"), "<html></html>");
-      const alias = join(root, "alias");
-      symlinkSync(project, alias);
-      expect(parseCompositionEntryArg(join(alias, "entry.html"), project, statSync)).toEqual({
-        ok: true,
-        value: "entry.html",
-      });
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-});
+describe.skipIf(process.platform === "win32")(
+  "parseCompositionEntryArg through a symlinked project path",
+  () => {
+    it("accepts an absolute entry spelled with the alias of the project directory", () => {
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "hyperframes-entry-alias-")));
+      try {
+        const project = join(root, "project");
+        mkdirSync(project);
+        writeFileSync(join(project, "entry.html"), "<html></html>");
+        const alias = join(root, "alias");
+        symlinkSync(project, alias);
+        expect(parseCompositionEntryArg(join(alias, "entry.html"), project, statSync)).toEqual({
+          ok: true,
+          value: "entry.html",
+        });
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+  },
+);
 
 describe("resolveDefaultFpsArg", () => {
   function writeComposition(path: string, fps: string): void {
