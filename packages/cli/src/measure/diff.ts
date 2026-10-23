@@ -452,6 +452,35 @@ function segmentVerdicts(
   });
 }
 
+/** The compared frames no measured segment speaks for, judged on their pixels: a segment that measured nothing
+ * (or a window outside every segment) must not let a failing comparison pass. */
+function uncoveredPass(
+  segments: SegmentVerdict[],
+  series: Series,
+  worstCell: number[],
+  ks: number[],
+  fps: number,
+  t: Thresholds,
+  warnings: string[],
+): boolean {
+  const measured = segments.filter((s) => s.pass !== null);
+  const inMeasured = (k: number) =>
+    measured.some((s) => k >= frameAt(s.window[0], fps) && k < frameAt(s.window[1], fps));
+  const rest = series.frame.flatMap((_, i) => (inMeasured(ks[i]!) ? [] : [i]));
+  if (!rest.length) return true;
+  const unmeasured = segments.filter((s) => s.pass === null).map((s) => s.id);
+  warnings.push(
+    `${rest.length} compared frame(s) fall in no measured segment${unmeasured.length ? ` (${unmeasured.join(", ")} measured nothing)` : ""}: they are judged on their pixels`,
+  );
+  return passes(
+    scores(
+      rest.map((i) => series.frame[i]!),
+      rest.map((i) => worstCell[i]!),
+    ),
+    t,
+  );
+}
+
 async function worstMoments(
   picks: number[],
   ctx: { refClip: Clip; yours: Clip; series: Series; ks: number[]; ref: VideoInfo; outDir: string },
@@ -546,6 +575,15 @@ function onsetCurve(path: string): number[] {
   return rms.map((v, i) => Math.max(0, v - (rms[i - 1] ?? v)));
 }
 
+/** Sound starts in an onset curve: rises over a quarter of its largest, at least 0.1 s apart. */
+function starts(curve: number[]): number {
+  const floor = 0.25 * Math.max(0, ...curve);
+  let [n, last] = [0, -Infinity];
+  for (const [i, v] of curve.entries())
+    if (v > floor && floor > 0 && i - last >= 10) [n, last] = [n + 1, i];
+  return n;
+}
+
 /** How far yours' sound sits from the original's (positive: yours is late), from where sounds start. */
 // fallow-ignore-next-line complexity
 function soundOffset(reference: string, yours: string, ref: VideoInfo, mine: VideoInfo) {
@@ -572,14 +610,22 @@ function soundOffset(reference: string, yours: string, ref: VideoInfo, mine: Vid
     if (r > best[0]) best = [r, lag];
   }
   const offset = best[1] * 10;
-  // Steady sound (a held pad, room tone) has too few starts to align: say so rather than fail it.
   if (best[0] <= 0.3)
-    return {
-      offset_ms: null,
-      match: round(best[0], 2),
-      pass: true,
-      note: "too few distinct sounds to align",
-    };
+    // Steady sound (a held pad, room tone) has too few starts to align, so it is unmeasured; distinct sounds that
+    // match at no lag within ±0.5 s are further off than that, which fails.
+    return Math.min(starts(a), starts(b)) < 3
+      ? {
+          offset_ms: null,
+          match: round(best[0], 2),
+          pass: null,
+          note: "too few distinct sounds to align",
+        }
+      : {
+          offset_ms: null,
+          match: round(best[0], 2),
+          pass: false,
+          note: "the sounds line up at no offset within ±0.5 s",
+        };
   return { offset_ms: offset, match: round(best[0], 2), pass: Math.abs(offset) <= 1000 / ref.fps };
 }
 
@@ -737,7 +783,10 @@ export async function diffVideos(options: DiffOptions): Promise<DiffResult> {
         ? sideBySide(opts.reference, opts.yours, ref, join(opts.outDir, "sbs.mp4"))
         : undefined;
 
-    const judged = segments ? segments.every((s) => s.pass !== false) : passes(overall, t);
+    const judged = segments
+      ? segments.every((s) => s.pass !== false) &&
+        uncoveredPass(segments, series, worstCell, ks, ref.fps, t, warnings)
+      : passes(overall, t);
     const complete = series.frame.length === ks.length;
     return {
       pass:

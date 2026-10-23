@@ -81,6 +81,40 @@ describe.skipIf(noTools)("diffVideos", () => {
     expect(existsSync(join(out, "worst-09-cell.png"))).toBe(false);
   });
 
+  it("does not let a segment that measured nothing pass a failing comparison", async () => {
+    const white = clip("white.mp4", ["-f", "lavfi", "-i", "color=c=white:s=160x90:r=30:d=2"]);
+    const blue = clip("blue.mp4", ["-f", "lavfi", "-i", "color=c=blue:s=160x90:r=30:d=2"]);
+    const base = { reference: white, yours: blue, range: [0, 0.5] as [number, number] };
+    expect((await diffVideos({ ...base, outDir: join(dir, "wb") })).pass).toBe(false);
+    const segments = [{ id: "S01", start: 1, end: 2, title: "", pixels: "rebuilt" as const }];
+    const r = await diffVideos({ ...base, segments, outDir: join(dir, "wb-seg") });
+    expect(r.segments![0]!.pass).toBeNull();
+    expect(r.pass).toBe(false);
+  });
+
+  it("fails sound that starts a second late and passes a steady tone against itself", async () => {
+    // Uneven beeps, so only one offset lines them up.
+    const beeps = (shift: number) =>
+      [0.5, 1.4, 2.0, 3.1, 3.5, 4.6]
+        .map((t) => `between(t,${t + shift},${t + shift + 0.1})`)
+        .join("+");
+    const withSound = (name: string, gain: string) =>
+      clip(name, [
+        ...["-f", "lavfi", "-i", "color=c=gray:s=160x90:r=30:d=6"],
+        ...["-f", "lavfi", "-i", "sine=f=440:d=6", "-af", `volume='${gain}':eval=frame`],
+        ...["-c:a", "aac", "-shortest"],
+      ]);
+    const on = withSound("on.mp4", `if(${beeps(0)},1,0)`);
+    const late = withSound("late.mp4", `if(${beeps(1)},1,0)`);
+    const off = await diffVideos({ reference: on, yours: late, outDir: join(dir, "late") });
+    expect(off.sound!.pass).toBe(false);
+    expect(off.pass).toBe(false);
+    const tone = withSound("tone.mp4", "1");
+    const steady = await diffVideos({ reference: tone, yours: tone, outDir: join(dir, "tone") });
+    expect(steady.sound!.pass).not.toBe(false);
+    expect(steady.pass).toBe(true);
+  });
+
   it("finds a wrong element by its cell when the whole frame still scores high", async () => {
     // An 80x60 box over a 320x180 frame for one second: about 0.94 whole-frame SSIM.
     const yours = clip("box.mp4", [
