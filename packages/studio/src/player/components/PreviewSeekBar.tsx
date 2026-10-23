@@ -40,7 +40,7 @@ export const PreviewSeekBar = memo(function PreviewSeekBar({
         disabled={disabled || duration <= 0}
         aria-label="Seek preview"
         onChange={(event) => onSeek(event.currentTarget.valueAsNumber)}
-        className="h-6 w-full cursor-pointer accent-neutral-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-ink disabled:cursor-default disabled:opacity-30"
+        className="h-3 w-full cursor-pointer accent-neutral-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-ink disabled:cursor-default disabled:opacity-30"
       />
     </div>
   );
