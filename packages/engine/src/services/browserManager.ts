@@ -462,7 +462,6 @@ async function probeBeginFrameSupport(
     let bytes = Buffer.alloc(0);
     let isPng = false;
     let attempts = 0;
-    // A renderer under load can take longer than a fixed count of tries to draw its first surface.
     while (!isPng && Date.now() < deadline) {
       attempts += 1;
       const response = await awaitBeforeDeadline(
