@@ -279,9 +279,11 @@ describe("a chunk whose workers launched in different capture modes", () => {
 
   it("fails with a typed error instead of being retried or mixed into one output", async () => {
     expect(() => observedChunkCaptureMode(mixed)).toThrow(MixedCaptureModesError);
-    expect(shouldRetryChunkCaptureWithScreenshot(new MixedCaptureModesError(["beginframe", "screenshot"]))).toBe(
-      false,
-    );
+    expect(
+      shouldRetryChunkCaptureWithScreenshot(
+        new MixedCaptureModesError(["beginframe", "screenshot"]),
+      ),
+    ).toBe(false);
     let runs = 0;
     await expect(
       runCaptureWithScreenshotFallback({
@@ -297,9 +299,9 @@ describe("a chunk whose workers launched in different capture modes", () => {
   });
 
   it("accepts one mode and still rejects a chunk with no workers or an unknown mode", () => {
-    expect(observedChunkCaptureMode([{ captureMode: "beginframe" }, { captureMode: "beginframe" }])).toBe(
-      "beginframe",
-    );
+    expect(
+      observedChunkCaptureMode([{ captureMode: "beginframe" }, { captureMode: "beginframe" }]),
+    ).toBe("beginframe");
     expect(() => observedChunkCaptureMode([])).toThrow(/invalid mode/);
     expect(() => observedChunkCaptureMode([{ captureMode: "gpu" }])).toThrow(/invalid mode/);
   });

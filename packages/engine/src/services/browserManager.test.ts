@@ -89,11 +89,15 @@ describe("BeginFrame capability probe", () => {
   it("keeps trying a renderer that has not drawn its first surface yet, up to the probe deadline", async () => {
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
     let screenshotCalls = 0;
-    const send = vi.fn().mockImplementation(async (_method: string, params?: { screenshot?: unknown }) => {
-      if (!params?.screenshot) return {};
-      screenshotCalls += 1;
-      return screenshotCalls <= 25 ? { hasDamage: false } : { screenshotData: png.toString("base64") };
-    });
+    const send = vi
+      .fn()
+      .mockImplementation(async (_method: string, params?: { screenshot?: unknown }) => {
+        if (!params?.screenshot) return {};
+        screenshotCalls += 1;
+        return screenshotCalls <= 25
+          ? { hasDamage: false }
+          : { screenshotData: png.toString("base64") };
+      });
     const browser = {
       newPage: vi.fn().mockResolvedValue({
         goto: vi.fn().mockResolvedValue(null),
