@@ -28,9 +28,19 @@ const mocks = vi.hoisted(() => ({
   bundleWithLocalizedFonts: vi.fn(async () => "<html></html>"),
   serverClose: vi.fn(async () => undefined),
   resolveProxy:
-    vi.fn<(projectDir: string, absoluteSourcePath: string, variant?: string) => Promise<string>>(),
+    vi.fn<
+      (
+        projectDir: string,
+        absoluteSourcePath: string,
+        variant?: string,
+        box?: { width: number; height: number },
+      ) => Promise<string>
+    >(),
   FfmpegUnavailableError: class FfmpegUnavailableError extends Error {},
-  getProxyCachePath: vi.fn((projectDir: string, sourcePath: string) => `${sourcePath}.proxy.mp4`),
+  getProxyCachePath: vi.fn(
+    (projectDir: string, sourcePath: string, _variant?: string, _box?: unknown) =>
+      `${sourcePath}.proxy.mp4`,
+  ),
   scanProjectMediaCodecMap: vi.fn<
     (...args: unknown[]) => Promise<
       Record<
@@ -88,12 +98,19 @@ vi.mock("@hyperframes/studio-server/proxy-transcoder", () => ({
   getProxyCachePath: mocks.getProxyCachePath,
   resolveProxies: (
     projectDir: string,
-    sources: Array<{ sourcePath: string; variant: string }>,
+    sources: Array<{
+      sourcePath: string;
+      variant: string;
+      box?: { width: number; height: number };
+    }>,
     onSettled: () => void = () => {},
   ) =>
     Promise.allSettled(
-      sources.map(({ sourcePath, variant }) =>
-        mocks.resolveProxy(projectDir, sourcePath, variant).finally(onSettled),
+      sources.map(({ sourcePath, variant, box }) =>
+        (box
+          ? mocks.resolveProxy(projectDir, sourcePath, variant, box)
+          : mocks.resolveProxy(projectDir, sourcePath, variant)
+        ).finally(onSettled),
       ),
     ),
 }));
@@ -1097,6 +1114,38 @@ describe("preResolveHostileMediaProxies", () => {
     resolveTranscode?.();
     await pending;
     expect(settled).toBe(true);
+  });
+
+  it("makes the copy at the size that fills the composition, not at the source size", async () => {
+    const projectDir = mkProjectDir();
+    mocks.scanProjectMediaCodecMap.mockResolvedValue({
+      "/clip.mp4": {
+        codecName: "hevc",
+        browserHostile: true,
+        representativeMime: null,
+        hasAlpha: false,
+      },
+    });
+    mocks.resolveProxy.mockResolvedValue("/cache/clip.mp4");
+    const html =
+      '<html><body><div data-composition-id="root" data-width="1920" data-height="1080"></div></body></html>';
+
+    await preResolveHostileMediaProxies(projectDir, html);
+
+    // The page asks for the quantized stage size, so the copy and its cache check use that box.
+    const box = { width: 2048, height: 1448 };
+    expect(mocks.resolveProxy).toHaveBeenCalledWith(
+      projectDir,
+      join(projectDir, "clip.mp4"),
+      "h264",
+      box,
+    );
+    expect(mocks.getProxyCachePath).toHaveBeenCalledWith(
+      projectDir,
+      join(projectDir, "clip.mp4"),
+      "h264",
+      box,
+    );
   });
 
   it("does nothing (no scan, no resolveProxy) when autoProxy is off in hyperframes.json", async () => {

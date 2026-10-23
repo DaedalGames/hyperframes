@@ -2,6 +2,7 @@ import { execFileSync, spawn as realSpawn, spawnSync, type ChildProcess } from "
 import { EventEmitter, once } from "node:events";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   realpathSync,
@@ -645,6 +646,52 @@ describe("resolveProxy", () => {
     const results = await batch;
     expect(results.map((result) => result.status)).toEqual(sources.map(() => "fulfilled"));
     expect(settled).toBe(sources.length);
+  });
+
+  it("makes a batch's copy at the box it is given, under that box's own cache name", async () => {
+    const { spawn, calls } = createSpawnSpy();
+    const { resolveProxies, getProxyCachePath } = await loadModule(spawn, FFMPEG_PATH);
+    const projectDir = tmpProject();
+    const sourcePath = join(projectDir, "clip.mov");
+    writeFileSync(sourcePath, "source");
+    const box = { width: 2048, height: 1448 };
+
+    const batch = resolveProxies(projectDir, [{ sourcePath, variant: "h264", box }]);
+    await answerUntilIdle(calls, (call) => succeed(call));
+
+    const [result] = await batch;
+    expect(result).toEqual({
+      status: "fulfilled",
+      value: getProxyCachePath(projectDir, sourcePath, "h264", box),
+    });
+    expect(result.status === "fulfilled" && result.value).not.toBe(
+      getProxyCachePath(projectDir, sourcePath, "h264"),
+    );
+  });
+
+  it("clears a partial copy left by a stopped process before it starts a batch, and keeps a live one", async () => {
+    const { spawn, calls } = createSpawnSpy();
+    const { resolveProxies } = await loadModule(spawn, FFMPEG_PATH);
+    const projectDir = tmpProject();
+    const sourcePath = join(projectDir, "clip.mov");
+    writeFileSync(sourcePath, "source");
+    const cacheDir = join(projectDir, ".transcode-cache");
+    mkdirSync(cacheDir, { recursive: true });
+    const name = (id: string) => `.tmp-${id}-${"a".repeat(64)}.mp4`;
+    const dead = join(cacheDir, name("11111111-1111-1111-1111-111111111111"));
+    const live = join(cacheDir, name("22222222-2222-2222-2222-222222222222"));
+    writeFileSync(dead, "partial");
+    writeFileSync(live, "partial");
+    const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000);
+    utimesSync(dead, minutesAgo(11), minutesAgo(11));
+    utimesSync(live, minutesAgo(1), minutesAgo(1));
+
+    const batch = resolveProxies(projectDir, [{ sourcePath, variant: "h264" }]);
+    await answerUntilIdle(calls, (call) => succeed(call));
+    await batch;
+
+    expect(existsSync(dead)).toBe(false);
+    expect(existsSync(live)).toBe(true);
   });
 
   it("settles each request of a batch on its own when one of them fails", async () => {

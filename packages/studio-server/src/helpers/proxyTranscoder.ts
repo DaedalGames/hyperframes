@@ -49,6 +49,8 @@ export const PROXY_PENDING_RETRY_AFTER_SECONDS = 2;
 const ENVIRONMENT_FAILURE_TTL_MS = 5 * PROXY_PENDING_RETRY_AFTER_SECONDS * 1000;
 const MAX_FAILURE_CACHE_ENTRIES = 128;
 export const DEFAULT_PROXY_WAIT_TIMEOUT_MS = 2 * 60 * 1000;
+// A copy being written grows its temp file all the time; one untouched this long was left by a stopped process.
+const DEAD_TEMP_MS = 10 * 60 * 1000;
 
 export class ProxyTranscodeError extends Error {
   readonly exitCode: number | null;
@@ -315,9 +317,9 @@ function forget(job: ProxyJob): void {
   if (inFlight.get(job.cachePath)?.job === job) inFlight.delete(job.cachePath);
 }
 
-function maintainProxyCache(cacheDir: string): void {
+function maintainProxyCache(cacheDir: string, staleTempMs?: number): void {
   try {
-    cleanupProxyCache(cacheDir, { protectedPaths: new Set(inFlight.keys()) });
+    cleanupProxyCache(cacheDir, { protectedPaths: new Set(inFlight.keys()), staleTempMs });
   } catch (error) {
     // Cache maintenance must never turn a playable preview into an error.
     console.warn(
@@ -660,16 +662,23 @@ export async function resolveProxy(
  * flight (other callers can still fill the queue); each waits at most TRANSCODE_TIMEOUT_MS. */
 export async function resolveProxies(
   projectDir: string,
-  sources: ReadonlyArray<{ sourcePath: string; variant: ProxyVariant }>,
+  sources: ReadonlyArray<{ sourcePath: string; variant: ProxyVariant; box?: PreviewProxyBox }>,
   onSettled: () => void = () => {},
 ): Promise<PromiseSettledResult<string>[]> {
+  const first = sources[0];
+  if (first) {
+    maintainProxyCache(
+      dirname(getProxyCachePath(projectDir, first.sourcePath, first.variant)),
+      DEAD_TEMP_MS,
+    );
+  }
   const results: PromiseSettledResult<string>[] = [];
   let next = 0;
   const worker = async (): Promise<void> => {
     for (let index = next++; index < sources.length; index = next++) {
-      const { sourcePath, variant } = sources[index]!;
+      const { sourcePath, variant, box } = sources[index]!;
       results[index] = await waitForProxy(
-        resolveProxy(projectDir, sourcePath, variant),
+        resolveProxy(projectDir, sourcePath, variant, box),
         TRANSCODE_TIMEOUT_MS,
       ).then(
         (value) => ({ status: "fulfilled", value }),

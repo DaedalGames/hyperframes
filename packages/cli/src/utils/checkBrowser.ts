@@ -33,6 +33,8 @@ import type { LayoutIssue, LayoutIssueCode, LayoutRect } from "./layoutAudit.js"
 import { serveStaticProjectHtml } from "./staticProjectServer.js";
 import { collectTweenRecords, findTweenTails, tweenTailMessage } from "./gsapTweenTails.js";
 import { resolveAutoProxy } from "./projectConfig.js";
+import { findCompositionDimensions } from "./compositionViewport.js";
+import { quantizePreviewProxyBox, type PreviewProxyBox } from "@hyperframes/core";
 import {
   decideMediaProxyEligibility,
   proxyVariantFor,
@@ -162,6 +164,10 @@ export async function preResolveHostileMediaProxies(
   if (hostileEntries.length === 0) return none;
 
   const startedAt = Date.now();
+  // The page asks for a copy that fills the composition, so make that one: a full-size 4K copy
+  // takes several times longer and the page would ask for its own copy as well.
+  const stage = findCompositionDimensions(html);
+  const box = (stage && quantizePreviewProxyBox(stage.width, stage.height)) || undefined;
   const sources = hostileEntries.map(([pathname, facts]) => {
     const file = pathname.replace(/^\/+/, "");
     return {
@@ -169,6 +175,7 @@ export async function preResolveHostileMediaProxies(
       file,
       sourcePath: resolve(projectDir, file),
       variant: proxyVariantFor(facts),
+      box,
     };
   });
   const total = hostileEntries.length;
@@ -210,10 +217,14 @@ export async function preResolveHostileMediaProxies(
 
 function proxyCached(
   projectDir: string,
-  source: { sourcePath: string; variant: ReturnType<typeof proxyVariantFor> },
+  source: {
+    sourcePath: string;
+    variant: ReturnType<typeof proxyVariantFor>;
+    box?: PreviewProxyBox;
+  },
 ): boolean {
   try {
-    return existsSync(getProxyCachePath(projectDir, source.sourcePath, source.variant));
+    return existsSync(getProxyCachePath(projectDir, source.sourcePath, source.variant, source.box));
   } catch {
     return false;
   }
