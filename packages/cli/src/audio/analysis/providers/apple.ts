@@ -81,11 +81,7 @@ async function hasSwiftCompiler(): Promise<boolean> {
 const firstLine = (error: unknown) =>
   ((error as { stderr?: string }).stderr || String(error)).trim().split("\n")[0];
 
-/**
- * The compiler's arguments. Its module cache sits beside the helper binary: the default one (a per-user system cache
- * folder) is outside what an agent's sandbox may write, so a cold cache failed the build with "Operation not permitted".
- * Through xcrun, so the compiler finds the SDK it belongs to.
- */
+// The compiler's module cache sits beside the helper: the default one is outside an agent's sandbox.
 export function swiftcArgs(source: string, output: string): string[] {
   return [
     "--sdk",
