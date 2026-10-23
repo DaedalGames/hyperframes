@@ -138,7 +138,7 @@ it("serves a check that prints what a cold check prints, then exits with its Chr
   const warm = await warmProcess(dir, env);
   const chrome = warm.chrome();
   const served = client(dir, env);
-  expect(await served.done).toBe(0);
+  expect(await served.done, `${served.stdout()}\n${served.stderr()}`).toBe(0);
   await waitForTestCondition(() => !testProcessIsAlive(warm.pid) && gone(chrome), 10_000);
 
   const cold = run([join(here, "cli.ts"), "check", dir, ...CHECK_ARGS], env);
@@ -155,7 +155,7 @@ it("keeps waiting after a connection that sends no request, then serves", async 
     probe.once("close", () => resolve());
   });
   const served = client(dir, env);
-  expect(await served.done).toBe(0);
+  expect(await served.done, `${served.stdout()}\n${served.stderr()}`).toBe(0);
   expect(served.stdout()).not.toContain("NOT SERVED");
   await waitForTestCondition(() => !testProcessIsAlive(warm.pid), 10_000);
 }, 120_000);
@@ -189,7 +189,7 @@ it("declines a client whose environment differs, and exits for the new one", asy
   const dir = project();
   const warm = await warmProcess(dir, env);
   const declined = client(dir, { ...env, HF_WARM_TEST_EXTRA: "1" });
-  expect(await declined.done).toBe(0);
+  expect(await declined.done, `${declined.stdout()}\n${declined.stderr()}`).toBe(0);
   expect(declined.stdout()).toBe("NOT SERVED\n");
   await waitForTestCondition(() => !testProcessIsAlive(warm.pid), 10_000);
 }, 60_000);
@@ -202,7 +202,7 @@ it("leaves a second client to run cold while it serves the first", async () => {
   await waitForTestCondition(warm.serving, 30_000);
   expect(await forgedRequest(env, dir)).toEqual([Frame.Proof, Frame.Declined]);
   const second = client(dir, env);
-  expect(await second.done).toBe(0);
+  expect(await second.done, `${second.stdout()}\n${second.stderr()}`).toBe(0);
   expect(second.stdout()).toBe("NOT SERVED\n");
 }, 60_000);
 
@@ -213,7 +213,7 @@ it("declines a request whose proof is wrong, then still serves a genuine client"
   expect(await forgedRequest(env, dir)).toEqual([Frame.Proof, Frame.Declined]);
   expect(testProcessIsAlive(warm.pid)).toBe(true);
   const served = client(dir, env);
-  expect(await served.done).toBe(0);
+  expect(await served.done, `${served.stdout()}\n${served.stderr()}`).toBe(0);
   expect(served.stdout()).not.toContain("NOT SERVED");
 }, 120_000);
 
@@ -222,7 +222,7 @@ it("sends an impostor that cannot prove the token nothing but its nonce, and run
   const forged = encodeFrame(Frame.Proof, JSON.stringify({ proof: "0".repeat(64), nonce: "n" }));
   const seen = await impostor(warmCheckEndpoint(env)!.address, forged);
   const cold = client(project(), env);
-  expect(await cold.done).toBe(0);
+  expect(await cold.done, `${cold.stdout()}\n${cold.stderr()}`).toBe(0);
   expect(cold.stdout()).toContain("NOT SERVED");
   expect(seen.frames).toEqual([Frame.Hello]);
 }, 120_000);
@@ -231,7 +231,7 @@ it("gives up on a silent impostor and runs cold, having sent only its nonce", as
   const env = privateEnv();
   const seen = await impostor(warmCheckEndpoint(env)!.address);
   const cold = client(project(), env);
-  expect(await cold.done).toBe(0);
+  expect(await cold.done, `${cold.stdout()}\n${cold.stderr()}`).toBe(0);
   expect(cold.stdout()).toContain("NOT SERVED");
   expect(seen.frames).toEqual([Frame.Hello]);
 }, 120_000);
