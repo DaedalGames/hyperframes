@@ -3,13 +3,18 @@ import { createCompositor, type MoverFrame } from "./composite";
 import { IDENTITY, translate } from "./pose";
 
 function fakeContext() {
-  return {
-    drawImage: vi.fn(),
+  const alphas: number[] = [];
+  const ctx = {
+    drawImage: vi.fn(() => {
+      alphas.push(ctx.globalAlpha);
+    }),
+    alphas,
     clearRect: vi.fn(),
     setTransform: vi.fn(),
     globalAlpha: 1,
     globalCompositeOperation: "source-over",
   };
+  return ctx;
 }
 let offscreen: Array<ReturnType<typeof fakeContext>> = [];
 
@@ -67,7 +72,10 @@ describe("createCompositor", () => {
     const accum = offscreen[0];
     expect(stats.blurred).toBe(1);
     expect(accum?.drawImage).toHaveBeenCalledTimes(stats.taps);
-    expect(accum?.globalAlpha).toBeCloseTo(1 / stats.taps, 9);
+    // Whole 1/255 units, because canvas quantizes image alpha to them: the taps sum to 1 exactly.
+    const units = (accum?.alphas ?? []).map((a) => Math.round(a * 255));
+    expect(units).toHaveLength(stats.taps);
+    expect(units.reduce((sum, u) => sum + u, 0)).toBe(255);
     // Background first, then the trail over it.
     expect(out.drawImage.mock.calls[0]).toEqual([background, 0, 0]);
     expect(out.drawImage).toHaveBeenCalledTimes(2);

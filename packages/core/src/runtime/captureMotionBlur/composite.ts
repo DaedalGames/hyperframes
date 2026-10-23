@@ -9,7 +9,7 @@
  * Image-space approximation: a mover's box contents move with it; ink outside it is not redrawn.
  */
 
-import { type Affine, invert, sweep, thinTaps } from "./pose";
+import { type Affine, invert, sweep, tapWeights, thinTaps } from "./pose";
 
 export interface MoverFrame {
   w: number;
@@ -114,11 +114,12 @@ export function createCompositor(width: number, height: number, dpr = 1) {
     a.globalAlpha = 1;
     a.clearRect(rx, ry, rw, rh);
     a.globalCompositeOperation = "lighter";
-    a.globalAlpha = 1 / taps.length;
-    for (const m of taps) {
+    const weights = tapWeights(taps.length);
+    taps.forEach((m, k) => {
+      a.globalAlpha = weights[k] ?? 0;
       a.setTransform(dpr * m.a, dpr * m.b, dpr * m.c, dpr * m.d, dpr * m.e, dpr * m.f);
       a.drawImage(layer.canvas, 0, 0, w * dpr, h * dpr, 0, 0, w, h);
-    }
+    });
     out.drawImage(accum.canvas, rx, ry, rw, rh, rx, ry, rw, rh);
     return taps.length;
   }

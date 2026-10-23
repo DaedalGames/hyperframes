@@ -1,7 +1,7 @@
 /**
  * Capture motion blur, in preview and render. Root attributes: data-motion-blur="on"|"off",
- * -shutter (0–720°, default 180), -samples (2–64, default 16), -events="on" (run timeline
- * callbacks at sub-frame samples). PAGE_MOTION_BLUR_OFF_GLOBAL (engine blur, or a preview that
+ * -shutter (0–720°, default 180), -samples (2–64; unset sizes the taps to the smear),
+ * -events="on" (run timeline callbacks at sub-frame samples). PAGE_MOTION_BLUR_OFF_GLOBAL (engine blur, or a preview that
  * could not blur) turns all off.
  *
  * Per frame: read movers' poses across the shutter (seeks, no paint), capture the root and crop
@@ -36,7 +36,7 @@ import {
 import { swallow } from "../diagnostics";
 import { createCompositor, type MoverFrame } from "./composite";
 import { discoverMovers } from "./discover";
-import { type Affine, createPoseReader, IDENTITY, tapsFromReads } from "./pose";
+import { type Affine, autoTaps, createPoseReader, IDENTITY, tapsFromReads } from "./pose";
 
 export interface CaptureMotionBlurHost {
   root: HTMLElement;
@@ -52,7 +52,7 @@ export interface CaptureMotionBlurHost {
 
 interface Config {
   shutterDeg: number;
-  samples: number;
+  samples: number | null;
   events: boolean;
 }
 
@@ -118,7 +118,9 @@ function readConfig(root: HTMLElement): Config | null {
   };
   return {
     shutterDeg: clamp(num("data-motion-blur-shutter", 180), 0, 720),
-    samples: Math.round(clamp(num("data-motion-blur-samples", 16), 2, 64)),
+    samples: root.hasAttribute("data-motion-blur-samples")
+      ? Math.round(clamp(num("data-motion-blur-samples", 16), 2, 64))
+      : null,
     events: root.getAttribute("data-motion-blur-events") === "on",
   };
 }
@@ -298,12 +300,20 @@ function createInstance(host: CaptureMotionBlurHost, config: Config, form: HtmlI
     }
     seek(t);
     r.reset();
-    const result = visible.map((el, i) => ({
-      w: el.offsetWidth,
-      h: el.offsetHeight,
-      now: r.pose(el),
-      taps: tapsFromReads(poses[i] ?? [IDENTITY], config.samples),
-    }));
+    const result = visible.map((el, i) => {
+      const w = el.offsetWidth;
+      const h = el.offsetHeight;
+      const reads = poses[i] ?? [IDENTITY];
+      return {
+        w,
+        h,
+        now: r.pose(el),
+        taps:
+          config.samples === null
+            ? autoTaps(reads, w, h, width, height)
+            : tapsFromReads(reads, config.samples),
+      };
+    });
     r.reset();
     return { els: visible, frames: result };
   }
