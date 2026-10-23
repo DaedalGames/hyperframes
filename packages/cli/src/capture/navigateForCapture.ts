@@ -146,6 +146,15 @@ export async function gotoWhenSent(
     await cdp.send("Network.enable");
     const sent = documentRequestSent(cdp);
     const unfinished = unfinishedPageLoadRequests(cdp);
+    const trace: string[] = [];
+    const t0 = Date.now();
+    const note = (what: string) => trace.push(`${Date.now() - t0}ms ${what}`);
+    (cdp as unknown as { on(e: string, f: (name: string) => void): void }).on("*", (name) => note(String(name)));
+    page.on("request", (r) => note(`page.request ${r.url()}`));
+    page.on("requestfailed", (r) => note(`page.requestfailed ${r.url()} ${r.failure()?.errorText}`));
+    page.on("response", (r) => note(`page.response ${r.status()}`));
+    page.on("framenavigated", (f) => note(`framenavigated ${f.url()}`));
+    note(`goto ${url} pageurl=${page.url()}`);
     const navigation = page.goto(url, { waitUntil: "domcontentloaded", timeout: 0 });
     const navigationAwaitedBelow = navigation.catch(() => undefined);
     await withRemainingBudget(
@@ -154,7 +163,7 @@ export async function gotoWhenSent(
       "sending the page request",
       () =>
         new TimeoutError(
-          `Navigation timeout: Chrome did not send the page request within ${coldChromeFirstRequestTimeoutMs} ms`,
+          `Navigation timeout: Chrome did not send the page request within ${coldChromeFirstRequestTimeoutMs} ms\nTRACE\n${trace.join("\n")}`,
         ),
     );
     return await withRemainingBudget(

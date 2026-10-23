@@ -523,65 +523,29 @@ jobs:
           $cmd = "& { while (`$true) { '--- ' + (Get-Date -Format o) + ' freeMB=' + [int]((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory/1024); Get-CimInstance Win32_PerfFormattedData_PerfProc_Process | Where-Object Name -ne '_Total' | Sort-Object PercentProcessorTime -Descending | Select-Object -First 6 Name,IDProcess,PercentProcessorTime | Format-Table -HideTableHeaders | Out-String; Start-Sleep 3 } }"
           Start-Process pwsh -ArgumentList '-NoProfile','-Command',"$cmd *>> '$f'" -WindowStyle Hidden
 
-      - name: Probe chrome with real args
+      - name: Loop the real cold check
         if: matrix.lane == 'engine-cli'
         shell: pwsh
-        timeout-minutes: 25
+        timeout-minutes: 30
         run: |
-          @'
-          import { createServer } from "node:http";
-          import { mkdtempSync, rmSync } from "node:fs";
-          import { tmpdir } from "node:os";
-          import { join } from "node:path";
-          import puppeteer from "puppeteer-core";
-          import { ensureBrowser } from "../src/browser/manager.ts";
-          import { launchManagedBrowser, closeManagedBrowser } from "../src/browser/launch.ts";
-          import { buildChromeArgs } from "@hyperframes/engine";
-
-          const { executablePath } = await ensureBrowser({ preferManagedChrome: true });
-          const server = createServer((_, res) => res.end("<!doctype html><p>probe</p>"));
-          await new Promise((r) => server.listen(0, "127.0.0.1", r));
-          const url = `http://localhost:${server.address().port}/`;
-          const full = buildChromeArgs({ width: 320, height: 180, captureMode: "screenshot", requiresWebGpu: false }, { browserGpuMode: "software" });
-          console.log("PROBE args", JSON.stringify(full));
-          const variants = { full, bare: ["--no-sandbox"] };
-          const N = Number(process.env.PROBE_N ?? 30);
-          const P = Number(process.env.PROBE_P ?? 3);
-          const ms = (t) => Math.round(performance.now() - t);
-          async function loop(id) {
-            for (let i = 0; i < N; i++) {
-              for (const [name, args] of Object.entries(variants)) {
-                const dir = mkdtempSync(join(tmpdir(), "hf-probe-"));
-                const t0 = performance.now();
-                let launch = -1, first = -1, close = -1, note = "";
-                try {
-                  const browser = await launchManagedBrowser(puppeteer, { executablePath, headless: true, userDataDir: dir, args });
-                  launch = ms(t0);
-                  const page = await browser.newPage();
-                  const t1 = performance.now();
-                  const cdp = await page.createCDPSession();
-                  await cdp.send("Network.enable");
-                  const sent = new Promise((r) => cdp.once("Network.requestWillBeSent", r));
-                  const nav = page.goto(url, { waitUntil: "domcontentloaded", timeout: 0 });
-                  await Promise.race([sent, new Promise((_, rej) => setTimeout(() => rej(new Error("no request in 45s")), 45000))]);
-                  first = ms(t1);
-                  await nav;
-                  const t2 = performance.now();
-                  await closeManagedBrowser(browser);
-                  close = ms(t2);
-                } catch (e) {
-                  note = String(e).slice(0, 120);
-                }
-                console.log(`PROBE w${id} ${name} i=${i} launch=${launch} firstRequest=${first} close=${close} ${note}`);
-                try { rmSync(dir, { recursive: true, force: true }); } catch {}
+          $dir = Join-Path $env:RUNNER_TEMP 'loopproj'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Set-Content -Encoding utf8 (Join-Path $dir 'index.html') '<!doctype html><html><body><div data-composition-id="main" data-width="320" data-height="180" data-duration="1"><p style="color:#fff;background:#000">Warm</p></div><script>window.__timelines={main:{duration:()=>1,seek:()=>{},pause:()=>{}}};</script></body></html>'
+          $jobs = 1..3 | ForEach-Object {
+            $n = $_
+            Start-Job -ArgumentList $n, $PWD.Path, $dir -ScriptBlock {
+              param($n, $root, $dir)
+              Set-Location $root
+              1..25 | ForEach-Object {
+                $t = Get-Date
+                $out = node --import tsx packages/cli/src/cli.ts check $dir --json --no-browser-gpu --samples=1 2>&1 | Out-String
+                $ms = [int]((Get-Date) - $t).TotalMilliseconds
+                "LOOP w$n i=$_ exit=$LASTEXITCODE ms=$ms"
+                if ($LASTEXITCODE -ne 0 -or $out -match 'TRACE') { "LOOPOUT w$n i=$_"; $out }
               }
             }
           }
-          await Promise.all(Array.from({ length: P }, (_, k) => loop(k)));
-          server.close();
-          console.log("PROBE done");
-          '@ | Set-Content -Encoding utf8 packages/cli/scripts/probe-chrome.mjs
-          node --import tsx packages/cli/scripts/probe-chrome.mjs
+          $jobs | Receive-Job -Wait -AutoRemoveJob
 
       - name: Run ${{ matrix.lane }} package tests
         if: matrix.packages && matrix.lane != 'engine-cli'
