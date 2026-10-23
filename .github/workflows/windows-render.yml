@@ -515,6 +515,20 @@ jobs:
         timeout-minutes: 16
         run: bun run --cwd packages/studio test -- --shard=${{ matrix.studio_shard }} --maxWorkers=2 --reporter=verbose
 
+      - name: Loop process tests
+        if: matrix.lane == 'engine-cli'
+        shell: pwsh
+        timeout-minutes: 30
+        run: |
+          $fails = 0
+          for ($i = 0; $i -lt 14; $i++) {
+            "=== ITER $i " + (Get-Date -Format o)
+            bun run --cwd packages/cli vitest run src/warmCheck.process.test.ts src/utils/checkDeadline.process.test.ts src/browser/chromeOrphans.process.test.ts --maxWorkers=2 --reporter=verbose
+            if ($LASTEXITCODE -ne 0) { $fails++; "=== ITER $i FAILED " + (Get-Date -Format o) }
+          }
+          "=== LOOP fails=$fails"
+          if ($fails -gt 0) { exit 1 }
+
       - name: Run ${{ matrix.lane }} package tests
         if: matrix.packages
         shell: pwsh
