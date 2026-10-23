@@ -523,71 +523,18 @@ jobs:
           $cmd = "& { while (`$true) { '--- ' + (Get-Date -Format o) + ' freeMB=' + [int]((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory/1024); Get-CimInstance Win32_PerfFormattedData_PerfProc_Process | Where-Object Name -ne '_Total' | Sort-Object PercentProcessorTime -Descending | Select-Object -First 6 Name,IDProcess,PercentProcessorTime | Format-Table -HideTableHeaders | Out-String; Start-Sleep 3 } }"
           Start-Process pwsh -ArgumentList '-NoProfile','-Command',"$cmd *>> '$f'" -WindowStyle Hidden
 
-      - name: Probe chrome
+      - name: Loop process tests
         if: matrix.lane == 'engine-cli'
         shell: pwsh
-        timeout-minutes: 25
+        timeout-minutes: 30
         run: |
-          @'
-          import { createServer } from "node:http";
-          import { mkdtempSync, rmSync } from "node:fs";
-          import { tmpdir } from "node:os";
-          import { join } from "node:path";
-          import puppeteer from "puppeteer-core";
-          import { ensureBrowser } from "../src/browser/manager.ts";
-
-          const { executablePath } = await ensureBrowser({ preferManagedChrome: true });
-          const server = createServer((_, res) => res.end("<!doctype html><p>probe</p>"));
-          await new Promise((r) => server.listen(0, "127.0.0.1", r));
-          const url = `http://localhost:${server.address().port}/`;
-          const variants = {
-            default: [],
-            noProxy: ["--no-proxy-server"],
-            noCrash: ["--disable-breakpad", "--disable-crash-reporter"],
-            both: ["--no-proxy-server", "--disable-breakpad", "--disable-crash-reporter"],
-          };
-          const N = Number(process.env.PROBE_N ?? 20);
-          const ms = (t) => Math.round(performance.now() - t);
-          for (let i = 0; i < N; i++) {
-            for (const [name, extra] of Object.entries(variants)) {
-              const dir = mkdtempSync(join(tmpdir(), "hf-probe-"));
-              const t0 = performance.now();
-              let launch = -1, first = -1, close = -1, note = "";
-              try {
-                const browser = await puppeteer.launch({
-                  executablePath,
-                  headless: true,
-                  pipe: true,
-                  userDataDir: dir,
-                  args: ["--no-sandbox", ...extra],
-                });
-                launch = ms(t0);
-                const page = await browser.newPage();
-                const t1 = performance.now();
-                const cdp = await page.createCDPSession();
-                await cdp.send("Network.enable");
-                const sent = new Promise((r) => cdp.once("Network.requestWillBeSent", r));
-                const nav = page.goto(url, { waitUntil: "domcontentloaded", timeout: 0 });
-                await sent;
-                first = ms(t1);
-                await nav;
-                const t2 = performance.now();
-                const child = browser.process();
-                const exited = new Promise((r) => child.once("exit", r));
-                await browser.close();
-                await exited;
-                close = ms(t2);
-              } catch (e) {
-                note = String(e).slice(0, 120);
-              }
-              console.log(`PROBE ${name} i=${i} launch=${launch} firstRequest=${first} close=${close} ${note}`);
-              try { rmSync(dir, { recursive: true, force: true }); } catch {}
-            }
+          $fails = 0
+          for ($i = 0; $i -lt 14; $i++) {
+            "=== ITER $i " + (Get-Date -Format o)
+            bun run --cwd packages/cli vitest run src/warmCheck.process.test.ts src/utils/checkDeadline.process.test.ts src/browser/chromeOrphans.process.test.ts --maxWorkers=2 --reporter=verbose
+            if ($LASTEXITCODE -ne 0) { $fails++; "=== ITER $i FAILED" }
           }
-          server.close();
-          console.log("PROBE done");
-          '@ | Set-Content -Encoding utf8 packages/cli/scripts/probe-chrome.mjs
-          node --import tsx packages/cli/scripts/probe-chrome.mjs
+          "=== LOOP fails=$fails"
 
       - name: Run ${{ matrix.lane }} package tests
         if: matrix.packages && matrix.lane != 'engine-cli'

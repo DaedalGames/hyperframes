@@ -22,7 +22,25 @@ export function testProcessIsAlive(pid: number): boolean {
 export async function waitForTestCondition(check: () => boolean, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!check()) {
-    if (Date.now() >= deadline) throw new Error(`Condition not met within ${timeoutMs} ms`);
+    if (Date.now() >= deadline) {
+      let alive = "";
+      if (process.platform === "win32") {
+        try {
+          alive = execFileSync(
+            "powershell.exe",
+            [
+              "-NoProfile",
+              "-Command",
+              "Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'chrome|node|powershell|pwsh' } | ForEach-Object { '{0} <- {1} {2} {3}s {4}' -f $_.ProcessId, $_.ParentProcessId, $_.Name, [int]((Get-Date) - $_.CreationDate).TotalSeconds, $_.CommandLine.Substring(0, [Math]::Min(160, $_.CommandLine.Length)) }",
+            ],
+            { encoding: "utf8", timeout: 20_000 },
+          );
+        } catch (error) {
+          alive = String(error);
+        }
+      }
+      throw new Error(`Condition not met within ${timeoutMs} ms\n${alive}`);
+    }
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 }
