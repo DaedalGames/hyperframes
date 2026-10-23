@@ -19,9 +19,10 @@ export const CLIP_HIDDEN_ATTR = "data-hf-clip-hidden";
 const CONTENTS_ATTR = "data-hf-hidden-clip-contents";
 const HIDDEN_CLIP = `[${CLIP_HIDDEN_ATTR}][style*="visibility: hidden"]`;
 const HIDE_HIDDEN_CLIP_CONTENTS = `${HIDDEN_CLIP} * { visibility: hidden !important; }`;
-// A filter that references an SVG filter (CSS url(#id) or a filter attribute) can paint from no
-// input, which visibility:hidden does not stop, on an SVG or an HTML element alike.
-const HIDE_FILTER_OUTPUT = `${HIDDEN_CLIP}, ${HIDDEN_CLIP} * { filter: none !important; }`;
+const FILTER_OUTPUT_LAYERS = [HIDDEN_CLIP, `${HIDDEN_CLIP} *`]
+  .flatMap((layer) => [layer, `${layer}::before`, `${layer}::after`])
+  .join(", ");
+const HIDE_FILTER_OUTPUT = `${FILTER_OUTPUT_LAYERS} { filter: none !important; }`;
 
 export function showHiddenClips(): () => void {
   const hidden = Array.from(document.querySelectorAll<HTMLElement>(`[${CLIP_HIDDEN_ATTR}]`));

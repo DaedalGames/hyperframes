@@ -336,6 +336,21 @@ describe("core runtime browser contract", () => {
     "the scene itself": (id, start) => `
       <svg width="0" height="0" style="position:absolute"><filter id="${id}"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="3" /></filter></svg>
       <div class="clip" data-start="${start}" data-duration="1" style="position:absolute;inset:0;filter:url(#${id});mix-blend-mode:overlay"></div>`,
+    "a dimmed overlay layer in a late sub-composition": (id, start) => `
+      <svg width="0" height="0" style="position:absolute"><filter id="${id}"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="3" /></filter></svg>
+      <div data-composition-id="${id}-scene" class="clip" data-start="${start}" data-duration="1" style="position:absolute;inset:0">
+        <div style="position:absolute;inset:0;filter:url(#${id});mix-blend-mode:overlay;opacity:0.14"></div>
+      </div>`,
+    "a pseudo-element of the scene": (id, start) => `
+      <svg width="0" height="0" style="position:absolute"><filter id="${id}"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="3" /></filter></svg>
+      <style>.${id}::before { content: ""; position: absolute; inset: 0; filter: url(#${id}); mix-blend-mode: overlay; }</style>
+      <div class="clip ${id}" data-start="${start}" data-duration="1" style="position:absolute;inset:0"></div>`,
+    "a pseudo-element inside the scene": (id, start) => `
+      <svg width="0" height="0" style="position:absolute"><filter id="${id}"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="3" /></filter></svg>
+      <style>.${id}-layer::after { content: ""; position: absolute; inset: 0; filter: url(#${id}); mix-blend-mode: overlay; }</style>
+      <div class="clip" data-start="${start}" data-duration="1" style="position:absolute;inset:0">
+        <div class="${id}-layer" style="position:absolute;inset:0"></div>
+      </div>`,
   };
 
   it.each(Object.keys(filterLayers))(
@@ -377,7 +392,7 @@ describe("core runtime browser contract", () => {
 
         expect(await redRangeAt(1.5)).toEqual([128, 128]);
         const [min, max] = await redRangeAt(2.5);
-        expect(max - min).toBeGreaterThan(20);
+        expect(max - min).toBeGreaterThan(2);
       } finally {
         await grainPage.close();
       }

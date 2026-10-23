@@ -4792,7 +4792,6 @@ export function initSandboxRuntimeModular(): void {
     const revision = opts?.revision ?? readCompositionTimingRevision();
     if (revision !== tweensRenderedThrough.revision)
       tweensRenderedThrough = { revision, time: Number.NEGATIVE_INFINITY };
-    // A tween's first render reads its start values from computed style, so the hidden-clip rules are lifted for it.
     const firstRenders = t > tweensRenderedThrough.time;
     const hideClipsAgain = firstRenders ? showHiddenClips() : null;
     if (tl) {
