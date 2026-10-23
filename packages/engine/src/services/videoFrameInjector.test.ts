@@ -478,7 +478,11 @@ describe("createVideoFrameInjector extraction-cache lease renewal", () => {
 describe("frame cache budget across workers", () => {
   it("gives each worker an equal part of the total, never under 64 MB", () => {
     expect(frameCacheBytesLimitMbPerWorker({ frameDataUriCacheBytesLimitMb: 1500 })).toBe(1500);
-    expect(frameCacheBytesLimitMbPerWorker({ frameDataUriCacheBytesLimitMb: 1500, workers: 6 })).toBe(250);
-    expect(frameCacheBytesLimitMbPerWorker({ frameDataUriCacheBytesLimitMb: 1500, workers: 100 })).toBe(64);
+    expect(
+      frameCacheBytesLimitMbPerWorker({ frameDataUriCacheBytesLimitMb: 1500, workers: 6 }),
+    ).toBe(250);
+    expect(
+      frameCacheBytesLimitMbPerWorker({ frameDataUriCacheBytesLimitMb: 1500, workers: 100 }),
+    ).toBe(64);
   });
 });
