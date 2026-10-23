@@ -222,7 +222,7 @@ export const PlayerControls = memo(function PlayerControls({
   });
 
   return (
-    <div>
+    <div className="relative z-20">
       <PreviewSeekBar duration={duration} disabled={controlsDisabled} onSeek={onSeek} />
       <div
         className="grid h-7 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center px-3"

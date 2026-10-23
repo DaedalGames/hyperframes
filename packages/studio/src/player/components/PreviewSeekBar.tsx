@@ -29,7 +29,7 @@ export const PreviewSeekBar = memo(function PreviewSeekBar({
   }, [duration]);
 
   return (
-    <div className="flex items-center px-3">
+    <div className="flex h-3 items-center px-3">
       <input
         ref={inputRef}
         type="range"
@@ -40,7 +40,7 @@ export const PreviewSeekBar = memo(function PreviewSeekBar({
         disabled={disabled || duration <= 0}
         aria-label="Seek preview"
         onChange={(event) => onSeek(event.currentTarget.valueAsNumber)}
-        className="h-3 w-full cursor-pointer accent-neutral-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-ink disabled:cursor-default disabled:opacity-30"
+        className="h-6 w-full cursor-pointer accent-neutral-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-ink disabled:cursor-default disabled:opacity-30"
       />
     </div>
   );
