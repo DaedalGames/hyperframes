@@ -28,6 +28,8 @@ export const examples: Example[] = [
 ];
 
 const WORK_W = 640;
+// Grey bytes the heat map may hold at once.
+const GREY_BUDGET = 256 * 1024 * 1024;
 const MOVING = 24;
 // 3x5 digits, drawn without a font so the picture comes out the same on every machine.
 const DIGITS = [
@@ -139,21 +141,39 @@ export default defineCommand({
       const { info, roi } = videoAndRoi(args.video, args.roi);
       const [a, b] = window(info, args.from, args.to, ["--from", "--to"]);
       const count = Math.max(2, num(args.ghosts, "--ghosts", 8));
-      const { frames, w, h } = readClip(videoClip(info.path, a, b - a, info), {
+      const width = Math.min(WORK_W, roi[2]);
+      const n = Math.max(0, Math.round((b - a) * info.fps));
+      if (n < 2) throw new Fix(`under 2 frames between ${a}s and ${b}s`, "widen --from/--to");
+      // The heat map reads every frame, grey; a long window is read every nth frame to stay within GREY_BUDGET.
+      const outH = Math.max(2, Math.round((roi[3] * width) / roi[2] / 2) * 2);
+      const nth = Math.ceil((n * width * outH) / GREY_BUDGET);
+      const clip = videoClip(info.path, a, b - a, info);
+      const every = [`select=not(mod(n\\,${nth}))`, `setpts=N/(${info.fpsText})/TB`];
+      const all = readClip(nth > 1 ? { ...clip, filters: every } : clip, {
         roi,
-        width: Math.min(WORK_W, roi[2]),
+        width,
+        gray: true,
       });
-      if (frames.length < 2)
-        throw new Fix(`under 2 frames between ${a}s and ${b}s`, "widen --from/--to");
+      const { w, h } = all;
+      const gs = all.frames;
       const picks = [
         ...new Set(
-          Array.from({ length: count }, (_, i) =>
-            Math.round((i * (frames.length - 1)) / (count - 1)),
-          ),
+          Array.from({ length: count }, (_, i) => Math.round((i * (n - 1)) / (count - 1))),
         ),
       ];
-      const gs = frames.map(grey);
-      const base = medianGrey(picks.map((i) => gs[i]!));
+      // Colour for the ghosts alone, picked by index from one decode.
+      const colour = readClip(
+        {
+          ...clip,
+          filters: [
+            `select=${picks.map((k) => `eq(n\\,${k})`).join("+")}`,
+            `setpts=N/(${info.fpsText})/TB`,
+          ],
+        },
+        { roi, width },
+      ).frames;
+      const ghostGrey = colour.map(grey);
+      const base = medianGrey(ghostGrey);
 
       // The onion skin: the background dimmed, each ghost's moving pixels over it, later ones stronger.
       const skin = new Uint8Array(w * h * 3);
@@ -161,7 +181,7 @@ export default defineCommand({
       const [kx, ky] = [roi[2] / w, roi[3] / h];
       const path = picks.map((fi, order) => {
         const alpha = 0.3 + (0.7 * order) / Math.max(1, picks.length - 1);
-        const [f, g] = [frames[fi]!, gs[fi]!];
+        const [f, g] = [colour[order]!, ghostGrey[order]!];
         let [sx, sy, n] = [0, 0, 0];
         for (let i = 0; i < w * h; i++) {
           if (Math.abs(g[i]! - base[i]!) <= MOVING) continue;
@@ -231,7 +251,8 @@ export default defineCommand({
         video: info.path,
         from: a,
         to: b,
-        frames: frames.length,
+        frames: n,
+        ...(nth > 1 ? { heat_every_nth_frame: nth } : {}),
         ghosts: picks.length,
         trail: writeImage(join(dir, `${name}.png`), skin, w, h),
         heat: writeImage(join(dir, `${name}-heat.png`), map, w, h),
