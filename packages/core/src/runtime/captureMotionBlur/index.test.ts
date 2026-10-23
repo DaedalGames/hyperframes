@@ -864,6 +864,18 @@ describe("painting", () => {
     expect(h.seek.mock.calls.at(-1)?.[0]).toBe(0.5);
   });
 
+  it("scans with callbacks on when the root allows events, so callback-driven movers are found", () => {
+    installHtmlInCanvas();
+    const eventful = movingHost({
+      "data-motion-blur": "on",
+      "data-motion-blur-events": "on",
+    }).h;
+    initCaptureMotionBlur(eventful);
+    win.__hfMotionBlur?.probe();
+    expect(eventful.seek.mock.calls.length).toBeGreaterThan(10);
+    expect(eventful.seek.mock.calls.every(([, suppress]) => suppress === false)).toBe(true);
+  });
+
   it("seeks pose reads with events suppressed unless the root allows them", () => {
     installHtmlInCanvas();
     const quiet = host(makeRoot());
@@ -883,20 +895,26 @@ describe("painting", () => {
     expect(calls.some(([, suppress]) => suppress === false)).toBe(true);
   });
 
-  it("never fires timeline callbacks during discovery, even with events on", () => {
-    installHtmlInCanvas();
-    const { h } = movingHost({ "data-motion-blur": "on", "data-motion-blur-events": "on" });
-    const fired: number[] = [];
-    const callAtOnePointSeven = (t: number, suppress: boolean) => {
-      h.seek(t, suppress);
-      if (!suppress && t >= 0.7) fired.push(t);
-    };
-    initCaptureMotionBlur({ ...h, seek: callAtOnePointSeven });
-    void paintCaptureMotionBlur(0.1, PLAY);
-    expect(win.__hfMotionBlur?.report().movers).toBe(1);
-    expect(fired).toEqual([]);
-    const quiet = h.seek.mock.calls.filter(([, suppress]) => suppress === true);
-    expect(quiet.some(([t]) => t === 0.1)).toBe(true);
+  it("fires timeline callbacks during discovery only when the root allows events", () => {
+    for (const events of [true, false]) {
+      installHtmlInCanvas();
+      const attrs: Record<string, string> = { "data-motion-blur": "on" };
+      if (events) attrs["data-motion-blur-events"] = "on";
+      const { h } = movingHost(attrs);
+      const fired: number[] = [];
+      const callAtOnePointSeven = (t: number, suppress: boolean) => {
+        h.seek(t, suppress);
+        if (!suppress && t >= 0.7) fired.push(t);
+      };
+      initCaptureMotionBlur({ ...h, seek: callAtOnePointSeven });
+      void paintCaptureMotionBlur(0.1, PLAY);
+      expect(win.__hfMotionBlur?.report().movers).toBe(1);
+      expect(fired.length > 0).toBe(events);
+      resetCaptureMotionBlurForTests();
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+      document.body.innerHTML = "";
+    }
   });
 
   it("in engine mode composes with the prior composite owner and draws even without a paint event", () => {

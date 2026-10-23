@@ -276,8 +276,6 @@ function createInstance(host: CaptureMotionBlurHost, config: Config, form: HtmlI
   }
 
   const seek = (t: number): void => host.seek(t, !config.events);
-  // The scan walks the whole timeline: callbacks must not fire (or leave their effects) there.
-  const scanSeek = (t: number): void => host.seek(t, true);
 
   function discover(restoreTo: number): void {
     scannedTimeline = host.timeline();
@@ -288,10 +286,10 @@ function createInstance(host: CaptureMotionBlurHost, config: Config, form: HtmlI
       scene: root,
       durationSeconds: duration,
       fps: host.fps,
-      seek: scanSeek,
+      seek,
       onStep: (i, steps) => defects.sample(i, steps, (i / steps) * duration),
     });
-    scanSeek(restoreTo);
+    seek(restoreTo);
     scanDefect = defects.result();
     faceNow = defects.facesNow;
     movers = found.movers;
