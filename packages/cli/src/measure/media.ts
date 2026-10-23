@@ -32,7 +32,7 @@ function ffprobeBin(): string {
 
 /** Runs ffmpeg and returns its stdout; `input` is piped to stdin. */
 export function runFfmpeg(args: string[], input?: Buffer, cwd?: string): Buffer {
-  return execFileSync(ffmpegBin(), ["-nostdin", "-v", "error", ...args], {
+  return execFileSync(ffmpegBin(), ["-nostdin", "-loglevel", "error", ...args], {
     maxBuffer: MAX_BUFFER,
     windowsHide: true,
     ...(input ? { input } : {}),
@@ -89,7 +89,7 @@ export function probeVideo(path: string): VideoInfo {
     json = JSON.parse(
       execFileSync(
         ffprobeBin(),
-        ["-v", "error", "-show_streams", "-show_format", "-of", "json", path],
+        ["-v", "error", "-show_streams", "-show_format", "-of", "json", "--", path],
         { maxBuffer: MAX_BUFFER, windowsHide: true },
       ).toString(),
     );

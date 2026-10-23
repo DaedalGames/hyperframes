@@ -1,6 +1,5 @@
-// Body and camera motion where the pixels differ (a regenerated shot, another person, another room), ported from
-// the Studio's motion-energy.mjs. Both clips are sampled on one 12 fps grid (mixed 24/30 fps skews per-frame
-// differences), ROI scaled to 270 px wide, luma. Energy(t) = mean |frame_t - frame_t-1|.
+// Motion where the pixels differ (a regenerated shot, another person): both clips on one 12 fps grid, since mixed
+// 24/30 fps skews per-frame differences.
 import { meanAbsDiff, readClip, round, type Clip, type Roi } from "./media.js";
 import { pearson } from "./stats.js";
 
@@ -17,7 +16,6 @@ export interface EnergyComparison {
   r: number | null;
   lag_s: number;
   peak_ratio: number;
-  /** Amount of movement, yours over the reference's. */
   mean_ratio: number;
 }
 

@@ -378,7 +378,7 @@ async function captureProject(
       outputDir: shots,
       timeout: opts.timeoutMs,
       log: opts.log ?? (() => {}),
-      record: false,
+      recordInHistory: false,
     });
     if (captured.paths.length !== times.length)
       throw new Fix(

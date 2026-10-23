@@ -518,15 +518,14 @@ export async function captureSnapshots(
     review?: boolean;
     /** Progress lines; `--json` sends them to stderr so stdout stays one envelope. */
     log?: (message: string) => void;
-    /** False for working frames another command reads and discards: nothing enters project history. */
-    record?: boolean;
+    recordInHistory?: boolean;
   },
 ): Promise<CapturedSnapshots> {
   const log = opts.log ?? ((message: string) => console.log(message));
   const { bundleWithLocalizedFonts } = await import("../utils/bundleWithLocalizedFonts.js");
 
   const capture =
-    opts.record === false
+    opts.recordInHistory === false
       ? undefined
       : await captureArtifactRevision(projectDir).catch(warnSnapshotsNotRecorded);
   const invocation = randomUUID();
@@ -1005,7 +1004,7 @@ export async function captureSnapshots(
           log,
         )
       : false;
-    if (!recorded && opts.record !== false) {
+    if (!recorded && opts.recordInHistory !== false) {
       const paths = [...replaced, ...artifacts.map((artifact) => artifact.image)];
       if (paths.length > 0) await forgetRecordedArtifacts(projectDir, paths).catch(() => undefined);
     }
