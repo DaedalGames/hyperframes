@@ -164,10 +164,8 @@ export async function preResolveHostileMediaProxies(
   if (hostileEntries.length === 0) return none;
 
   const startedAt = Date.now();
-  // The page asks for a copy that fills the composition, so make that one: a full-size 4K copy
-  // takes several times longer and the page would ask for its own copy as well.
   const stage = findCompositionDimensions(html);
-  const box = (stage && quantizePreviewProxyBox(stage.width, stage.height)) || undefined;
+  const stageBox = (stage && quantizePreviewProxyBox(stage.width, stage.height)) || undefined;
   const sources = hostileEntries.map(([pathname, facts]) => {
     const file = pathname.replace(/^\/+/, "");
     return {
@@ -175,7 +173,7 @@ export async function preResolveHostileMediaProxies(
       file,
       sourcePath: resolve(projectDir, file),
       variant: proxyVariantFor(facts),
-      box,
+      box: stageBox,
     };
   });
   const total = hostileEntries.length;

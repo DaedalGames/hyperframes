@@ -49,8 +49,7 @@ export const PROXY_PENDING_RETRY_AFTER_SECONDS = 2;
 const ENVIRONMENT_FAILURE_TTL_MS = 5 * PROXY_PENDING_RETRY_AFTER_SECONDS * 1000;
 const MAX_FAILURE_CACHE_ENTRIES = 128;
 export const DEFAULT_PROXY_WAIT_TIMEOUT_MS = 2 * 60 * 1000;
-// A copy being written grows its temp file all the time; one untouched this long was left by a stopped process.
-const DEAD_TEMP_MS = 10 * 60 * 1000;
+const UNTOUCHED_TEMP_IS_DEAD_MS = 10 * 60 * 1000;
 
 export class ProxyTranscodeError extends Error {
   readonly exitCode: number | null;
@@ -669,7 +668,10 @@ export async function resolveProxies(
   if (first) {
     maintainProxyCache(
       dirname(getProxyCachePath(projectDir, first.sourcePath, first.variant)),
-      DEAD_TEMP_MS,
+      Math.min(
+        Number(process.env.HYPERFRAMES_PROXY_CACHE_STALE_TEMP_MS) || UNTOUCHED_TEMP_IS_DEAD_MS,
+        UNTOUCHED_TEMP_IS_DEAD_MS,
+      ),
     );
   }
   const results: PromiseSettledResult<string>[] = [];

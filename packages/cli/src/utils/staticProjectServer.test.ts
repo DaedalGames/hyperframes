@@ -363,6 +363,38 @@ describe("serveStaticProjectHtml transparent media proxies", () => {
     );
   });
 
+  it("resolves the copy named by hf-proxy-box, the one check made before the page opened", async () => {
+    const projectDir = mk();
+    writeFileSync(join(projectDir, "clip.mp4"), "original-hevc-bytes");
+    const proxyPath = join(projectDir, "proxy.mp4");
+    writeFileSync(proxyPath, "boxed-h264-bytes");
+    mocks.resolveProxy.mockResolvedValue(proxyPath);
+    server = await serveStaticProjectHtml(projectDir, "<html></html>");
+
+    const res = await fetch(`${server.url}clip.mp4?hf-proxy=h264&hf-proxy-box=2048x1448`);
+
+    expect(await res.text()).toBe("boxed-h264-bytes");
+    expect(mocks.resolveProxy).toHaveBeenCalledWith(
+      projectDir,
+      join(projectDir, "clip.mp4"),
+      "h264",
+      { width: 2048, height: 1448 },
+      { signal: expect.any(AbortSignal) },
+    );
+  });
+
+  it.each(["clip.mp4?hf-proxy=h264&hf-proxy-box=1000x1000", "clip.mp4?hf-proxy-box=2048x1448"])(
+    "answers 404 without a copy for %s, as the Studio preview does",
+    async (path) => {
+      const projectDir = mk();
+      writeFileSync(join(projectDir, "clip.mp4"), "original-hevc-bytes");
+      server = await serveStaticProjectHtml(projectDir, "<html></html>");
+
+      expect((await fetch(`${server.url}${path}`)).status).toBe(404);
+      expect(mocks.resolveProxy).not.toHaveBeenCalled();
+    },
+  );
+
   it.each(["mxf", "mts", "m2ts", "ts", "mkv", "m4v"])(
     "serves a proxy for .%s camera/container media",
     async (extension) => {
