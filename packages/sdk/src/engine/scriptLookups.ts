@@ -1,9 +1,5 @@
-/**
- * Whether an inline script of the document looks an element up by id.
- *
- * A removed node makes `document.getElementById('x').getTotalLength()` throw before the timeline registers,
- * so a stored delete that a script still depends on is hidden instead of removed.
- */
+// Whether an inline script looks the element up by id. A replayed delete of such a node is hidden,
+// not removed: a missing node makes the script throw before the timeline registers.
 
 // The string handed to getElementById / querySelector(All); a template's ${...} stands for any text.
 const LOOKUP = /(getElementById|querySelector(?:All)?)\s*\(\s*(["'`])([\s\S]*?)\2/g;
