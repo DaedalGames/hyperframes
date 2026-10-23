@@ -117,16 +117,7 @@ function splitFontFamilyValue(value: string): string[] {
   return pieces.map((piece) => piece.trim()).filter((piece) => piece.length > 0);
 }
 
-/**
- * Parse a single `font-family` value (e.g. `"Inter", -apple-system,
- * sans-serif`) into a list of unquoted family names in declaration order.
- * Whitespace and surrounding `"…"` / `'…'` quotes are stripped; case is
- * preserved. Pass each name through `normalizeFamilyName` for case-
- * insensitive comparisons.
- *
- * Only top-level commas split: a `var(--x, fallback)` expression stays one
- * token, as does a comma inside a quoted family name.
- */
+/** Splits a `font-family` value on top-level commas into unquoted names, keeping case. */
 export function parseFontFamilyValue(value: string): string[] {
   return splitFontFamilyValue(value)
     .map((piece) => piece.replace(/^['"]/, "").replace(/['"]$/, "").trim())
