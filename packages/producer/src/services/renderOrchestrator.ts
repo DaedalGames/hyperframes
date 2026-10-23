@@ -3554,6 +3554,7 @@ async function executeRenderPipeline(input: {
       createVideoFrameInjector(frameLookup, {
         frameDataUriCacheLimit: cfg.frameDataUriCacheLimit,
         frameDataUriCacheBytesLimitMb: cfg.frameDataUriCacheBytesLimitMb,
+        workers: workerCount,
       });
 
     let captureCalibration:
