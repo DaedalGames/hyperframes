@@ -96,6 +96,10 @@ export default defineCommand({
         );
       if (!info.audio) notes.push("no sound: the rebuild has no <audio>");
       const made = args.normalize ? normalize(info, resolve(String(args.normalize))) : undefined;
+      // The canvas is the copy the rebuild works from; a variable-rate original's frames over its nominal rate is
+      // not its length.
+      const canvas = made ? probeVideo(made.path) : info;
+      const canvasSeconds = canvas.vfr ? canvas.duration : canvas.frames / canvas.fps;
       return {
         video: info.path,
         width: info.width,
@@ -113,7 +117,7 @@ export default defineCommand({
           width: info.width,
           height: info.height,
           fps: made?.fps ?? info.fpsText,
-          duration: round(info.frames / info.fps, 3),
+          duration: round(canvasSeconds, 3),
           note: "data-width, data-height and data-duration (the picture's length) on the root composition; render with --fps at this rate",
         },
         ...(made ? { normalized: made.path } : {}),
