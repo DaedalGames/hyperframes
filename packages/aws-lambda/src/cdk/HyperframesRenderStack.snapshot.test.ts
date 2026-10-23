@@ -168,10 +168,8 @@ describe("HyperframesRenderStack — snapshot", () => {
     expect(requireRecordProperty(warm, "Parameters", "parameters").InvocationType).toBe("Event");
     expect(warm.Next).toBe("PlanV2");
     expect(JSON.stringify(warm.Catch)).toContain('"Next":"PlanV2"');
-    const choices = requireRecord(states.SelectPlanProtocol, "SelectPlanProtocol").Choices as Record<
-      string,
-      unknown
-    >[];
+    const choices = requireRecord(states.SelectPlanProtocol, "SelectPlanProtocol")
+      .Choices as Record<string, unknown>[];
     const toWarm = choices.filter((choice) => choice.Next === "WarmRender");
     expect(toWarm).toHaveLength(1);
     expect(toWarm[0]).toEqual({
