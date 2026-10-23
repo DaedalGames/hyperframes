@@ -162,7 +162,7 @@ export function applyOverrideSet(parsed: ParsedDocument, overrides: OverrideSet)
   applyPatchesToDocument(parsed, patches, { keepScriptTargets: true });
 }
 
-/** Remember a deleted node a script looks up, so serialize can write it back hidden (a missing node makes that script throw). */
+/** Keep a deleted node a script looks up: serialize writes it back hidden, so the script finds it. */
 function keepDelete(parsed: ParsedDocument, el: Element): void {
   const parent = el.parentElement;
   (parsed.keptDeletes ??= []).push({
