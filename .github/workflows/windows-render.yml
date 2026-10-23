@@ -520,7 +520,7 @@ jobs:
         shell: pwsh
         run: |
           $f = Join-Path $env:RUNNER_TEMP 'load.log'
-          $cmd = "while (`$true) { '--- ' + (Get-Date -Format o) + ' freeMB=' + [int]((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory/1024); Get-CimInstance Win32_PerfFormattedData_PerfProc_Process | Where-Object Name -ne '_Total' | Sort-Object PercentProcessorTime -Descending | Select-Object -First 6 Name,IDProcess,PercentProcessorTime | Format-Table -HideTableHeaders | Out-String; Start-Sleep 3 }"
+          $cmd = "& { while (`$true) { '--- ' + (Get-Date -Format o) + ' freeMB=' + [int]((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory/1024); Get-CimInstance Win32_PerfFormattedData_PerfProc_Process | Where-Object Name -ne '_Total' | Sort-Object PercentProcessorTime -Descending | Select-Object -First 6 Name,IDProcess,PercentProcessorTime | Format-Table -HideTableHeaders | Out-String; Start-Sleep 3 } }"
           Start-Process pwsh -ArgumentList '-NoProfile','-Command',"$cmd *>> '$f'" -WindowStyle Hidden
 
       - name: Run ${{ matrix.lane }} package tests
