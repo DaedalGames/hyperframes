@@ -256,14 +256,31 @@ Resources:
             Choices:
               - Variable: $.PlanProtocol
                 StringEquals: v2
-                Next: PlanV2
+                Next: WarmRender
               - Variable: $.PlanProtocol
                 StringEquals: v1
                 Next: Plan
               - Variable: $.PlanProtocol
                 IsPresent: true
                 Next: UnsupportedPlanProtocol
-            Default: PlanV2
+            Default: WarmRender
+
+          # The audio task runs on this function once the plan is done; starting its container now hides the cold start.
+          WarmRender:
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke
+            Parameters:
+              FunctionName: !GetAtt RenderFunction.Arn
+              InvocationType: Event
+              Payload:
+                Action: warm
+            ResultPath: null
+            Catch:
+              - ErrorEquals:
+                  - States.ALL
+                ResultPath: null
+                Next: PlanV2
+            Next: PlanV2
 
           UnsupportedPlanProtocol:
             Type: Fail

@@ -58,6 +58,7 @@ const EXPECTED_RESOURCE_COUNTS: Record<string, number> = {
 // not at this level — we cover it separately in the contract test.
 const EXPECTED_STATE_NAMES = [
   "SelectPlanProtocol",
+  "WarmRender",
   "Plan",
   "PlanV2",
   "BuildChunkList",
@@ -161,13 +162,23 @@ describe("HyperframesRenderStack — snapshot", () => {
     expect(actualStates.sort()).toEqual([...EXPECTED_STATE_NAMES].sort());
   });
 
+  it("warms the render function before the plan, and a failed warm-up never fails the render", () => {
+    for (const definition of [SYNTHED.definition, readSamDefinition()]) {
+      const warm = requireRecord(definition.States.WarmRender, "WarmRender state");
+      expect(sentPayload(warm)).toEqual({ Action: "warm" });
+      expect(requireRecordProperty(warm, "Parameters", "parameters").InvocationType).toBe("Event");
+      expect(warm.Next).toBe("PlanV2");
+      expect(JSON.stringify(warm.Catch)).toContain('"Next":"PlanV2"');
+    }
+  });
+
   it("defaults omitted plan protocol to v2 and preserves the explicit v1 branch", () => {
     for (const definition of [SYNTHED.definition, readSamDefinition()]) {
       const selection = requireRecord(
         definition.States.SelectPlanProtocol,
         "SelectPlanProtocol state",
       );
-      expect(selection.Default).toBe("PlanV2");
+      expect(selection.Default).toBe("WarmRender");
       expect(JSON.stringify(selection)).toContain('"StringEquals":"v1"');
       expect(JSON.stringify(definition.States.Plan)).toContain('"PlanProtocol":"v1"');
     }
@@ -346,14 +357,14 @@ describe("HyperframesRenderStack — snapshot", () => {
   });
 
   it("runs plan and renderChunk on the SAM template's optional arm64 video function", () => {
-    // A chunk refuses a plan made with another ffmpeg build; audio and assemble stay on x86.
+    // A chunk refuses a plan made with another ffmpeg build; warm-up, audio and assemble stay on x86.
     const targets = Object.values(lambdaTasks(readSamDefinition().States)).map((task) => ({
       action: sentPayload(task).Action,
       functionName: requireRecordProperty(requireRecord(task, "task"), "Parameters", "task params")
         .FunctionName,
     }));
     expect(new Set(targets.map((target) => target.action))).toEqual(
-      new Set(["plan", "renderChunk", "audio", "assemble"]),
+      new Set(["warm", "plan", "renderChunk", "audio", "assemble"]),
     );
     for (const { action, functionName } of targets) {
       expect({ action, functionName }).toEqual({
@@ -491,6 +502,8 @@ describe("HyperframesRenderStack — snapshot", () => {
   it("gives Lambda throttles a minutes-long backoff ahead of the catch-all, in CDK and SAM", () => {
     for (const definition of [SYNTHED.definition, readSamDefinition()]) {
       for (const [taskName, task] of Object.entries(lambdaTasks(definition.States))) {
+        // The warm-up is fire-and-forget: a throttle is caught and the render goes on without it.
+        if (taskName === "WarmRender") continue;
         expect({ taskName, ...throttleRetry(task) }).toEqual({
           taskName,
           beforeCatchAll: true,

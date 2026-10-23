@@ -332,6 +332,16 @@ export class HyperframesRenderStack extends Construct {
       maxDelay: Duration.seconds(60),
     });
 
+    // The audio task runs on this function once the plan is done; starting its container now hides the cold start.
+    const warmRender = new tasks.LambdaInvoke(this, "WarmRender", {
+      lambdaFunction: this.renderFunction,
+      invocationType: tasks.LambdaInvocationType.EVENT,
+      payload: sfn.TaskInput.fromObject({ Action: "warm" }),
+      resultPath: sfn.JsonPath.DISCARD,
+    });
+    warmRender.addCatch(planV2, { errors: ["States.ALL"], resultPath: sfn.JsonPath.DISCARD });
+    warmRender.next(planV2);
+
     const buildChunkList = new sfn.Pass(this, "BuildChunkList", {
       parameters: {
         "ChunkIndexes.$": "States.ArrayRange(0, States.MathAdd($.Plan.ChunkCount, -1), 1)",
@@ -557,10 +567,10 @@ export class HyperframesRenderStack extends Construct {
       cause: 'PlanProtocol must be "v1", "v2", or absent (defaults to v2).',
     });
     return new sfn.Choice(this, "SelectPlanProtocol")
-      .when(sfn.Condition.stringEquals("$.PlanProtocol", "v2"), planV2)
+      .when(sfn.Condition.stringEquals("$.PlanProtocol", "v2"), warmRender)
       .when(sfn.Condition.stringEquals("$.PlanProtocol", "v1"), plan)
       .when(sfn.Condition.isPresent("$.PlanProtocol"), unsupportedPlanProtocol)
-      .otherwise(planV2);
+      .otherwise(warmRender);
   }
 }
 
