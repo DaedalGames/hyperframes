@@ -1,4 +1,5 @@
 import { BrowserCleanupError } from "../browser/launch.js";
+import { logCheckProgress } from "./checkProgress.js";
 import { CheckDeadline, CheckDeadlineError, type CheckPhase } from "./checkDeadline.js";
 import {
   checkSnapshotDirectory,
@@ -526,12 +527,14 @@ async function collectGridSamples(
   const times = mergeSampleTimes(grid.layoutSamples, motion.times);
   const pending = times.map((_, index) => index);
   const perTime: GridSamples[] = [];
+  let finished = 0;
   const work = async (worker: CheckAuditDriver, taken: number[] = []) => {
     for (let index = pending.shift(); index !== undefined; index = pending.shift()) {
       taken.push(index);
       const time = times[index] ?? 0;
       perTime[index] = await collectSampleAt(worker, options, grid, motion, sets, time);
       enter("samples");
+      logCheckProgress("samples", ++finished, times.length);
     }
   };
   const helpWith = async (helper: CheckAuditDriver) => {
@@ -685,9 +688,11 @@ async function collectOverlapGridInBatches(
   progress: () => void,
 ): Promise<AnchoredLayoutIssue[][]> {
   const issues: AnchoredLayoutIssue[][] = [];
+  const batches = Math.ceil(times.length / OVERLAP_BATCH);
   for (let from = 0; from < times.length; from += OVERLAP_BATCH) {
     issues.push(...(await driver.collectOverlapGrid(times.slice(from, from + OVERLAP_BATCH))));
     progress();
+    logCheckProgress("overlap", from / OVERLAP_BATCH + 1, batches);
   }
   return issues;
 }
@@ -704,12 +709,13 @@ async function collectMotionOverlapSamples(
   const shiftedTimes = await denseOverlapTimes(driver, grid, range);
   // Before the grid: a seek after it would overwrite the span the grid stamps on what its samples queue.
   if (craft) {
-    for (const time of buildCraftSampleTimes(grid.duration)) {
-      // The render's last frame lands before the duration, where the runtime has already unmounted clips.
-      if (time >= grid.duration) continue;
+    // The render's last frame lands before the duration, where the runtime has already unmounted clips.
+    const craftTimes = buildCraftSampleTimes(grid.duration).filter((time) => time < grid.duration);
+    for (const [index, time] of craftTimes.entries()) {
       await driver.seekGeometry(time);
       collected.craftFrames.push(...(await collectCraftFrame(driver, time)));
       progress();
+      logCheckProgress("craft", index + 1, craftTimes.length);
     }
   }
   const probeHold = holdProber(driver, collected, range ? range[1] : grid.duration);
