@@ -41,6 +41,8 @@ export const DEFAULT_MIN_P05 = 0.85;
  */
 export const DEFAULT_MIN_CELL = 0.75;
 // A regenerated shot moves about as much as the original's.
+/** The worst-moment pictures a run writes, cleared before the next so a shorter list leaves none behind. */
+const OWN_WORST = /^worst-\d{2}-(?:cell|original|yours)\.png$/;
 const ENERGY_RATIO: [number, number] = [0.8, 1.25];
 const GRID = 4;
 const WORST_GAP_S = 0.5;
@@ -660,8 +662,10 @@ export async function diffVideos(options: DiffOptions): Promise<DiffResult> {
 
   try {
     mkdirSync(opts.outDir, { recursive: true });
+    const inputs = new Set([resolve(opts.reference), resolve(opts.yours)]);
     for (const f of readdirSync(opts.outDir))
-      if (/^worst-/.test(f)) rmSync(join(opts.outDir, f), { force: true });
+      if (OWN_WORST.test(f) && !inputs.has(resolve(opts.outDir, f)))
+        rmSync(join(opts.outDir, f), { force: true });
     const logPath = join(opts.outDir, "ssim.log");
     const series = ssimSeries(refClip, yours, logPath);
     if (!series.frame.length)

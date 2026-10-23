@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -65,6 +65,20 @@ describe.skipIf(noTools)("diffVideos", () => {
     expect(r.ssim.frames).toBe(90);
     expect(r.ssim.mean).toBeGreaterThan(0.999);
     expect(r.worst).toEqual([]);
+  });
+
+  it("clears only its own worst pictures from the output folder, never an input", async () => {
+    const out = join(dir, "shared");
+    mkdirSync(out, { recursive: true });
+    const original = join(out, "worst-original.mp4");
+    copyFileSync(ref, original);
+    writeFileSync(join(out, "worst-notes.txt"), "mine");
+    writeFileSync(join(out, "worst-09-cell.png"), "stale");
+    const r = await diffVideos({ reference: original, yours: ref, outDir: out });
+    expect(r.pass).toBe(true);
+    expect(existsSync(original)).toBe(true);
+    expect(existsSync(join(out, "worst-notes.txt"))).toBe(true);
+    expect(existsSync(join(out, "worst-09-cell.png"))).toBe(false);
   });
 
   it("finds a wrong element by its cell when the whole frame still scores high", async () => {
