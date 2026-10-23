@@ -41,6 +41,9 @@ export function avSync(
       "measure sync needs the picture and its sound in one file",
     );
   if (!(maxLagMs > 0)) throw new Fix("--max-lag-ms must be positive", "--max-lag-ms 400");
+  // Start on a frame: the picture can only begin on one, and sound cut from between two frames runs a fraction of a
+  // frame ahead of it, enough to move a near-tie peak by several frames.
+  start = Math.ceil(start * info.fps - 1e-6) / info.fps;
   const { frames, w, h } = readClip(videoClip(info.path, start, end - start, info), {
     roi: mouth,
     width: 160,

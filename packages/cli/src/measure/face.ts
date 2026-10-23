@@ -23,7 +23,11 @@ export async function faceBoxes(info: VideoInfo, start: number, end: number, sam
   const cv = await loadOpenCv((m) => console.error(m));
   const [k0, k1] = [
     frameAt(start, info.fps),
-    Math.max(frameAt(start, info.fps), Math.ceil(end * info.fps - 1e-6) - 1),
+    // The file can run longer than its picture (a longer soundtrack): a frame past the last is never decoded.
+    Math.max(
+      frameAt(start, info.fps),
+      Math.min(info.frames - 1, Math.ceil(end * info.fps - 1e-6) - 1),
+    ),
   ];
   const n = Math.min(samples, k1 - k0 + 1);
   const ks = [
