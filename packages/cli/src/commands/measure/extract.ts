@@ -61,7 +61,8 @@ async function record(
   return entry.id;
 }
 
-const crop = (roi: Roi) => `crop=${roi[2]}:${roi[3]}:${roi[0]}:${roi[1]}`;
+// exact=1 keeps an odd offset on 4:2:0 footage; ffmpeg otherwise moves it to the even pixel before.
+const crop = (roi: Roi) => `crop=${roi[2]}:${roi[3]}:${roi[0]}:${roi[1]}:exact=1`;
 
 /** The frame shown at `at` seconds, cropped, as a picture. */
 export async function cutStill(info: VideoInfo, at: number, roi: Roi, out: string) {
@@ -224,8 +225,8 @@ export default defineCommand({
         };
       }
 
-      if (!/\.(mp4|mov|webm)$/i.test(out))
-        throw new Fix(`${out} is not a video`, "--out assets/name.mp4");
+      if (!/\.(mp4|mov)$/i.test(out))
+        throw new Fix(`${out} is not an mp4 or mov (clips are H.264)`, "--out assets/name.mp4");
       const clip = cutClip(
         info,
         num(args.from, "--from", 0),
