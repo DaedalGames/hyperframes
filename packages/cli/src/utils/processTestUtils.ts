@@ -60,9 +60,14 @@ function processTable(): Map<number, TableEntry> {
           { encoding: "utf8" },
         )
       : execFileSync("ps", ["-A", "-o", "pid=,ppid=,comm="], { encoding: "utf8" });
+  return parseProcessListing(listing, process.platform === "win32");
+}
+
+export function parseProcessListing(listing: string, withStart: boolean): Map<number, TableEntry> {
+  const table = new Map<number, TableEntry>();
   for (const line of listing.split("\n")) {
     const fields = line.trim().split(/\s+/);
-    const started = process.platform === "win32" ? BigInt(fields.splice(2, 1)[0] ?? 0) : undefined;
+    const started = withStart ? BigInt(fields.splice(2, 1)[0] ?? 0) : undefined;
     const [pid, parent, ...name] = fields;
     if (Number(pid) > 0) {
       table.set(Number(pid), { parent: Number(parent), name: name.join(" "), started });
