@@ -10,6 +10,7 @@ import {
   createChunkVideoFrameInjectorFactory,
   createVerifiedDistributedCaptureSession,
   type ChunkResult,
+  MixedCaptureModesError,
   observedChunkCaptureMode,
   runCaptureWithScreenshotFallback,
   shouldRetryChunkCaptureWithScreenshot,
@@ -274,34 +275,32 @@ describe("beginFrameSessionNeedsScreenshotFallback", () => {
 });
 
 describe("a chunk whose workers launched in different capture modes", () => {
-  const mixed = [
-    { captureMode: "beginframe" },
-    { captureMode: "screenshot" },
-    { captureMode: "beginframe" },
-  ];
+  const mixed = [{ captureMode: "beginframe" }, { captureMode: "screenshot" }];
 
-  it("is retried whole in screenshot mode, so every worker then agrees", async () => {
-    const modes: string[] = [];
-    const result = await runCaptureWithScreenshotFallback({
-      forceScreenshot: false,
-      run: async (forceScreenshot) => {
-        modes.push(forceScreenshot ? "screenshot" : "beginframe");
-        return observedChunkCaptureMode(forceScreenshot ? [{ captureMode: "screenshot" }] : mixed);
-      },
-      resetForScreenshotRetry: () => {},
-    });
-
-    expect(result).toBe("screenshot");
-    expect(modes).toEqual(["beginframe", "screenshot"]);
+  it("fails with a typed error instead of being retried or mixed into one output", async () => {
+    expect(() => observedChunkCaptureMode(mixed)).toThrow(MixedCaptureModesError);
+    expect(shouldRetryChunkCaptureWithScreenshot(new MixedCaptureModesError(["beginframe", "screenshot"]))).toBe(
+      false,
+    );
+    let runs = 0;
+    await expect(
+      runCaptureWithScreenshotFallback({
+        forceScreenshot: false,
+        run: async () => {
+          runs++;
+          return observedChunkCaptureMode(mixed);
+        },
+        resetForScreenshotRetry: () => {},
+      }),
+    ).rejects.toThrow(MixedCaptureModesError);
+    expect(runs).toBe(1);
   });
 
-  it("still rejects a chunk with no workers or an unknown mode", () => {
+  it("accepts one mode and still rejects a chunk with no workers or an unknown mode", () => {
+    expect(observedChunkCaptureMode([{ captureMode: "beginframe" }, { captureMode: "beginframe" }])).toBe(
+      "beginframe",
+    );
     expect(() => observedChunkCaptureMode([])).toThrow(/invalid mode/);
     expect(() => observedChunkCaptureMode([{ captureMode: "gpu" }])).toThrow(/invalid mode/);
-    expect(
-      shouldRetryChunkCaptureWithScreenshot(
-        new Error("capture workers reported an invalid mode: gpu"),
-      ),
-    ).toBe(false);
   });
 });

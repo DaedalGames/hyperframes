@@ -335,7 +335,6 @@ export function observedChunkCaptureMode(
  * keep their original classification instead of being hidden by a fallback.
  */
 export function shouldRetryChunkCaptureWithScreenshot(error: unknown): boolean {
-  if (error instanceof MixedCaptureModesError) return true;
   const failure = classifyCaptureFailure(error);
   if (failure.kind === "cancelled" || failure.kind === "memory_exhaustion") return false;
   return (
