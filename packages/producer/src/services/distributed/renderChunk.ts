@@ -317,7 +317,9 @@ export class MixedCaptureModesError extends Error {
   }
 }
 
-export function observedChunkCaptureMode(perfs: readonly Pick<CapturePerfSummary, "captureMode">[]): CaptureMode {
+export function observedChunkCaptureMode(
+  perfs: readonly Pick<CapturePerfSummary, "captureMode">[],
+): CaptureMode {
   const modes = [...new Set(perfs.map((perf) => perf.captureMode))];
   if (modes.length > 1) throw new MixedCaptureModesError(modes);
   const [mode] = modes;

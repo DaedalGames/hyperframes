@@ -274,7 +274,11 @@ describe("beginFrameSessionNeedsScreenshotFallback", () => {
 });
 
 describe("a chunk whose workers launched in different capture modes", () => {
-  const mixed = [{ captureMode: "beginframe" }, { captureMode: "screenshot" }, { captureMode: "beginframe" }];
+  const mixed = [
+    { captureMode: "beginframe" },
+    { captureMode: "screenshot" },
+    { captureMode: "beginframe" },
+  ];
 
   it("is retried whole in screenshot mode, so every worker then agrees", async () => {
     const modes: string[] = [];
@@ -294,8 +298,10 @@ describe("a chunk whose workers launched in different capture modes", () => {
   it("still rejects a chunk with no workers or an unknown mode", () => {
     expect(() => observedChunkCaptureMode([])).toThrow(/invalid mode/);
     expect(() => observedChunkCaptureMode([{ captureMode: "gpu" }])).toThrow(/invalid mode/);
-    expect(shouldRetryChunkCaptureWithScreenshot(new Error("capture workers reported an invalid mode: gpu"))).toBe(
-      false,
-    );
+    expect(
+      shouldRetryChunkCaptureWithScreenshot(
+        new Error("capture workers reported an invalid mode: gpu"),
+      ),
+    ).toBe(false);
   });
 });
