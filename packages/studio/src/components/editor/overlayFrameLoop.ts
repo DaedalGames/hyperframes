@@ -14,12 +14,7 @@
  * wake sources below, and `requestOverlayFrames` is the door for anything else.
  *
  * `IDLE_POLL_MS` is the safety net, and the reason a missed wake source is a
- * quarter second of staleness rather than a permanently frozen overlay. It
- * backs off to `MAX_IDLE_POLL_MS` while nothing happens: every poll is a frame
- * request, and each one restarts the display's vsync for a few frames, so a
- * steady quarter-second poll kept an idle editor's GPU process waking about
- * 65 times a second. A missed wake is likeliest just after activity (a CSS
- * transition no event reports), which is when the poll is still fast.
+ * quarter second of staleness rather than a permanently frozen overlay.
  */
 
 /**
@@ -33,7 +28,7 @@
 import { usePlayerStore } from "../../player/store/playerStore";
 
 const AWAKE_MS = 400;
-/** How soon after the last wake a parked loop runs one frame anyway, in case a wake was missed. */
+/** How often a parked loop runs one frame anyway, in case a wake was missed. */
 export const IDLE_POLL_MS = 250;
 /** The longest a parked loop waits between polls; each idle poll doubles the wait up to this. */
 export const MAX_IDLE_POLL_MS = 4000;
@@ -145,7 +140,6 @@ function schedule(): void {
     frameId = requestAnimationFrame(runFrame);
     return;
   }
-  // A hidden page draws nothing to keep current; `visibilitychange` wakes the loop when it shows again.
   if (typeof document !== "undefined" && document.hidden) return;
   const wait = idlePollMs;
   idlePollMs = Math.min(idlePollMs * 2, MAX_IDLE_POLL_MS);
@@ -212,9 +206,8 @@ function detachListeners(): void {
 
 /**
  * Run `update` on the shared loop. The subscriber must be a pure poll: it is
- * called on an ordinary animation frame while the editor is active, then at
- * most four times a second, backing off to once every four seconds while it
- * stays idle.
+ * called on an ordinary animation frame while the editor is active, then
+ * less often the longer it stays idle, down to once every four seconds.
  */
 export function subscribeOverlayFrame(update: () => void): () => void {
   subscribers.add(update);
