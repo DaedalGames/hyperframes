@@ -254,16 +254,20 @@ Resources:
           SelectPlanProtocol:
             Type: Choice
             Choices:
+              # Only a stack with the arm64 video function has a cold x86 function to warm; without one this never matches.
+              - Variable: $.PlanProtocol
+                StringEquals: !If [HasVideoFunction, v2, v2-without-video-function]
+                Next: WarmRender
               - Variable: $.PlanProtocol
                 StringEquals: v2
-                Next: WarmRender
+                Next: PlanV2
               - Variable: $.PlanProtocol
                 StringEquals: v1
                 Next: Plan
               - Variable: $.PlanProtocol
                 IsPresent: true
                 Next: UnsupportedPlanProtocol
-            Default: WarmRender
+            Default: PlanV2
 
           # The audio task runs on this function once the plan is done; starting its container now hides the cold start.
           WarmRender:

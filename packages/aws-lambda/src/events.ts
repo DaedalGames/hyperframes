@@ -25,7 +25,6 @@ export type { SerializableDistributedRenderConfig } from "@hyperframes/producer/
 
 /** Discriminator for the three roles the one Lambda image fulfills. */
 export type LambdaAction = "plan" | "audio" | "renderChunk" | "assemble";
-/** Sent by the state machine, not unwrapped: makes a cold function ready for the `audio` task that follows. */
 export interface WarmEvent {
   Action: "warm";
 }

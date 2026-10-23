@@ -58,7 +58,6 @@ const EXPECTED_RESOURCE_COUNTS: Record<string, number> = {
 // not at this level — we cover it separately in the contract test.
 const EXPECTED_STATE_NAMES = [
   "SelectPlanProtocol",
-  "WarmRender",
   "Plan",
   "PlanV2",
   "BuildChunkList",
@@ -162,14 +161,24 @@ describe("HyperframesRenderStack — snapshot", () => {
     expect(actualStates.sort()).toEqual([...EXPECTED_STATE_NAMES].sort());
   });
 
-  it("warms the render function before the plan, and a failed warm-up never fails the render", () => {
-    for (const definition of [SYNTHED.definition, readSamDefinition()]) {
-      const warm = requireRecord(definition.States.WarmRender, "WarmRender state");
-      expect(sentPayload(warm)).toEqual({ Action: "warm" });
-      expect(requireRecordProperty(warm, "Parameters", "parameters").InvocationType).toBe("Event");
-      expect(warm.Next).toBe("PlanV2");
-      expect(JSON.stringify(warm.Catch)).toContain('"Next":"PlanV2"');
-    }
+  it("warms the render function before a v2 plan only on a stack with a video function, and a failed warm-up is caught", () => {
+    const states = readSamDefinition().States;
+    const warm = requireRecord(states.WarmRender, "WarmRender state");
+    expect(sentPayload(warm)).toEqual({ Action: "warm" });
+    expect(requireRecordProperty(warm, "Parameters", "parameters").InvocationType).toBe("Event");
+    expect(warm.Next).toBe("PlanV2");
+    expect(JSON.stringify(warm.Catch)).toContain('"Next":"PlanV2"');
+    const choices = requireRecord(states.SelectPlanProtocol, "SelectPlanProtocol").Choices as Record<
+      string,
+      unknown
+    >[];
+    const toWarm = choices.filter((choice) => choice.Next === "WarmRender");
+    expect(toWarm).toHaveLength(1);
+    expect(toWarm[0]).toEqual({
+      Variable: "$.PlanProtocol",
+      StringEquals: ["HasVideoFunction", "v2", "v2-without-video-function"],
+      Next: "WarmRender",
+    });
   });
 
   it("defaults omitted plan protocol to v2 and preserves the explicit v1 branch", () => {
@@ -178,7 +187,7 @@ describe("HyperframesRenderStack — snapshot", () => {
         definition.States.SelectPlanProtocol,
         "SelectPlanProtocol state",
       );
-      expect(selection.Default).toBe("WarmRender");
+      expect(selection.Default).toBe("PlanV2");
       expect(JSON.stringify(selection)).toContain('"StringEquals":"v1"');
       expect(JSON.stringify(definition.States.Plan)).toContain('"PlanProtocol":"v1"');
     }
@@ -345,7 +354,7 @@ describe("HyperframesRenderStack — snapshot", () => {
     // CDK drops null-valued payload fields when it renders the definition (#5259), so compare
     // what each deployed task sends rather than the construct source.
     const cdkTasks = lambdaTasks(SYNTHED.definition.States);
-    const samTasks = lambdaTasks(readSamDefinition().States);
+    const { WarmRender: _warm, ...samTasks } = lambdaTasks(readSamDefinition().States);
     expect(Object.keys(cdkTasks).sort()).toEqual(Object.keys(samTasks).sort());
     expect(Object.keys(cdkTasks).length).toBeGreaterThanOrEqual(6);
     for (const [taskName, cdkTask] of Object.entries(cdkTasks)) {
@@ -502,7 +511,6 @@ describe("HyperframesRenderStack — snapshot", () => {
   it("gives Lambda throttles a minutes-long backoff ahead of the catch-all, in CDK and SAM", () => {
     for (const definition of [SYNTHED.definition, readSamDefinition()]) {
       for (const [taskName, task] of Object.entries(lambdaTasks(definition.States))) {
-        // The warm-up is fire-and-forget: a throttle is caught and the render goes on without it.
         if (taskName === "WarmRender") continue;
         expect({ taskName, ...throttleRetry(task) }).toEqual({
           taskName,
