@@ -10,6 +10,7 @@ import { ShortcutsButton } from "./ShortcutsPanel";
 import type { ShortcutSection } from "./studioShortcuts";
 import { SpeedMenu } from "./SpeedMenu";
 import { VolumeControl } from "./VolumeControl";
+import { PreviewSeekBar } from "./PreviewSeekBar";
 
 /* ── Icon sub-components ─────────────────────────────────────────── */
 
@@ -222,6 +223,7 @@ export const PlayerControls = memo(function PlayerControls({
 
   return (
     <div>
+      <PreviewSeekBar duration={duration} disabled={controlsDisabled} onSeek={onSeek} />
       <div
         className="grid h-10 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center px-3"
         aria-disabled={disabled || undefined}
