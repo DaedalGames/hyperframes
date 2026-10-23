@@ -162,8 +162,19 @@ export function applyOverrideSet(parsed: ParsedDocument, overrides: OverrideSet)
   applyPatchesToDocument(parsed, patches, { keepScriptTargets: true });
 }
 
+/** Remember a deleted node a script looks up, so serialize can write it back hidden (a missing node makes that script throw). */
+function keepDelete(parsed: ParsedDocument, el: Element): void {
+  const parent = el.parentElement;
+  (parsed.keptDeletes ??= []).push({
+    hfId: el.getAttribute("data-hf-id") ?? "",
+    html: el.outerHTML,
+    parentId: parent?.getAttribute("data-hf-id") ?? null,
+    siblingIndex: parent ? Array.from(parent.children).indexOf(el) : 0,
+  });
+}
+
 interface ApplyOptions {
-  /** Hide, instead of remove, an element an inline script looks up (stored deletes replayed onto a base). */
+  /** Keep a copy of each removed element an inline script looks up (stored deletes replayed onto a base). */
   keepScriptTargets?: boolean;
 }
 
@@ -257,12 +268,9 @@ function applyOne(
       if (!p.id) return;
       if (patch.op === "remove") {
         const el = findById(parsed.document, p.id);
-        // A stored delete a script still looks up is hidden: a missing node makes that script throw.
-        if (el && options.keepScriptTargets && scriptLooksUp(parsed.document, el)) {
-          setElementStyles(el, { display: "none" });
-        } else {
-          el?.remove();
-        }
+        if (el && options.keepScriptTargets && scriptLooksUp(parsed.document, el))
+          keepDelete(parsed, el);
+        el?.remove();
       } else if (patch.op === "add" && patch.value) {
         const v = patch.value as { html: string; parentId: string | null; siblingIndex: number };
         const parent = v.parentId
