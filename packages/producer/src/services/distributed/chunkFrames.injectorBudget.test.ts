@@ -13,7 +13,7 @@ afterAll(() => mock.module("@hyperframes/engine", () => real));
 
 const { createChunkVideoFrameInjectorFactory } = await import("./chunkFrames.js");
 
-const budget = { frameDataUriCacheLimit: 256, frameDataUriCacheBytesLimitMb: 1500, workers: 4 };
+const budget = { frameDataUriCacheLimit: 256, frameDataUriCacheBytesLimitMb: 375 };
 
 describe("chunk video frame injector budget", () => {
   it("hands the shared cache budget to every injector it builds", async () => {

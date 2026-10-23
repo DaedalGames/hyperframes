@@ -26,7 +26,6 @@ export interface VideoFrameInjectorOptions extends Partial<
   Pick<EngineConfig, "frameDataUriCacheLimit" | "frameDataUriCacheBytesLimitMb">
 > {
   frameSrcResolver?: (framePath: string) => string | null;
-  workers?: number;
 }
 
 interface FrameSourceCacheStats {
@@ -168,12 +167,6 @@ const CACHE_TOUCH_THROTTLE_MS = 5 * 60 * 1000;
 
 export const __testing = { createFrameSourceCache, CACHE_TOUCH_THROTTLE_MS };
 
-export function frameCacheBytesLimitMbPerWorker(config?: VideoFrameInjectorOptions): number {
-  const total =
-    config?.frameDataUriCacheBytesLimitMb ?? DEFAULT_CONFIG.frameDataUriCacheBytesLimitMb;
-  return Math.max(64, Math.floor(total / Math.max(1, config?.workers ?? 1)));
-}
-
 /**
  * Creates a BeforeCaptureHook that injects pre-extracted video frames
  * into the page, replacing native <video> elements with frame images.
@@ -188,7 +181,11 @@ export function createVideoFrameInjector(
     32,
     config?.frameDataUriCacheLimit ?? DEFAULT_CONFIG.frameDataUriCacheLimit,
   );
-  const bytesLimit = frameCacheBytesLimitMbPerWorker(config) * 1024 * 1024;
+  const bytesLimitMb = Math.max(
+    64,
+    config?.frameDataUriCacheBytesLimitMb ?? DEFAULT_CONFIG.frameDataUriCacheBytesLimitMb,
+  );
+  const bytesLimit = bytesLimitMb * 1024 * 1024;
   const frameCache = createFrameSourceCache(entryLimit, bytesLimit, config?.frameSrcResolver);
   const lastInjectedFrameByVideo = new Map<string, number>();
   const lastCacheTouchByDir = new Map<string, number>();

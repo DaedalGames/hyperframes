@@ -62,6 +62,7 @@ import {
 import { defaultLogger } from "../../logger.js";
 import { applyRenderWarningPolicy, collectVideoMetadataHints } from "../renderOrchestrator.js";
 import { runEncodeStage } from "../render/stages/encodeStage.js";
+import { frameCacheOptions } from "../render/frameCacheBudget.js";
 import { runCaptureStage } from "../render/stages/captureStage.js";
 import { createCapturePlan } from "../render/capturePlan.js";
 import {
@@ -833,11 +834,10 @@ export async function renderChunk(
           : null;
       // A capture can fail before any session reads it; the failure is rethrown below.
       videoFrameLookup?.catch(() => {});
-      const createChunkVideoFrameInjector = createChunkVideoFrameInjectorFactory(videoFrameLookup, {
-        frameDataUriCacheLimit: cfg.frameDataUriCacheLimit,
-        frameDataUriCacheBytesLimitMb: cfg.frameDataUriCacheBytesLimitMb,
-        workers: chunkWorkerCount,
-      });
+      const createChunkVideoFrameInjector = createChunkVideoFrameInjectorFactory(
+        videoFrameLookup,
+        frameCacheOptions(cfg, chunkWorkerCount),
+      );
 
       const captureStarted = Date.now();
       captureMode = await runCaptureWithScreenshotFallback({
