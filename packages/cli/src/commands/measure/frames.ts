@@ -1,5 +1,5 @@
 import { mkdtempSync, readdirSync, renameSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { defineCommand } from "citty";
 import type { Example } from "../_examples.js";
 import {
@@ -74,50 +74,48 @@ function framesAt(info: VideoInfo, ks: number[], roi: Roi, width: number): Frame
   return readClip(clip, { ...(full ? {} : { roi }), width: width || roi[2] });
 }
 
-/** Writes frames as numbered PNGs in one ffmpeg call; returns their paths in order. */
-function writeFrames(
-  f: Frames,
-  from: number,
-  count: number,
-  dir: string,
-  prefix: string,
-): string[] {
-  // Beside the output, so the move below stays on one filesystem (a container's /tmp often is not the project's).
+/** Writes frames as numbered PNGs into `work` in one ffmpeg call; returns their paths in order. */
+function pngs(f: Frames, from: number, count: number, work: string): string[] {
+  const raw = Buffer.concat(
+    f.frames
+      .slice(from, from + count)
+      .map((px) => Buffer.from(px.buffer, px.byteOffset, px.byteLength)),
+  );
+  runFfmpeg(
+    [
+      ...["-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", `${f.w}x${f.h}`, "-i", "-"],
+      ...["-start_number", "0", join(work, "%04d.png")],
+    ],
+    raw,
+  );
+  return readdirSync(work)
+    .sort()
+    .map((name) => join(work, name));
+}
+
+/** A private folder beside the output (one filesystem for the move), removed after `use`. */
+async function inWork<T>(dir: string, use: (work: string) => Promise<T> | T): Promise<T> {
   const work = mkdtempSync(join(dir, ".frames-"));
   try {
-    const raw = Buffer.concat(
-      f.frames
-        .slice(from, from + count)
-        .map((px) => Buffer.from(px.buffer, px.byteOffset, px.byteLength)),
-    );
-    runFfmpeg(
-      [
-        "-y",
-        "-f",
-        "rawvideo",
-        "-pix_fmt",
-        "rgb24",
-        "-s",
-        `${f.w}x${f.h}`,
-        "-i",
-        "-",
-        "-start_number",
-        "0",
-        join(work, "%04d.png"),
-      ],
-      raw,
-    );
-    return readdirSync(work)
-      .sort()
-      .map((name, i) => {
-        const to = join(dir, `${prefix}-${String(i).padStart(2, "0")}.png`);
-        renameSync(join(work, name), to);
-        return to;
-      });
+    return await use(work);
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
 }
+
+/** Frames kept as `<prefix>-NN.png` in `dir`. */
+const keepFrames = (f: Frames, count: number, dir: string, prefix: string) =>
+  inWork(dir, (work) =>
+    pngs(f, 0, count, work).map((path, i) => {
+      const to = join(dir, `${prefix}-${String(i).padStart(2, "0")}.png`);
+      renameSync(path, to);
+      return to;
+    }),
+  );
+
+/** One sheet of frames; the frames themselves never leave the private folder. */
+const sheetOfFrames = (f: Frames, from: number, count: number, labels: string[], out: string) =>
+  inWork(dirname(out), (work) => sheet(pngs(f, from, count, work), labels, out, f.w));
 
 async function sheet(
   paths: string[],
@@ -225,7 +223,7 @@ export default defineCommand({
           ),
         ].sort((a, b) => a - b);
         const f = framesAt(info, ks, roi, num(args.width, "--width", 0));
-        const paths = writeFrames(f, 0, ks.length, dir, "at");
+        const paths = await keepFrames(f, ks.length, dir, "at");
         return {
           ...head,
           frames: ks.map((k, i) => ({ t: round(k / info.fps, 3), frame: k, path: paths[i] })),
@@ -246,14 +244,13 @@ export default defineCommand({
         const sheets: string[] = [];
         for (let s = 0; s < ks.length; s += SHEET_TILES) {
           const part = ks.slice(s, s + SHEET_TILES);
-          const paths = writeFrames(f, s, part.length, dir, `every-${s / SHEET_TILES}`);
-          const out = await sheet(
-            paths,
+          const out = await sheetOfFrames(
+            f,
+            s,
+            part.length,
             part.map((k) => `${round(k / info.fps, 2)}s`),
             join(dir, `every-${step}s-${s / SHEET_TILES + 1}.jpg`),
-            f.w,
           );
-          for (const p of paths) rmSync(p, { force: true });
           if (out) sheets.push(out);
         }
         return { ...head, every_s: step, frames: ks.length, sheets };
@@ -265,14 +262,13 @@ export default defineCommand({
         const k1 = Math.min(last, Math.max(k0, Math.ceil(b * info.fps - 1e-6) - 1));
         const { ks, step } = spread(k0, k1, max);
         const f = framesAt(info, ks, roi, width);
-        const paths = writeFrames(f, 0, ks.length, dir, "range");
-        const out = await sheet(
-          paths,
+        const out = await sheetOfFrames(
+          f,
+          0,
+          ks.length,
           ks.map((k) => label(k, info.fps)),
           join(dir, `range-${a}-${b}s.jpg`),
-          f.w,
         );
-        for (const p of paths) rmSync(p, { force: true });
         return { ...head, start: a, end: b, frames: ks.length, every_nth_frame: step, strip: out };
       }
 
@@ -306,14 +302,13 @@ export default defineCommand({
       for (const [i, wnd] of windows.entries()) {
         const { ks, step } = picks[i]!;
         const from = all.indexOf(ks[0]!);
-        const paths = writeFrames(f, from, ks.length, dir, `w${i + 1}`);
-        const out = await sheet(
-          paths,
+        const out = await sheetOfFrames(
+          f,
+          from,
+          ks.length,
           ks.map((k) => label(k, info.fps)),
           join(dir, `window-${String(i + 1).padStart(2, "0")}-${wnd.start}s.jpg`),
-          f.w,
         );
-        for (const p of paths) rmSync(p, { force: true });
         strips.push({
           start: wnd.start,
           end: wnd.end,
