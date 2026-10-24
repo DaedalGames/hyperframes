@@ -1,0 +1,128 @@
+import { SCENE_NO_SWAP_ATTR, SCENE_PART_ATTR, SCENE_PARTS_META } from "../sceneParts";
+import { STUDIO_PREVIEW_PARKED_SCENE_ATTR as PARKED } from "../studioPreviewMark";
+import { nearPlayhead } from "./farScenes";
+import type { ParkedTimelineScene } from "./timeline";
+import type { RuntimeTimelineClip } from "./types";
+
+/** A scene the preview may unmount: its host's own attributes time it, and its parts can be run again. */
+export type WindowedScene = { name: string; start: number; end: number };
+
+// Each windowed scene as the page first had it, before any script ran: what a mount puts back.
+const pristine = new Map<string, { html: string; scripts: Element[] }>();
+
+const partsSelector = (name: string, tag = "") =>
+  `${tag}[${SCENE_PART_ATTR}="${CSS.escape(name)}"]`;
+const ownNumber = (el: Element, attr: string) =>
+  Number(el.getAttribute(attr)?.trim() || Number.NaN);
+
+function windowedHosts(): Array<WindowedScene & { host: Element }> {
+  if (!document.querySelector(`meta[name="${SCENE_PARTS_META}"]`)) return [];
+  return Array.from(document.querySelectorAll(`[${SCENE_PART_ATTR}]:not(style, script)`))
+    .flatMap((host) => {
+      const start = ownNumber(host, "data-start");
+      const duration = ownNumber(host, "data-duration");
+      const film = host.parentElement;
+      const windowed =
+        Number.isFinite(start) &&
+        duration > 0 &&
+        !host.hasAttribute(SCENE_NO_SWAP_ATTR) &&
+        !host.hasAttribute("data-hf-original-composition-id") &&
+        film?.hasAttribute("data-composition-id") === true &&
+        film.closest(`[${SCENE_PART_ATTR}]`) === null;
+      const name = host.getAttribute(SCENE_PART_ATTR)!;
+      return windowed ? [{ name, host, start, end: start + duration }] : [];
+    })
+    .sort((a, b) => a.start - b.start);
+}
+
+/** The scenes boot kept for remounting, in start order; mounted or parked, a host keeps its timing. */
+export const windowedScenes = (): WindowedScene[] =>
+  windowedHosts()
+    .filter(({ name }) => pristine.has(name))
+    .map(({ name, start, end }) => ({ name, start, end }));
+
+/** The names of the scenes to keep mounted at `time`: the playing scene and a neighbour each side. */
+export function scenesNear(scenes: WindowedScene[], time: number): Set<string> {
+  const near = nearPlayhead(scenes, time);
+  return new Set(scenes.filter((_, i) => near[i]).map((s) => s.name));
+}
+
+export const hostOf = (name: string): Element | null =>
+  document.querySelector(`${partsSelector(name)}:not(style, script)`);
+
+export const isParked = (host: Element): boolean => host.hasAttribute(PARKED);
+
+/** Swaps a scene's host for an empty copy that keeps its timing, and takes its scripts out of the page. */
+export function park(name: string): Element | null {
+  const host = hostOf(name);
+  if (!host || isParked(host)) return host;
+  for (const script of document.querySelectorAll(partsSelector(name, "script"))) script.remove();
+  const placeholder = host.cloneNode(false) as Element;
+  placeholder.setAttribute(PARKED, "");
+  host.replaceWith(placeholder);
+  return placeholder;
+}
+
+/** Puts a parked scene back as the page first had it, with what the runtime wrote on its host; returns its scripts. */
+export function unpark(name: string): { host: Element; scripts: Element[] } | null {
+  const placeholder = hostOf(name);
+  const parts = pristine.get(name);
+  if (!placeholder || !isParked(placeholder) || !parts) return null;
+  const template = document.createElement("template");
+  template.innerHTML = parts.html;
+  const host = document.importNode(template.content.firstElementChild!, true);
+  for (const { name: attr, value } of Array.from(placeholder.attributes))
+    if (attr !== PARKED) host.setAttribute(attr, value);
+  placeholder.replaceWith(host);
+  return { host, scripts: parts.scripts.map((el) => el.cloneNode(true) as Element) };
+}
+
+/**
+ * Before any scene script runs: keeps each windowed scene as written and parks those away from the start,
+ * so their scripts never run until the playhead comes near. A page without a scene manifest is left alone.
+ */
+export function parkFarScenesAtBoot(time = 0): void {
+  pristine.clear();
+  parkedClips.clear();
+  const hosts = windowedHosts();
+  const near = scenesNear(hosts, time);
+  for (const { name, host } of hosts) {
+    const scripts = Array.from(document.querySelectorAll(partsSelector(name, "script")));
+    pristine.set(name, {
+      html: host.outerHTML,
+      scripts: scripts.map((el) => el.cloneNode(true) as Element),
+    });
+    if (!near.has(name)) park(name);
+  }
+}
+
+/** Forgets what a swap replaced: the swapped scene's new markup is what a later mount puts back. */
+export function rememberScene(name: string, host: Element, scripts: Element[]): void {
+  if (!pristine.has(name)) return;
+  parkedClips.delete(name);
+  pristine.set(name, {
+    html: host.outerHTML,
+    scripts: scripts.map((el) => el.cloneNode(true) as Element),
+  });
+}
+
+/** The timeline's clips of each parked scene, built from its markup once and dropped when an edit changes it. */
+export const parkedClips = new Map<string, RuntimeTimelineClip[]>();
+
+/** The parked scenes, each able to build its markup detached under a copy of the film root for the timeline. */
+export function parkedTimelineScenes(): ParkedTimelineScene[] {
+  return Array.from(document.querySelectorAll(`[${PARKED}]`)).flatMap((placeholder) => {
+    const name = placeholder.getAttribute(SCENE_PART_ATTR);
+    const parts = name === null ? undefined : pristine.get(name);
+    const film = placeholder.parentElement;
+    if (name === null || !parts || !film) return [];
+    const host = () => {
+      const detachedFilm = film.cloneNode(false) as Element;
+      const template = document.createElement("template");
+      template.innerHTML = parts.html;
+      detachedFilm.append(template.content);
+      return detachedFilm.firstElementChild!;
+    };
+    return [{ name, host }];
+  });
+}

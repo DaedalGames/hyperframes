@@ -6,9 +6,12 @@ export const STUDIO_PREVIEW_ERRORS = "__hfPreviewErrors";
 export const PREVIEW_RASTER_ATTR = "data-hf-preview-raster";
 export const RUNTIME_STAMPED_ATTR = "data-hf-autostamped";
 export const STUDIO_PREVIEW_FAR_SCENE_ATTR = "data-hf-far-scene";
+/** On an empty stand-in for a scene the preview unmounted; the scene comes back when the playhead nears it. */
+export const STUDIO_PREVIEW_PARKED_SCENE_ATTR = "data-hf-parked-scene";
 export const PREVIEW_ONLY_ATTRS = [
   STUDIO_PREVIEW_UPCOMING_ATTR,
   STUDIO_PREVIEW_FAR_SCENE_ATTR,
+  STUDIO_PREVIEW_PARKED_SCENE_ATTR,
   STUDIO_PREVIEW_LAZY_ATTR,
   PREVIEW_RASTER_ATTR,
   RUNTIME_STAMPED_ATTR,

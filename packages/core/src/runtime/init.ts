@@ -1,6 +1,17 @@
 // fallow-ignore-file code-duplication complexity
 import { setPreviewRasterScale } from "./previewRasterHints";
 import { createFarSceneSkip } from "./farScenes";
+import {
+  hostOf as sceneHostOf,
+  isParked,
+  parkedClips,
+  parkedTimelineScenes,
+  park as parkScene,
+  rememberScene,
+  scenesNear,
+  unpark,
+  windowedScenes,
+} from "./sceneWindow";
 import { clipsFirstRenderedIn } from "./firstRenderReveal";
 import { refreshSvgSelectorAliases } from "../compiler/svgSelectorAliases";
 import { RUNTIME_FILLER } from "./protocol";
@@ -19,6 +30,7 @@ import {
 import {
   PREVIEW_ONLY_ATTRS,
   RUNTIME_STAMPED_ATTR,
+  STUDIO_PREVIEW_PARKED_SCENE_ATTR,
   STUDIO_PREVIEW_LAZY_ATTR,
   STUDIO_PREVIEW_UPCOMING_ATTR,
 } from "../studioPreviewMark";
@@ -2824,6 +2836,12 @@ export function initSandboxRuntimeModular(): void {
     return true;
   };
 
+  // A parked scene's clips stay on the timeline, read from its markup.
+  const timelinePayloadParams = () => ({
+    canonicalFps: state.canonicalFps,
+    parked: parkedTimelineScenes(),
+    parkedClips,
+  });
   const hiddenImagesSkipped = skipsHiddenImages();
   const mediaDeferred = defersMedia();
   const skipFarScenes = createFarSceneSkip((host) =>
@@ -2832,6 +2850,8 @@ export function initSandboxRuntimeModular(): void {
       resolver: timingResolverFor(true),
     }),
   );
+  // Set once the scene swap is in place; true while a scene playing at the time is still parked.
+  let moveSceneWindow = (_time: number): boolean => false;
   const LOOKAHEAD_SECONDS = 2;
   const RELEASE_LOOKAHEAD_SECONDS = 4;
   // Unskipped while within the window on either side of the playhead, so a step or shuttle back
@@ -3066,6 +3086,8 @@ export function initSandboxRuntimeModular(): void {
     timingRevision?: number,
     playedFromSeconds?: number,
   ) => {
+    // While the scene the playhead landed in mounts, the page keeps what it last drew.
+    if (moveSceneWindow(currentTime)) return;
     const rootComp = resolveRootCompositionElement();
     let decidedTimedClip = false;
     const visibleAt = timedVisibilityAt(timingRevision);
@@ -3598,9 +3620,7 @@ export function initSandboxRuntimeModular(): void {
     if (jumpLanding && !renderCaptureSeekStarted && hasPendingSeekCompletion())
       return postTimelineAfterSeek();
     jumpLanding = false;
-    const payload = collectRuntimeTimelinePayload({
-      canonicalFps: state.canonicalFps,
-    });
+    const payload = collectRuntimeTimelinePayload(timelinePayloadParams());
     window.__clipManifest = payload;
     lastPostedManifest = JSON.stringify(payload);
 
@@ -3638,9 +3658,7 @@ export function initSandboxRuntimeModular(): void {
 
   // What no observer sees (a label, a track or an inline z-index edited on a playing clip) still reaches Studio.
   const postTimelineIfManifestChanged = () => {
-    const manifest = JSON.stringify(
-      collectRuntimeTimelinePayload({ canonicalFps: state.canonicalFps }),
-    );
+    const manifest = JSON.stringify(collectRuntimeTimelinePayload(timelinePayloadParams()));
     if (manifest !== lastPostedManifest) postTimeline();
   };
 
@@ -3907,6 +3925,91 @@ export function initSandboxRuntimeModular(): void {
       }
     }
   };
+  // Stops every animation a scene's scripts started, newest first, and forgets them. `check` runs once they stop.
+  const stopSceneAnimations = (hosts: Element[], check: () => void = () => {}) => {
+    const timelines = () =>
+      (window.__timelines ??= {}) as Record<string, RuntimeTimelineLike | undefined>;
+    const sceneAnimations = () => (window.__hfSceneAnimations ??= {});
+    const root = state.capturedTimeline as
+      | (RuntimeTimelineLike & { remove?: (child: unknown) => unknown })
+      | null;
+    const oldIds = hosts.flatMap((host) => compositionIdsIn(host));
+    const stopped = new Set<unknown>();
+    const stopOldAnimations = () => {
+      const before = stopped.size;
+      for (const id of oldIds) {
+        // Newest first: each revert restores what the animation before it wrote.
+        for (const previous of [
+          ...(sceneAnimations()[id] ?? []).slice().reverse(),
+          timelines()[id],
+        ]) {
+          if (!previous || stopped.has(previous)) continue;
+          stopped.add(previous);
+          const old = previous as SceneAnimation;
+          if (old.revert) old.revert();
+          else old.totalTime?.(0, true);
+          root?.remove?.(previous);
+          // revert() has already killed it; a second kill() fires onInterrupt again.
+          if (!old.revert) old.kill?.();
+        }
+      }
+      return stopped.size > before;
+    };
+    // A revert fires the animation's onInterrupt, which can register more; stop those too, until none appear.
+    let passes = 0;
+    while (stopOldAnimations()) {
+      if (++passes > 8) throw new Error("the old scene keeps starting animations as they stop");
+    }
+    check();
+    for (const id of oldIds) {
+      delete timelines()[id];
+      delete sceneAnimations()[id];
+    }
+  };
+  // What a load does after scene markup changed: bindings, media, captions, the root timeline, then a redraw.
+  const settleChangedScenes = (
+    swappedHosts: Element[],
+    captionHosts: Element[],
+    captionOverrides: Awaited<ReturnType<typeof fetchCaptionOverrides>>,
+  ) => {
+    // Boot's order: bindings settle each src before media binding proxies and loads it.
+    for (const host of swappedHosts) applyVariableBindings(document, host);
+    bindMediaMetadataListeners();
+    // Rewound before the rewrite, so each rewritten tween re-reads its start from the reset word.
+    const rewindCaptionTimelines = () => {
+      for (const host of captionHosts) {
+        for (const el of [host, ...host.querySelectorAll("[data-composition-id]")]) {
+          const id = el.getAttribute("data-composition-id");
+          if (id) window.__timelines?.[id]?.totalTime?.(0, true);
+        }
+      }
+    };
+    initVfx(document.body, state.canonicalFps);
+    initMotionBlur();
+    applyFetchedCaptionOverrides(captionOverrides, captionHosts, rewindCaptionTimelines);
+    releaseDetachedMedia();
+    childrenBound = false;
+    bindRootTimelineIfAvailable();
+    // Probed before the scene was nested, so the new media found no volume envelope.
+    const swapMovers = passMovers();
+    for (const host of swappedHosts) {
+      for (const el of host.querySelectorAll<HTMLMediaElement>("video, audio")) {
+        volumeKeyframeCache.delete(el);
+        probeAndCacheVolumeKeyframes(el, swapMovers);
+      }
+    }
+    const duration = getSafeTimelineDurationSeconds(state.capturedTimeline, 0);
+    if (duration > 0) clock.setDuration(duration);
+    // Adapters drive only the elements they found at discover time; the new scene's are new.
+    runAdapters("discover", state.currentTime);
+    // The rebind above skips these when the root timeline object did not change.
+    applyPositionEdits(document);
+    // Redraw the current frame as a seek does; a playing film cut to end at or before it stops there, as at its end.
+    const cutShort = clock.isPlaying() && duration > 0 && state.currentTime >= duration;
+    transport.seek(cutShort ? duration : state.currentTime, { keepPlaying: !cutShort });
+    syncTimedElementVisibility(state.currentTime);
+    postTimeline();
+  };
   // Only the rules not here yet: rewriting a loaded rule's style would load its font again.
   const addNewFontFaces = (next: Document) => {
     const holders = (doc: Document) =>
@@ -3942,8 +4045,33 @@ export function initSandboxRuntimeModular(): void {
     ) {
       throw new Error("scenes were added or removed");
     }
-    const changed = names.filter((name) => nextParts.scenes[name] !== liveParts.scenes[name]);
-    if (changed.length === 0) throw new Error("no scene changed");
+    const edited = names.filter((name) => nextParts.scenes[name] !== liveParts.scenes[name]);
+    if (edited.length === 0) throw new Error("no scene changed");
+    const nextPartsOf = (name: string) =>
+      Array.from(next.querySelectorAll(`[${SCENE_PART_ATTR}="${CSS.escape(name)}"]`));
+    // A parked scene runs nothing, so only the markup it mounts with changes.
+    const parkedHost = (name: string) => {
+      const host = sceneHostOf(name);
+      return host !== null && isParked(host);
+    };
+    for (const name of edited.filter(parkedHost)) {
+      const parts = nextPartsOf(name);
+      const host = parts.find((el) => el.tagName !== "STYLE" && el.tagName !== "SCRIPT");
+      if (!host) throw new Error(`scene ${name} cannot be swapped: it has no single host`);
+      rememberScene(
+        name,
+        host,
+        parts.filter((el) => el.tagName === "SCRIPT"),
+      );
+    }
+    const changed = edited.filter((name) => !parkedHost(name));
+    if (changed.length === 0) {
+      document
+        .querySelector(`meta[name="${SCENE_PARTS_META}"]`)
+        ?.setAttribute("content", JSON.stringify(nextParts));
+      postTimeline();
+      return;
+    }
     const swaps = changed.map((name) => {
       const partsIn = (doc: Document) =>
         Array.from(doc.querySelectorAll(`[${SCENE_PART_ATTR}="${CSS.escape(name)}"]`));
@@ -4033,45 +4161,16 @@ export function initSandboxRuntimeModular(): void {
     // Checked after the wait, which a tween could start in, and before anything changes.
     refuseAnyOutsideTweens();
     sceneSwapGeneration += 1;
-    const root = state.capturedTimeline as
-      | (RuntimeTimelineLike & { remove?: (child: unknown) => unknown })
-      | null;
     // Overrides re-dim every word they touch, so only the swapped scenes' captions get them.
     const captionHosts: Element[] = [];
     const swappedHosts: Element[] = [];
-    const oldIds = swaps.flatMap(({ oldHost }) => compositionIdsIn(oldHost));
-    const stopped = new Set<unknown>();
-    const stopOldAnimations = () => {
-      const before = stopped.size;
-      for (const id of oldIds) {
-        // Newest first: each revert restores what the animation before it wrote.
-        for (const previous of [
-          ...(sceneAnimations()[id] ?? []).slice().reverse(),
-          timelines()[id],
-        ]) {
-          if (!previous || stopped.has(previous)) continue;
-          stopped.add(previous);
-          const old = previous as SceneAnimation;
-          if (old.revert) old.revert();
-          else old.totalTime?.(0, true);
-          root?.remove?.(previous);
-          // revert() has already killed it; a second kill() fires onInterrupt again.
-          if (!old.revert) old.kill?.();
-        }
-      }
-      return stopped.size > before;
-    };
-    // A revert fires the animation's onInterrupt, which can register more; stop those too, until none appear.
-    let passes = 0;
-    while (stopOldAnimations()) {
-      if (++passes > 8) throw new Error("the old scene keeps starting animations as they stop");
-    }
-    refuseReplacedScenes();
-    refuseAnyOutsideTweens();
-    for (const id of oldIds) {
-      delete timelines()[id];
-      delete sceneAnimations()[id];
-    }
+    stopSceneAnimations(
+      swaps.map(({ oldHost }) => oldHost),
+      () => {
+        refuseReplacedScenes();
+        refuseAnyOutsideTweens();
+      },
+    );
     // Released before kept media is reset: a later stop puts back the mute and volume it saved under the old script.
     webAudio.stopAll();
     clock.detachAudioSource();
@@ -4104,43 +4203,76 @@ export function initSandboxRuntimeModular(): void {
     document
       .querySelector(`meta[name="${SCENE_PARTS_META}"]`)
       ?.setAttribute("content", JSON.stringify(nextParts));
-    // Boot's order: bindings settle each src before media binding proxies and loads it.
-    for (const host of swappedHosts) applyVariableBindings(document, host);
-    bindMediaMetadataListeners();
-    // Rewound before the rewrite, so each rewritten tween re-reads its start from the reset word.
-    const rewindCaptionTimelines = () => {
-      for (const host of captionHosts) {
-        for (const el of [host, ...host.querySelectorAll("[data-composition-id]")]) {
-          const id = el.getAttribute("data-composition-id");
-          if (id) window.__timelines?.[id]?.totalTime?.(0, true);
-        }
-      }
-    };
-    initVfx(document.body, state.canonicalFps);
-    initMotionBlur();
-    applyFetchedCaptionOverrides(captionOverrides, captionHosts, rewindCaptionTimelines);
+    for (const { name, newParts, newHost } of swaps)
+      rememberScene(
+        name,
+        newHost,
+        newParts.filter((el) => el.tagName === "SCRIPT"),
+      );
+    settleChangedScenes(swappedHosts, captionHosts, captionOverrides);
+    windowScenes = windowedScenes();
+  };
+
+  // Preview only: scenes away from the playhead were parked at boot; the window mounts and retires them as it moves.
+  let windowScenes = windowedScenes();
+  const parkedNames = new Set(
+    Array.from(document.querySelectorAll(`[${STUDIO_PREVIEW_PARKED_SCENE_ATTR}]`), (el) =>
+      el.getAttribute(SCENE_PART_ATTR),
+    ),
+  );
+  let windowWork: Promise<void> | null = null;
+  let windowNear = "";
+  const mountScene = async (name: string) => {
+    const unparked = unpark(name);
+    if (!unparked) return;
+    parkedNames.delete(name);
+    const { host, scripts } = unparked;
+    recordAuthoredMedia(host);
+    refreshSvgSelectorAliases();
+    const captionHosts = host.querySelector(".caption-group") ? [host] : [];
+    const captionOverrides = captionHosts.length > 0 ? await fetchCaptionOverrides() : [];
+    await runScriptsAfterFonts(scripts.map((el) => document.body.appendChild(el)));
+    if (!state.tornDown) settleChangedScenes([host], captionHosts, captionOverrides);
+  };
+  const retireScene = (name: string) => {
+    const host = sceneHostOf(name);
+    if (!host || isParked(host)) return;
+    stopSceneAnimations([host]);
+    parkScene(name);
+    parkedNames.add(name);
     releaseDetachedMedia();
     childrenBound = false;
     bindRootTimelineIfAvailable();
-    // Probed before the scene was nested, so the new media found no volume envelope.
-    const swapMovers = passMovers();
-    for (const host of swappedHosts) {
-      for (const el of host.querySelectorAll<HTMLMediaElement>("video, audio")) {
-        volumeKeyframeCache.delete(el);
-        probeAndCacheVolumeKeyframes(el, swapMovers);
-      }
-    }
-    const duration = getSafeTimelineDurationSeconds(state.capturedTimeline, 0);
-    if (duration > 0) clock.setDuration(duration);
-    // Adapters drive only the elements they found at discover time; the new scene's are new.
-    runAdapters("discover", state.currentTime);
-    // The rebind above skips these when the root timeline object did not change.
-    applyPositionEdits(document);
-    // Redraw the current frame as a seek does; a playing film cut to end at or before it stops there, as at its end.
-    const cutShort = clock.isPlaying() && duration > 0 && state.currentTime >= duration;
-    transport.seek(cutShort ? duration : state.currentTime, { keepPlaying: !cutShort });
-    syncTimedElementVisibility(state.currentTime);
     postTimeline();
+  };
+  moveSceneWindow = (time: number): boolean => {
+    if (windowScenes.length === 0 || state.tornDown) return false;
+    const parked = (name: string) => parkedNames.has(name);
+    const landedParked = windowScenes.some(
+      ({ name, start, end }) => start <= time && time <= end && parked(name),
+    );
+    if (windowWork) return landedParked;
+    const near = scenesNear(windowScenes, time);
+    const key = [...near].join("\n");
+    if (key === windowNear) return landedParked;
+    // Nearest first, so the scene the playhead is in mounts before its neighbours.
+    const toMount = windowScenes
+      .filter(({ name }) => near.has(name) && parked(name))
+      .sort((a, b) => Math.abs(a.start - time) - Math.abs(b.start - time));
+    const toRetire = windowScenes.filter(({ name }) => !near.has(name) && !parked(name));
+    windowNear = key;
+    if (toMount.length === 0 && toRetire.length === 0) return landedParked;
+    windowWork = (async () => {
+      for (const { name } of toMount) await mountScene(name);
+      for (const { name } of toRetire) retireScene(name);
+    })().finally(() => {
+      windowWork = null;
+      windowNear = "";
+      moveSceneWindow(state.currentTime);
+    });
+    // A seek is not done until the scenes it shows are mounted.
+    registerSeekCompletion(windowWork);
+    return landedParked;
   };
   // Only a preview served with a scene manifest can swap; elsewhere the caller reloads directly.
   if (readSceneParts(document)) {

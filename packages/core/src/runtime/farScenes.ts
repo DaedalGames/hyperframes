@@ -8,15 +8,24 @@ const OUT_OF_FLOW = new Set(["absolute", "fixed"]);
 
 type Timed = { host: HTMLElement; span: { start: number; end: number } };
 
-/** Hosts outside the playing scene(s) and one neighbour each side; between scenes, the one before the gap plays. */
-function farFrom(timed: Timed[], time: number): Set<HTMLElement> {
-  const playing = timed.flatMap(({ span }, i) =>
-    span.start <= time && time <= span.end ? [i] : [],
-  );
-  const before = timed.filter(({ span }) => span.start <= time).length - 1;
+/** Whether each span, sorted by start, is the playing one or a neighbour; between scenes, the one before the gap plays. */
+export function nearPlayhead(
+  spans: Array<{ start: number; end: number }>,
+  time: number,
+): boolean[] {
+  const playing = spans.flatMap((span, i) => (span.start <= time && time <= span.end ? [i] : []));
+  const before = spans.filter((span) => span.start <= time).length - 1;
   const lo = playing.length > 0 ? playing[0]! : before;
   const hi = playing.length > 0 ? playing[playing.length - 1]! : before;
-  return new Set(timed.filter((_, i) => i < lo - 1 || i > hi + 1).map((s) => s.host));
+  return spans.map((_, i) => i >= lo - 1 && i <= hi + 1);
+}
+
+function farFrom(timed: Timed[], time: number): Set<HTMLElement> {
+  const near = nearPlayhead(
+    timed.map((s) => s.span),
+    time,
+  );
+  return new Set(timed.filter((_, i) => !near[i]).map((s) => s.host));
 }
 
 /**
