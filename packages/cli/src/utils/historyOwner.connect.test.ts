@@ -57,7 +57,7 @@ async function serve(
   return port;
 }
 
-/** A preview holding the project's history; `routeless` hides POST /history/checkpoint as releases before 0.8.152 did. */
+/** A preview holding the project's history; `routeless` drops POST /history/checkpoint, as before 0.8.152. */
 async function heldPreview(dir: string, version: string, routeless: boolean) {
   const history = await openProjectHistory({
     projectDir: dir,
