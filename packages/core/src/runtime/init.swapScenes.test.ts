@@ -1825,6 +1825,19 @@ describe("the preview's scene window", () => {
     expect(sceneHost("s2").getAttribute("style")).toContain("visibility: visible");
   });
 
+  it("mounts a scene Studio holds for editing and keeps it until Studio lets go", async () => {
+    bootWindowed([S0, S1, S2], trackingRoot().root);
+    await tick();
+    await window.__hfHoldScenes!(["main", "s2"]);
+    expect(sceneHost("s2").textContent).toBe("two");
+    await seekAndSettle(0.5);
+    for (let i = 0; i < 5; i++) await tick();
+    expect(parked()).toEqual([]);
+    await window.__hfHoldScenes!([]);
+    for (let i = 0; i < 5; i++) await tick();
+    expect(parked()).toEqual(["s2"]);
+  });
+
   it("keeps a parked scene's clips on the timeline, at the time its scene puts them", async () => {
     bootWindowed([S0, S1, S2], trackingRoot().root);
     await tick();

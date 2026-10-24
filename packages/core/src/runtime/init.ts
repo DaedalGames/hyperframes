@@ -4245,6 +4245,8 @@ export function initSandboxRuntimeModular(): void {
     bindRootTimelineIfAvailable();
     postTimeline();
   };
+  // Scenes Studio holds mounted for selecting or editing, whatever the playhead does.
+  let heldScenes = new Set<string>();
   moveSceneWindow = (time: number): boolean => {
     if (windowScenes.length === 0 || state.tornDown) return false;
     const parked = (name: string) => parkedNames.has(name);
@@ -4253,6 +4255,7 @@ export function initSandboxRuntimeModular(): void {
     );
     if (windowWork) return landed !== undefined;
     const near = scenesNear(windowScenes, time);
+    for (const name of heldScenes) near.add(name);
     const key = [...near].join("\n");
     if (key === windowNear) return landed !== undefined;
     // One step at a time, planned again after each, so a later seek or scrub overtakes the rest.
@@ -4267,13 +4270,14 @@ export function initSandboxRuntimeModular(): void {
       windowNear = key;
       return false;
     }
+    const wantedNow = (name: string) =>
+      heldScenes.has(name) || scenesNear(windowScenes, state.currentTime).has(name);
     windowWork = (async () => {
       if (landed) await mountScene(landed.name);
       else if (toMount) {
         // A neighbour waits a turn: a seek queued meanwhile may want another scene first.
         await new Promise((resolve) => window.setTimeout(resolve, 0));
-        if (scenesNear(windowScenes, state.currentTime).has(toMount.name))
-          await mountScene(toMount.name);
+        if (wantedNow(toMount.name)) await mountScene(toMount.name);
       } else for (const { name } of toRetire) retireScene(name);
     })().finally(() => {
       windowWork = null;
@@ -4284,11 +4288,24 @@ export function initSandboxRuntimeModular(): void {
     if (landed) registerSeekCompletion(windowWork);
     return landed !== undefined;
   };
+  // Mounts the named scenes and keeps them mounted until the next call names others.
+  const holdScenes = async (names: string[]): Promise<void> => {
+    heldScenes = new Set(names.filter((name) => windowScenes.some((s) => s.name === name)));
+    windowNear = "";
+    // Bounded: a scene that cannot mount must not keep this waiting.
+    for (let turn = 0; turn <= windowScenes.length && !state.tornDown; turn++) {
+      moveSceneWindow(state.currentTime);
+      if (![...heldScenes].some((name) => parkedNames.has(name))) return;
+      await (windowWork ?? Promise.resolve());
+    }
+  };
   // Only a preview served with a scene manifest can swap; elsewhere the caller reloads directly.
   if (readSceneParts(document)) {
     window.__hfSwapScenes = swapScenes;
+    window.__hfHoldScenes = holdScenes;
     registerRuntimeCleanup(() => {
       delete window.__hfSwapScenes;
+      delete window.__hfHoldScenes;
     });
   }
 

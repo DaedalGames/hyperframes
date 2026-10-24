@@ -19,6 +19,7 @@ import {
   type DomEditSelection,
 } from "../components/editor/domEditing";
 import { reapplyPositionEditsAfterSeek } from "../components/editor/manualEdits";
+import { holdScenesOf } from "../utils/sceneHold";
 import { useStudioTestHooks } from "./useStudioTestHooks";
 import { logSelect } from "../utils/selectDebug";
 import { announceTimelineSelection as announceSelectionToTimeline } from "./domSelectionTimelineMirror";
@@ -308,6 +309,8 @@ export function useDomSelection({
       }
       if (!doc) return null;
 
+      // A long film's preview mounts only the scenes near the playhead: have the element's scene mounted first.
+      await holdScenesOf(iframe, element);
       reapplyPositionEditsAfterSeek(doc);
 
       const targetElement = findElementForTimelineElement(doc, element, {
@@ -328,6 +331,7 @@ export function useDomSelection({
     async (element: TimelineElement | null) => {
       const seq = ++timelineSelectSeqRef.current;
       if (!element) {
+        void holdScenesOf(previewIframeRef.current, null);
         applyDomSelection(null, { revealPanel: false });
         return;
       }
