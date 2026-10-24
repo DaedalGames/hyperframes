@@ -1847,6 +1847,15 @@ describe("the preview's scene window", () => {
     expect(clip && [clip.start, clip.duration]).toEqual([4.5, 1]);
   });
 
+  it("hands Studio a parked scene's markup, and nothing for a mounted one", async () => {
+    bootWindowed([S0, S1, S2], trackingRoot().root);
+    await tick();
+    const markup = window.__hfParkedSceneMarkup!;
+    expect(markup(sceneHost("s2"))?.textContent).toBe("two");
+    expect(markup(sceneHost("s2"))?.isConnected).toBe(false);
+    expect(markup(sceneHost("s0"))).toBeNull();
+  });
+
   it("gives an edit to a parked scene to its next mount, without mounting it", async () => {
     bootWindowed([S0, S1, S2], trackingRoot().root);
     await tick();

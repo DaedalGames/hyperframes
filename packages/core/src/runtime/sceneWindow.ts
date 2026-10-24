@@ -120,20 +120,25 @@ export function rememberScene(name: string, host: Element, scripts: Element[]): 
 /** The timeline's clips of each parked scene, built from its markup once and dropped when an edit changes it. */
 export const parkedClips = new Map<string, RuntimeTimelineClip[]>();
 
-/** The parked scenes, each able to build its markup detached under a copy of the film root for the timeline. */
-export function parkedTimelineScenes(): ParkedTimelineScene[] {
-  return Array.from(document.querySelectorAll(`[${PARKED}]`)).flatMap((placeholder) => {
-    const name = placeholder.getAttribute(SCENE_PART_ATTR);
-    const parts = name === null ? undefined : pristine.get(name);
-    const film = placeholder.parentElement;
-    if (name === null || !parts || !film) return [];
-    const host = () => {
-      const detachedFilm = film.cloneNode(false) as Element;
-      const template = document.createElement("template");
-      template.innerHTML = parts.html;
-      detachedFilm.append(template.content);
-      return detachedFilm.firstElementChild!;
-    };
-    return [{ name, host }];
-  });
+const parkedName = (placeholder: Element): string | null => {
+  const name = isParked(placeholder) ? placeholder.getAttribute(SCENE_PART_ATTR) : null;
+  return name !== null && pristine.has(name) && placeholder.parentElement ? name : null;
+};
+
+/** A parked scene's markup, built detached under a copy of the film root; null for any other element. */
+export function parkedSceneMarkup(placeholder: Element): Element | null {
+  const name = parkedName(placeholder);
+  if (name === null) return null;
+  const detachedFilm = placeholder.parentElement!.cloneNode(false) as Element;
+  const template = document.createElement("template");
+  template.innerHTML = pristine.get(name)!.html;
+  detachedFilm.append(template.content);
+  return detachedFilm.firstElementChild;
 }
+
+/** The parked scenes, each able to build its markup for the timeline. */
+export const parkedTimelineScenes = (): ParkedTimelineScene[] =>
+  Array.from(document.querySelectorAll(`[${PARKED}]`)).flatMap((placeholder) => {
+    const name = parkedName(placeholder);
+    return name === null ? [] : [{ name, host: () => parkedSceneMarkup(placeholder)! }];
+  });

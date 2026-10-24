@@ -6,6 +6,7 @@ import {
   hostOf as sceneHostOf,
   isParked,
   parkedClips,
+  parkedSceneMarkup,
   parkedTimelineScenes,
   park as parkScene,
   rememberScene,
@@ -4345,9 +4346,11 @@ export function initSandboxRuntimeModular(): void {
   if (readSceneParts(document)) {
     window.__hfSwapScenes = swapScenes;
     window.__hfHoldScenes = holdScenes;
+    window.__hfParkedSceneMarkup = parkedSceneMarkup;
     registerRuntimeCleanup(() => {
       delete window.__hfSwapScenes;
       delete window.__hfHoldScenes;
+      delete window.__hfParkedSceneMarkup;
     });
   }
 
