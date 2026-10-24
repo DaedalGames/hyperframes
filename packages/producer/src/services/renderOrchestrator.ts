@@ -188,10 +188,13 @@ import {
   computeCompositionObservabilityHash,
   RenderObservabilityRecorder,
   observeRenderStage,
+  RenderStageStalledError,
   type RenderCaptureObservability,
   type RenderExtractionObservability,
   type RenderObservationData,
   type RenderObservabilitySummary,
+  type OpenStallAttempt,
+  type StageStallRule,
 } from "./render/observability.js";
 import { emitFallbackCaptureProfile } from "./render/fallbackCaptureProfile.js";
 import { type HdrPerfCollector, type HdrPerfSummary } from "./render/hdrPerf.js";
@@ -210,6 +213,7 @@ import { runAudioStage } from "./render/stages/audioStage.js";
 import { inspectDiskCaptureHeadroom, runCaptureStage } from "./render/stages/captureStage.js";
 import {
   type CaptureStreamingStageResult,
+  resolveCaptureStallTimeoutMs,
   runCaptureStreamingStage,
 } from "./render/stages/captureStreamingStage.js";
 import { runCaptureHdrStage } from "./render/stages/captureHdrStage.js";
@@ -1128,7 +1132,20 @@ export function resetCaptureAttemptProgress(job: { framesRendered?: number }): v
   job.framesRendered = 0;
 }
 
+const FIRST_FRAME_STALL_MS = 300_000;
+
+/** The no-progress rule for capture stages that have no watchdog of their own: disk, HDR, chunk. */
+export function frameStallRule(job: { framesRendered?: number }): StageStallRule {
+  const noProgressMs = resolveCaptureStallTimeoutMs();
+  return {
+    progress: () => job.framesRendered ?? 0,
+    noProgressMs,
+    firstProgressMs: Math.max(FIRST_FRAME_STALL_MS, noProgressMs),
+  };
+}
+
 export function isRecoverableParallelCaptureError(error: unknown): boolean {
+  if (error instanceof RenderStageStalledError) return true;
   const message = normalizeErrorMessage(error);
   if (!message.includes("[Parallel] Capture failed")) return false;
   const kind = classifyCaptureFailure(error).kind;
@@ -1204,6 +1221,7 @@ export async function executeDiskCaptureWithAdaptiveRetry(options: {
   dedupPerfs: CapturePerfSummary[];
   /** Mutated in place: the workers' page-error console lines, for the render's error count. */
   pageErrorLines?: string[];
+  openAttempt?: OpenStallAttempt;
 }): Promise<CaptureAttemptSummary[]> {
   const attempts: CaptureAttemptSummary[] = [];
   let currentWorkers = options.initialWorkerCount;
@@ -1243,6 +1261,7 @@ export async function executeDiskCaptureWithAdaptiveRetry(options: {
     // twice, inflating reused/predicted past totalFrames. The common no-retry path keeps
     // exactly one attempt's perf; a retry reports only the final attempt's set.
     options.dedupPerfs.length = 0;
+    const attemptSignal = options.openAttempt?.(options.abortSignal) ?? options.abortSignal;
     try {
       for (const tasks of batches) {
         const capturedBeforeBatch = countCapturedFrames(
@@ -1257,7 +1276,7 @@ export async function executeDiskCaptureWithAdaptiveRetry(options: {
             tasks,
             options.captureOptions,
             options.createBeforeCaptureHook,
-            options.abortSignal,
+            attemptSignal,
             options.onProgress
               ? (progress) => {
                   options.onProgress?.({
@@ -1309,7 +1328,10 @@ export async function executeDiskCaptureWithAdaptiveRetry(options: {
       currentWorkers = nextWorkers;
       missingRanges = remaining;
       attempt++;
-    } catch (error) {
+    } catch (caught) {
+      // A stalled attempt fails like the per-call protocol timeout it stands in for.
+      const error =
+        attemptSignal?.aborted && !options.abortSignal?.aborted ? attemptSignal.reason : caught;
       const failure = classifyCaptureFailure(error, { signal: options.abortSignal });
       // A cancelled render tears the browser down, which surfaces as a
       // transient-looking `Target closed`. Rethrow immediately so cancellation
@@ -1812,35 +1834,6 @@ function colorGradingValueHasLut(rawAttributeValue: string): boolean {
   }
 }
 
-/** Longest a live probe-page read may hold the render; a busy page otherwise waits out the CDP timeout. */
-export const PROBE_READ_TIMEOUT_MS = 5_000;
-
-/** `page.evaluate` that rejects after `PROBE_READ_TIMEOUT_MS`, so callers fall back to their static answer. */
-async function evaluateWithinBound<T>(
-  page: Pick<CaptureSession["page"], "evaluate">,
-  fn: () => T,
-  what: string,
-  log: Pick<ProducerLogger, "warn">,
-): Promise<Awaited<T>> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timedOut = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () => reject(new Error(`no answer within ${PROBE_READ_TIMEOUT_MS} ms (page busy)`)),
-      PROBE_READ_TIMEOUT_MS,
-    );
-  });
-  try {
-    return await Promise.race([page.evaluate(fn) as Promise<Awaited<T>>, timedOut]);
-  } catch (err) {
-    log.warn(`[Render] live ${what} read skipped; using the static answer`, {
-      error: err instanceof Error ? err.message : String(err),
-    });
-    throw err;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 /**
  * Element count for the short-comp band's gate, WITH PROVENANCE.
  *
@@ -1866,7 +1859,6 @@ async function evaluateWithinBound<T>(
 export async function resolveCompositionElementCount(
   probeSession: Pick<CaptureSession, "isInitialized" | "page"> | null,
   html: string,
-  log: Pick<ProducerLogger, "warn"> = defaultLogger,
 ): Promise<{
   count: number;
   source: "live" | "static";
@@ -1887,13 +1879,10 @@ export async function resolveCompositionElementCount(
 }> {
   if (probeSession?.isInitialized) {
     try {
-      const liveCount = await evaluateWithinBound(
-        probeSession.page,
+      const liveCount = await probeSession.page.evaluate(
         // Live HTMLCollection length — avoids materializing a static NodeList
         // on the large-DOM comps this gate exists to catch (review nit).
         () => document.getElementsByTagName("*").length,
-        "element count",
-        log,
       );
       if (typeof liveCount === "number" && Number.isFinite(liveCount)) {
         return { count: liveCount, source: "live" };
@@ -2032,12 +2021,11 @@ function probeAdaptersUsed(): string[] {
 export async function resolveAdaptersUsed(
   probeSession: Pick<CaptureSession, "isInitialized" | "page"> | null,
   html: string,
-  log: Pick<ProducerLogger, "warn"> = defaultLogger,
 ): Promise<readonly RuntimeAdapterName[]> {
   const staticAdapters = detectAdaptersStatic(html);
   if (!probeSession?.isInitialized) return staticAdapters;
   try {
-    const live = await evaluateWithinBound(probeSession.page, probeAdaptersUsed, "adapters", log);
+    const live = await probeSession.page.evaluate(probeAdaptersUsed);
     if (!Array.isArray(live)) return staticAdapters;
     const detected = new Set<string>([...staticAdapters, ...live]);
     return KNOWN_RUNTIME_ADAPTERS.filter((name) => detected.has(name));
@@ -3663,8 +3651,8 @@ async function executeRenderPipeline(input: {
       vfxHostCount,
       vfxCapture,
       vfxTypes,
-    } = await resolveCompositionElementCount(probeSession, compiled.html, log);
-    const adaptersUsed = await resolveAdaptersUsed(probeSession, compiled.html, log);
+    } = await resolveCompositionElementCount(probeSession, compiled.html);
+    const adaptersUsed = await resolveAdaptersUsed(probeSession, compiled.html);
     // HF_DE_SHORT_MAX_ELEMENTS=0 is the documented kill switch (symmetric
     // with HF_DE_SHORT_MIN_FRAMES=0, which disables via the predicate's own
     // minFrames > 0 guard). Gated explicitly here too — without it, a fired
@@ -4458,8 +4446,9 @@ async function executeRenderPipeline(input: {
         observability,
         "capture_hdr_layered",
         captureStageObservationData({ hasHdrContent }),
-        () =>
-          runCaptureHdrStage({
+        (openAttempt) => {
+          const attempt = openAttempt(executionSignal);
+          return runCaptureHdrStage({
             job,
             cfg,
             plan: layeredPlan,
@@ -4486,10 +4475,15 @@ async function executeRenderPipeline(input: {
             buildCaptureOptions,
             createRenderVideoFrameInjector,
             hdrDiagnostics,
-            abortSignal: executionSignal,
-            assertNotAborted,
+            abortSignal: attempt,
+            assertNotAborted: () => {
+              assertNotAborted();
+              attempt.throwIfAborted();
+            },
             onProgress,
-          }),
+          });
+        },
+        { stall: frameStallRule(job) },
       );
       lastBrowserConsole = hdrRes.lastBrowserConsole;
       layeredCaptureWarnings.push(...hdrRes.warnings);
@@ -4960,7 +4954,7 @@ async function executeRenderPipeline(input: {
             observability,
             "capture_disk",
             captureStageObservationData({ needsAlpha: diskPlan.needsAlpha }),
-            () =>
+            (openAttempt) =>
               runCaptureStage({
                 fileServer: activeFileServer,
                 workDir,
@@ -4979,7 +4973,9 @@ async function executeRenderPipeline(input: {
                 assertNotAborted,
                 onProgress,
                 onFrameLanded: (frame) => overlap?.onFrameLanded(frame),
+                openAttempt,
               }),
+            { stall: frameStallRule(job) },
           );
         let captureRes;
         try {
