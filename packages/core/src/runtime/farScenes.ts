@@ -9,7 +9,7 @@ const OUT_OF_FLOW = new Set(["absolute", "fixed"]);
 type Timed = { host: HTMLElement; span: { start: number; end: number } };
 
 /** Whether each span, sorted by start, is the playing one or a neighbour; between scenes, the one before the gap plays. */
-export function nearPlayhead(
+function nearPlayhead(
   spans: Array<{ start: number; end: number }>,
   time: number,
 ): boolean[] {
