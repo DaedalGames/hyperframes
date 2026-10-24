@@ -177,6 +177,13 @@ export interface ChunkResult {
   encodeStageMs: number;
   /** Capture workers used for this chunk (`resolveChunkCaptureWorkers` result). */
   workers: number;
+  /** Worker-summed per-frame capture time, to see which step of a frame costs most. */
+  capturePhaseMs?: {
+    frames: number;
+    seekMs: number;
+    beforeCaptureMs: number;
+    screenshotMs: number;
+  };
   /**
    * Effective engine mode used by every worker, after any browser fallback.
    *
@@ -482,6 +489,19 @@ export function resolveLockedVp9CpuUsed(
   // Pre-vp9CpuUsed WebM planDirs used the old closed-GOP literal. Keep replay
   // bytes stable for those plans while new planDirs carry their resolved value.
   return lockedEncoder.vp9CpuUsed ?? LEGACY_DISTRIBUTED_VP9_CPU_USED;
+}
+
+function sumCapturePhases(
+  perfs: readonly CapturePerfSummary[],
+): NonNullable<ChunkResult["capturePhaseMs"]> {
+  const sum = (pick: (perf: CapturePerfSummary) => number) =>
+    Math.round(perfs.reduce((total, perf) => total + pick(perf) * perf.frames, 0));
+  return {
+    frames: perfs.reduce((total, perf) => total + perf.frames, 0),
+    seekMs: sum((perf) => perf.avgSeekMs),
+    beforeCaptureMs: sum((perf) => perf.avgBeforeCaptureMs),
+    screenshotMs: sum((perf) => perf.avgScreenshotMs),
+  };
 }
 
 /**
@@ -1083,6 +1103,7 @@ export async function renderChunk(
     const sha256 = hashChunkOutput(outputChunkPath, outputKind);
     const durationMs = Date.now() - start;
     const perfPath = `${outputChunkPath}.perf.json`;
+    const capturePhaseMs = sumCapturePhases(capturePerfs);
     const perfPayload = {
       planHash: plan.planHash,
       chunkIndex,
@@ -1095,6 +1116,7 @@ export async function renderChunk(
       captureStageMs,
       encodeStageMs,
       workers: chunkWorkerCount,
+      capturePhaseMs,
       captureMode,
       // Device-pixel box each video's frames were extracted to cover; a video not listed kept full size.
       videoShownBoxes: Object.fromEntries(shownBoxes ?? []),
@@ -1129,6 +1151,7 @@ export async function renderChunk(
       captureStageMs,
       encodeStageMs,
       workers: chunkWorkerCount,
+      capturePhaseMs,
       captureMode,
       perfPath,
     };

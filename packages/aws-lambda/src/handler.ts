@@ -653,6 +653,13 @@ async function handleRenderChunk(
       chunkIndex: event.ChunkIndex,
       workers: result.workers,
       captureMode: result.captureMode,
+      stageMs: {
+        planHash: result.planHashMs,
+        sessionBoot: result.sessionBootMs,
+        capture: result.captureStageMs,
+        encode: result.encodeStageMs,
+      },
+      capturePhaseMs: result.capturePhaseMs,
     });
 
     const chunkUri = await uploadChunkOutput(
@@ -709,6 +716,13 @@ async function handleRenderChunkV2(
       chunkIndex: event.ChunkIndex,
       workers: result.workers,
       captureMode: result.captureMode,
+      stageMs: {
+        planHash: result.planHashMs,
+        sessionBoot: result.sessionBootMs,
+        capture: result.captureStageMs,
+        encode: result.encodeStageMs,
+      },
+      capturePhaseMs: result.capturePhaseMs,
     });
     const chunkUri = await uploadChunkOutput(
       s3,

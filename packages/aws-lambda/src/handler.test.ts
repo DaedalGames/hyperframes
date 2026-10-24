@@ -718,6 +718,7 @@ describe("handler dispatch", () => {
           captureStageMs: 1,
           encodeStageMs: 1,
           workers: 5,
+          capturePhaseMs: { frames: 83, seekMs: 10, beforeCaptureMs: 20, screenshotMs: 30 },
           captureMode: "beginframe",
           perfPath: outputChunkPath + ".perf.json",
         };
@@ -773,10 +774,15 @@ describe("handler dispatch", () => {
     const captures = logged
       .filter((line) => line.includes('"chunk_capture"'))
       .map((line) => JSON.parse(line));
-    expect(captures).toEqual([
-      { event: "chunk_capture", chunkIndex: 0, workers: 5, captureMode: "beginframe" },
-      { event: "chunk_capture", chunkIndex: 0, workers: 5, captureMode: "beginframe" },
-    ]);
+    const capture = {
+      event: "chunk_capture",
+      chunkIndex: 0,
+      workers: 5,
+      captureMode: "beginframe",
+      stageMs: { planHash: 1, sessionBoot: 1, capture: 1, encode: 1 },
+      capturePhaseMs: { frames: 83, seekMs: 10, beforeCaptureMs: 20, screenshotMs: 30 },
+    };
+    expect(captures).toEqual([capture, capture]);
   });
 
   it("rejects renderChunk when event.PlanHash diverges from plan.json", async () => {
