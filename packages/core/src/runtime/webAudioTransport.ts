@@ -153,6 +153,7 @@ const IDLE_SUSPEND_MS = 10000;
 export class WebAudioTransport {
   private _ctx: AudioContext | null = null;
   private _bufferCache = new Map<string, AudioBuffer>();
+  private _decoding = new Map<string, Promise<AudioBuffer | null>>();
   private _failedSrcs = new Set<string>();
   private _mediaElementSources = new WeakMap<HTMLMediaElement, MediaElementAudioSourceNode>();
   private _activeSources: ScheduledSource[] = [];
@@ -270,9 +271,18 @@ export class WebAudioTransport {
     }
   }
 
-  async decodeAudioElement(el: HTMLMediaElement): Promise<AudioBuffer | null> {
+  /** One fetch and decode per source at a time: a play and a seek scheduling together share it. */
+  decodeAudioElement(el: HTMLMediaElement): Promise<AudioBuffer | null> {
     const src = decodeKey(el);
-    if (!src) return null;
+    if (!src) return Promise.resolve(null);
+    const pending = this._decoding.get(src);
+    if (pending) return pending;
+    const decoding = this.fetchAndDecode(src).finally(() => this._decoding.delete(src));
+    this._decoding.set(src, decoding);
+    return decoding;
+  }
+
+  private async fetchAndDecode(src: string): Promise<AudioBuffer | null> {
     if (this._bufferCache.has(src)) return this._bufferCache.get(src)!;
     if (this._failedSrcs.has(src)) return null;
     if (!this._ctx) return null;

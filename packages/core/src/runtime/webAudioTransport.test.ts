@@ -1634,5 +1634,23 @@ describe("WebAudioTransport", () => {
       expect(fetchMock).toHaveBeenCalledTimes(1); // short-circuited, no re-fetch
       vi.unstubAllGlobals();
     });
+
+    it("fetches and decodes a source once when a play and a seek both ask before it decodes", async () => {
+      const decoded = {} as AudioBuffer;
+      const transport = transportWithDecode(async () => decoded);
+      const fetchMock = vi.fn(async () => ({
+        ok: true,
+        arrayBuffer: async () => new ArrayBuffer(8),
+      }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const both = await Promise.all([
+        transport.decodeAudioElement(el("sfx.wav")),
+        transport.decodeAudioElement(el("sfx.wav")),
+      ]);
+      expect(both).toEqual([decoded, decoded]);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      vi.unstubAllGlobals();
+    });
   });
 });
