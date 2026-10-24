@@ -1,6 +1,7 @@
 // fallow-ignore-file code-duplication complexity
 import { setPreviewRasterScale } from "./previewRasterHints";
 import { createFarSceneSkip } from "./farScenes";
+import { clipsFirstRenderedIn } from "./firstRenderReveal";
 import { refreshSvgSelectorAliases } from "../compiler/svgSelectorAliases";
 import { RUNTIME_FILLER } from "./protocol";
 import { preloadMedia, releaseMedia, lengthIsAuthored, stopMediaDownload } from "./preloadMedia";
@@ -4863,17 +4864,11 @@ export function initSandboxRuntimeModular(): void {
     if (revision !== tweensRenderedThrough.revision)
       tweensRenderedThrough = { revision, time: Number.NEGATIVE_INFINITY };
     const firstRenders = t > tweensRenderedThrough.time;
-    // Only clips live in the span rendered for the first time hold tweens that render now.
-    const windowOptions = {
-      timelineRegistry: window.__timelines ?? {},
-      resolver: timingResolverFor(true),
-    };
-    const renderedFrom = tweensRenderedThrough.time;
+    // Only clips holding a tween that renders for the first time on this seek need their authored style read.
+    const firstRendered =
+      firstRenders && tl ? clipsFirstRenderedIn(tl, tweensRenderedThrough.time, t) : null;
     const hideClipsAgain = firstRenders
-      ? showHiddenClips((el) => {
-          const span = runtimeElementWindow(el, windowOptions);
-          return !span || (span.start <= t && span.end >= renderedFrom);
-        })
+      ? showHiddenClips(firstRendered ? (el) => firstRendered.has(el) : undefined)
       : null;
     if (tl) {
       // #10: when data-duration exceeds the timeline's intrinsic length the

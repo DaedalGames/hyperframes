@@ -566,8 +566,8 @@ describe("initSandboxRuntimeModular", () => {
     it("shows only the clips a first render crosses, not later ones", () => {
       document.body.innerHTML =
         `<div data-composition-id="main" data-root="true" data-start="0" data-duration="10" data-width="1920" data-height="1080">` +
-        `<div id="line" style="position: absolute" data-start="2" data-duration="2"></div>` +
-        `<div id="later" style="position: absolute" data-start="8" data-duration="1"></div>` +
+        `<div id="line" style="position: absolute" data-start="2" data-duration="2"><p id="said"></p></div>` +
+        `<div id="later" style="position: absolute" data-start="8" data-duration="1"><p id="next"></p></div>` +
         `</div>`;
       const seen: string[] = [];
       const read = () => {
@@ -576,7 +576,8 @@ describe("initSandboxRuntimeModular", () => {
         return 1;
       };
       const tl = gsap.timeline({ paused: true });
-      tl.to({ x: 0 }, { x: read, duration: 0.1 }, 3);
+      tl.to("#said", { x: read, duration: 0.1 }, 3);
+      tl.to("#next", { x: 1, duration: 0.1 }, 8);
       window.__timelines = { main: tl as unknown as RuntimeTimelineLike };
       initSandboxRuntimeModular();
       window.__player?.seek(1);
