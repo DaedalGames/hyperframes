@@ -4248,31 +4248,41 @@ export function initSandboxRuntimeModular(): void {
   moveSceneWindow = (time: number): boolean => {
     if (windowScenes.length === 0 || state.tornDown) return false;
     const parked = (name: string) => parkedNames.has(name);
-    const landedParked = windowScenes.some(
+    const landed = windowScenes.find(
       ({ name, start, end }) => start <= time && time <= end && parked(name),
     );
-    if (windowWork) return landedParked;
+    if (windowWork) return landed !== undefined;
     const near = scenesNear(windowScenes, time);
     const key = [...near].join("\n");
-    if (key === windowNear) return landedParked;
-    // Nearest first, so the scene the playhead is in mounts before its neighbours.
-    const toMount = windowScenes
+    if (key === windowNear) return landed !== undefined;
+    // One step at a time, planned again after each, so a later seek or scrub overtakes the rest.
+    const neighbour = windowScenes
       .filter(({ name }) => near.has(name) && parked(name))
-      .sort((a, b) => Math.abs(a.start - time) - Math.abs(b.start - time));
-    const toRetire = windowScenes.filter(({ name }) => !near.has(name) && !parked(name));
-    windowNear = key;
-    if (toMount.length === 0 && toRetire.length === 0) return landedParked;
+      .sort((a, b) => Math.abs(a.start - time) - Math.abs(b.start - time))[0];
+    const toMount = landed ?? neighbour;
+    const toRetire = toMount
+      ? []
+      : windowScenes.filter(({ name }) => !near.has(name) && !parked(name));
+    if (!toMount && toRetire.length === 0) {
+      windowNear = key;
+      return false;
+    }
     windowWork = (async () => {
-      for (const { name } of toMount) await mountScene(name);
-      for (const { name } of toRetire) retireScene(name);
+      if (landed) await mountScene(landed.name);
+      else if (toMount) {
+        // A neighbour waits a turn: a seek queued meanwhile may want another scene first.
+        await new Promise((resolve) => window.setTimeout(resolve, 0));
+        if (scenesNear(windowScenes, state.currentTime).has(toMount.name))
+          await mountScene(toMount.name);
+      } else for (const { name } of toRetire) retireScene(name);
     })().finally(() => {
       windowWork = null;
       windowNear = "";
       moveSceneWindow(state.currentTime);
     });
-    // A seek is not done until the scenes it shows are mounted.
-    registerSeekCompletion(windowWork);
-    return landedParked;
+    // A seek is not done until the scene it lands in is mounted.
+    if (landed) registerSeekCompletion(windowWork);
+    return landed !== undefined;
   };
   // Only a preview served with a scene manifest can swap; elsewhere the caller reloads directly.
   if (readSceneParts(document)) {

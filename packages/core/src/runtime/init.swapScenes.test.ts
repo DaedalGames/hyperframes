@@ -1787,21 +1787,32 @@ describe("the preview's scene window", () => {
     expect(sceneHost("s0").textContent).toBe("zero");
   });
 
-  it("mounts the scenes a seek reaches before the seek counts as done, and parks the far ones", async () => {
+  it("mounts the scene a seek lands in before the seek counts as done, then parks the far ones", async () => {
     const { root, children } = trackingRoot();
     bootWindowed([S0, S1, S2], root);
     await tick();
-    await seekAndSettle(5);
-    expect(parked()).toEqual(["s0"]);
+    // Fonts that settle a moment later keep the mount pending past the seek's own work.
+    const fonts = { ready: new Promise((settle) => window.setTimeout(settle, 50)) };
+    Object.defineProperty(document, "fonts", { configurable: true, value: fonts });
+    window.__player?.seek(5);
+    let settled = false;
+    const done = window.__hfWaitForSeekCompletion!().then(() => (settled = true));
+    await tick();
+    expect([settled, window.__timelines?.s2]).toEqual([false, undefined]);
+    await done;
+    Reflect.deleteProperty(document, "fonts");
     expect(sceneHost("s2").textContent).toBe("two");
+    for (let i = 0; i < 5; i++) await tick();
+    expect(parked()).toEqual(["s0"]);
     expect(window.__timelines?.s2).toBe(made.a2);
     expect(children.map((c) => c.child)).toContain(made.a2);
     expect(made.a1!.kill).toHaveBeenCalled();
     expect(children.map((c) => c.child)).not.toContain(made.a1);
     expect(window.__player?.getTime()).toBe(5);
     await seekAndSettle(0.5);
-    expect(parked()).toEqual(["s2"]);
     expect(sceneHost("s0").textContent).toBe("zero");
+    for (let i = 0; i < 5; i++) await tick();
+    expect(parked()).toEqual(["s2"]);
   });
 
   it("keeps drawing the scene it showed while the scene a seek lands in mounts", async () => {
