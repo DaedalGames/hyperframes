@@ -1857,6 +1857,50 @@ describe("the preview's scene window", () => {
     expect(sceneHost("s2").textContent).toBe("two, edited");
   });
 
+  const audio = (src: string) => `<audio src="${src}" data-start="0.5" data-duration="1"></audio>`;
+
+  it("lets a scene mounting ahead of a playing film join its mix, leaving what already plays alone", async () => {
+    vi.spyOn(WebAudioTransport.prototype, "init").mockResolvedValue(true);
+    const schedule = vi
+      .spyOn(WebAudioTransport.prototype, "scheduleMediaElementPlayback")
+      .mockResolvedValue(null);
+    vi.spyOn(WebAudioTransport.prototype, "decodeAudioElement").mockResolvedValue(null);
+    const stop = vi.spyOn(WebAudioTransport.prototype, "stopAll");
+    quietMedia();
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    bootWindowed(
+      [{ ...S0, body: audio("/zero.mp3") }, S1, { ...S2, body: audio("/two.mp3") }],
+      trackingRoot().root,
+    );
+    window.requestAnimationFrame = (() => 1) as typeof window.requestAnimationFrame;
+    await tick();
+    window.__player?.play();
+    // Into the middle scene: the last one mounts a turn later as its neighbour.
+    window.__player?.seek(2.5, { keepPlaying: true });
+    await window.__hfWaitForSeekCompletion?.();
+    for (const spy of [schedule, stop]) spy.mockClear();
+    for (let i = 0; i < 5; i++) await tick();
+    expect(parked()).toEqual([]);
+    expect(stop).not.toHaveBeenCalled();
+    expect(schedule.mock.calls.map(([el]) => el.getAttribute("src"))).toEqual(["/two.mp3"]);
+  });
+
+  it("drops the decoded audio of a scene it parks", async () => {
+    const release = vi.spyOn(WebAudioTransport.prototype, "releaseDecodedExcept");
+    quietMedia();
+    bootWindowed(
+      [{ ...S0, body: audio("/zero.mp3") }, S1, { ...S2, body: audio("/two.mp3") }],
+      trackingRoot().root,
+    );
+    await tick();
+    release.mockClear();
+    await seekAndSettle(5);
+    for (let i = 0; i < 5; i++) await tick();
+    expect(parked()).toEqual(["s0"]);
+    const kept = release.mock.calls.at(-1)?.[0].map((el) => el.getAttribute("src"));
+    expect(kept).toEqual(["/two.mp3"]);
+  });
+
   it("mounts every scene of a page without a scene manifest, and every scene the swap gate refuses", async () => {
     bootWindowed([S0, S1, S2], trackingRoot().root, false);
     await tick();

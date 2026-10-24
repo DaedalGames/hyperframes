@@ -3966,11 +3966,20 @@ export function initSandboxRuntimeModular(): void {
       delete sceneAnimations()[id];
     }
   };
+  // A scene mounting under a playing film joins it: what already plays is neither stopped nor seeked.
+  const joinPlayback = (hosts: Element[]) => {
+    const pageAnimations = seekTimelineAndAdapters(state.currentTime);
+    runAdapters("pause", 0, pageAnimations);
+    runAdapters("play");
+    if (webAudioReady && !state.nativeMediaSyncDisabled && !state.webAudioMediaDisabled)
+      scheduleWebAudioFor(hosts.flatMap(webAudioMediaIn), webAudio.currentGeneration());
+  };
   // What a load does after scene markup changed: bindings, media, captions, the root timeline, then a redraw.
   const settleChangedScenes = (
     swappedHosts: Element[],
     captionHosts: Element[],
     captionOverrides: Awaited<ReturnType<typeof fetchCaptionOverrides>>,
+    joining = false,
   ) => {
     // Boot's order: bindings settle each src before media binding proxies and loads it.
     for (const host of swappedHosts) applyVariableBindings(document, host);
@@ -4006,7 +4015,8 @@ export function initSandboxRuntimeModular(): void {
     applyPositionEdits(document);
     // Redraw the current frame as a seek does; a playing film cut to end at or before it stops there, as at its end.
     const cutShort = clock.isPlaying() && duration > 0 && state.currentTime >= duration;
-    transport.seek(cutShort ? duration : state.currentTime, { keepPlaying: !cutShort });
+    if (joining && clock.isPlaying() && !cutShort) joinPlayback(swappedHosts);
+    else transport.seek(cutShort ? duration : state.currentTime, { keepPlaying: !cutShort });
     syncTimedElementVisibility(state.currentTime);
     postTimeline();
   };
@@ -4232,7 +4242,7 @@ export function initSandboxRuntimeModular(): void {
     const captionHosts = host.querySelector(".caption-group") ? [host] : [];
     const captionOverrides = captionHosts.length > 0 ? await fetchCaptionOverrides() : [];
     await runScriptsAfterFonts(scripts.map((el) => document.body.appendChild(el)));
-    if (!state.tornDown) settleChangedScenes([host], captionHosts, captionOverrides);
+    if (!state.tornDown) settleChangedScenes([host], captionHosts, captionOverrides, true);
   };
   const retireScene = (name: string) => {
     const host = sceneHostOf(name);
@@ -4241,6 +4251,7 @@ export function initSandboxRuntimeModular(): void {
     parkScene(name);
     parkedNames.add(name);
     releaseDetachedMedia();
+    webAudio.releaseDecodedExcept(webAudioMediaIn(document));
     childrenBound = false;
     bindRootTimelineIfAvailable();
     postTimeline();
@@ -5526,6 +5537,10 @@ export function initSandboxRuntimeModular(): void {
     const gen = webAudio.startGeneration();
     const clips = webAudioMediaIn(document);
     webAudio.releaseDecodedExcept(clips);
+    scheduleWebAudioFor(clips, gen);
+  };
+  // Within one play generation, so a clip added mid-play joins the mix without restarting it.
+  const scheduleWebAudioFor = (clips: HTMLMediaElement[], gen: number) => {
     for (const rawEl of clips) {
       if (isSilencedByHidden(rawEl)) continue;
       const compStart = resolveAbsoluteMediaStartSeconds(rawEl);
