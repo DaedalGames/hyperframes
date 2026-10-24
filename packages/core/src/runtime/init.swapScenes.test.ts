@@ -8,7 +8,7 @@ import { WebAudioTransport } from "./webAudioTransport";
 import { probeAndCacheElementVolume } from "./mediaVolumeEnvelope.js";
 import { wrapScopedCompositionScript } from "../compiler/compositionScoping";
 import { AFTER_FONTS_SCRIPT_TYPE } from "../compiler/scriptRuns";
-import { parkFarScenesAtBoot, setKeptSceneElementsForTests } from "./sceneWindow";
+import { parkFarScenesAtBoot } from "./sceneWindow";
 
 vi.mock("./mediaVolumeEnvelope.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./mediaVolumeEnvelope.js")>();
@@ -1764,8 +1764,6 @@ describe("the preview's scene window", () => {
     for (const k of Object.keys(made)) delete made[k];
     for (const label of ["a1", "a2", "b"]) made[label] = tl(label);
     (window as unknown as { __made: typeof made }).__made = made;
-    // None kept: every scene the window leaves parks, unless a test gives a budget.
-    keptBudget = setKeptSceneElementsForTests(0);
   });
   afterEach(() => {
     window.__hfRuntimeTeardown?.();
@@ -1773,9 +1771,7 @@ describe("the preview's scene window", () => {
     document.body.innerHTML = "";
     delete window.__hfSceneAnimations;
     vi.restoreAllMocks();
-    setKeptSceneElementsForTests(keptBudget);
   });
-  let keptBudget = 0;
 
   it("parks a scene away from the start, keeping its timing, and never runs its script", async () => {
     bootWindowed([S0, S1, S2], trackingRoot().root);
@@ -1938,22 +1934,6 @@ describe("the preview's scene window", () => {
     for (let i = 0; i < 5; i++) await tick();
     expect(parked()).toEqual(["s0", "s1"]);
     expect(sceneHost("s2").textContent).toBe("two");
-  });
-
-  it("keeps the scenes the playhead left mounted, most recent first, while they fit the budget", async () => {
-    // Each scene here is its host and one child: two elements.
-    setKeptSceneElementsForTests(2);
-    bootWindowed([S0, S1, S2], trackingRoot().root);
-    await tick();
-    await seekAndSettle(2.5);
-    for (let i = 0; i < 5; i++) await tick();
-    expect(parked()).toEqual([]);
-    const left = sceneHost("s1");
-    await seekAndSettle(5);
-    for (let i = 0; i < 5; i++) await tick();
-    expect(parked()).toEqual(["s0"]);
-    await seekAndSettle(2.5);
-    expect(sceneHost("s1")).toBe(left);
   });
 
   const audio = (src: string) => `<audio src="${src}" data-start="0.5" data-duration="1"></audio>`;

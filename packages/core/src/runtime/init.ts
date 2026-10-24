@@ -10,7 +10,6 @@ import {
   parkedTimelineScenes,
   park as parkScene,
   rememberScene,
-  scenesToKeep,
   scenesWanted,
   unpark,
   windowedScenes,
@@ -4295,8 +4294,6 @@ export function initSandboxRuntimeModular(): void {
   };
   // Scenes Studio holds mounted for selecting or editing, whatever the playhead does.
   let heldScenes = new Set<string>();
-  // Scenes the window wanted, most recently first: those it left stay mounted while they fit the budget.
-  let recentScenes: string[] = [];
   moveSceneWindow = (time: number): boolean => {
     if (windowScenes.length === 0 || state.tornDown) return false;
     const parked = (name: string) => parkedNames.has(name);
@@ -4308,16 +4305,14 @@ export function initSandboxRuntimeModular(): void {
     for (const name of heldScenes) near.add(name);
     const key = [...near].join("\n");
     if (key === windowNear) return landed !== undefined;
-    recentScenes = [...near, ...recentScenes.filter((name) => !near.has(name))];
     // One step at a time, planned again after each, so a later seek or scrub overtakes the rest.
     const neighbour = windowScenes
       .filter(({ name }) => near.has(name) && parked(name))
       .sort((a, b) => Math.abs(a.start - time) - Math.abs(b.start - time))[0];
     const toMount = landed ?? neighbour;
-    const kept = toMount ? null : scenesToKeep(recentScenes.filter((name) => !near.has(name)));
-    const toRetire = windowScenes.filter(
-      ({ name }) => kept && !near.has(name) && !kept.has(name) && !parked(name),
-    );
+    const toRetire = toMount
+      ? []
+      : windowScenes.filter(({ name }) => !near.has(name) && !parked(name));
     if (!toMount && toRetire.length === 0) {
       windowNear = key;
       return false;

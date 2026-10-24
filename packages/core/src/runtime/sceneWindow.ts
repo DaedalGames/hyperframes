@@ -64,28 +64,6 @@ export function scenesWanted(scenes: WindowedScene[], time: number, playing: boo
   return new Set(scenes.filter(wanted).map((s) => s.name));
 }
 
-// At most about 120 MB at the ~2 KB of renderer memory per element a long film measured.
-let keptSceneElements = 60_000;
-export const setKeptSceneElementsForTests = (elements: number): number => {
-  const was = keptSceneElements;
-  keptSceneElements = elements;
-  return was;
-};
-
-/** Of the mounted scenes the playhead left, most recent first, those that stay mounted within the element budget. */
-export function scenesToKeep(recentFirst: string[]): Set<string> {
-  const kept = new Set<string>();
-  let elements = 0;
-  for (const name of recentFirst) {
-    const host = hostOf(name);
-    if (!host || isParked(host)) continue;
-    elements += host.getElementsByTagName("*").length + 1;
-    if (elements > keptSceneElements) break;
-    kept.add(name);
-  }
-  return kept;
-}
-
 export const hostOf = (name: string): Element | null =>
   document.querySelector(`${partsSelector(name)}:not(style, script)`);
 
