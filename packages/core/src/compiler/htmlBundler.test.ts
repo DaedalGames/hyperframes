@@ -3525,7 +3525,7 @@ describe("bundleToSingleHtml sceneParts", () => {
     });
   });
 
-  it("gives each scene its own copy of a helper it shares, so a scene mounts without the one that loaded it first", async () => {
+  it("runs a helper scenes share once for the film, so a scene mounts without the one that loaded it first", async () => {
     const dir = makeTempProject({
       "index.html": `<!doctype html><html><head></head><body>
   <div data-composition-id="main" data-width="1920" data-height="1080" data-duration="4">
@@ -3533,21 +3533,17 @@ describe("bundleToSingleHtml sceneParts", () => {
     <div data-composition-id="early" data-composition-src="compositions/early.html" data-start="0" data-duration="2"></div>
   </div></body></html>`,
       "lib/kit.js": `window.Kit = { build: function (id) { return id; } };`,
-      ...Object.fromEntries(
-        ["late", "early"].map((n) => [
-          `compositions/${n}.html`,
-          `<template id="${n}-template"><div data-composition-id="${n}"><p>${n}</p><script src="../lib/kit.js"></script><script>window.Kit.build("${n}");</script></div></template>`,
-        ]),
-      ),
+      "lib/own.js": `window.Own = 1;`,
+      "compositions/late.html": `<template id="late-template"><div data-composition-id="late"><p>late</p><script src="../lib/kit.js"></script><script src="../lib/own.js"></script><script>window.Kit.build("late");</script></div></template>`,
+      "compositions/early.html": `<template id="early-template"><div data-composition-id="early"><p>early</p><script src="../lib/kit.js"></script><script>window.Kit.build("early");</script></div></template>`,
     });
     const doc = parseHTML(await bundleToSingleHtml(dir, { sceneParts: true })).document;
-    const runs = (scene: string) =>
-      [...doc.querySelectorAll(`script[data-hf-scene="${scene}"]`)]
-        .map((el) => el.textContent)
-        .join("");
-    expect([runs("late").includes("window.Kit ="), runs("early").includes("window.Kit =")]).toEqual(
-      [true, true],
-    );
+    const texts = (selector: string) =>
+      [...doc.querySelectorAll(selector)].map((el) => el.textContent ?? "").join("\n");
+    const film = texts("script:not([data-hf-scene])");
+    expect(film.match(/window\.Kit =/g)).toHaveLength(1);
+    expect(texts('script[data-hf-scene="late"]')).toContain("window.Own = 1");
+    expect(texts("script[data-hf-scene]")).not.toContain("window.Kit =");
     const rendered = parseHTML(await bundleToSingleHtml(dir)).document.documentElement.outerHTML;
     expect(rendered.match(/window\.Kit =/g)).toHaveLength(1);
   });

@@ -4265,14 +4265,17 @@ export function initSandboxRuntimeModular(): void {
   let windowWork: Promise<void> | null = null;
   let windowNear = "";
   const nextTask = () => new Promise((resolve) => window.setTimeout(resolve, 0));
+  // A host and its stand-in trade style, a display:none the visibility pass wrote included; the way back goes along.
+  const moveDisplayHide = (from: Element, to: Element) => {
+    const hidden = displayBeforeHide.get(from as StylableElement);
+    if (hidden) displayBeforeHide.set(to as StylableElement, hidden);
+  };
   // In three tasks, so frames draw between them; the scene counts as parked, its last frame held, until it settles.
   const mountScene = async (name: string) => {
     const unparked = unpark(name);
     if (!unparked) return;
     const { host, placeholder, scripts } = unparked;
-    // The host took the stand-in's style, a display:none the visibility pass gave it included; showing undoes it.
-    const hidden = displayBeforeHide.get(placeholder as StylableElement);
-    if (hidden) displayBeforeHide.set(host as StylableElement, hidden);
+    moveDisplayHide(placeholder, host);
     recordAuthoredMedia(host);
     refreshSvgSelectorAliases();
     const captionHosts = host.querySelector(".caption-group") ? [host] : [];
@@ -4287,7 +4290,8 @@ export function initSandboxRuntimeModular(): void {
     const host = sceneHostOf(name);
     if (!host || isParked(host)) return;
     stopSceneAnimations([host]);
-    parkScene(name);
+    const placeholder = parkScene(name);
+    if (placeholder) moveDisplayHide(host, placeholder);
     parkedNames.add(name);
     releaseDetachedMedia();
     webAudio.releaseDecodedExcept(webAudioMediaIn(document));

@@ -1243,6 +1243,10 @@ async function bundleProject(projectDir: string, options?: BundleOptions): Promi
     ...subCompResult.variablesByComp,
   };
   const seenCompScriptSrcs = new Set<string>();
+  const scenesBySrc = new Map<string, Set<string | undefined>>();
+  for (const item of subCompResult.scriptItems)
+    if (item.kind !== "inline")
+      scenesBySrc.set(item.src, (scenesBySrc.get(item.src) ?? new Set()).add(item.scene));
   for (const scriptItem of subCompResult.scriptItems) {
     if (scriptItem.kind === "inline") {
       pushRun(scriptRuns, scriptItem.scene, scriptItem.content);
@@ -1254,17 +1258,17 @@ async function bundleProject(projectDir: string, options?: BundleOptions): Promi
       seenCompScriptSrcs.add(extSrc);
       continue;
     }
-    // A scene mounts and runs alone, so each scene keeps its own copy of what it loads.
-    const seenKey = scriptItem.scene === undefined ? extSrc : `${scriptItem.scene}\n${extSrc}`;
-    if (seenCompScriptSrcs.has(seenKey)) continue;
-    seenCompScriptSrcs.add(seenKey);
+    if (seenCompScriptSrcs.has(extSrc)) continue;
+    seenCompScriptSrcs.add(extSrc);
+    // Run once for the film when scenes share it: a scene mounts without the one that loaded it first.
+    const scene = (scenesBySrc.get(extSrc)?.size ?? 0) > 1 ? undefined : scriptItem.scene;
     if (isRelativeUrl(extSrc) && scriptItem.type !== "module") {
       const jsPath = resolveEntryUrl(extSrc);
       const js = jsPath ? safeReadFile(jsPath) : null;
       if (js != null) {
         const chunk = () =>
           preserveLocalScriptIntegrity(document, extSrc, resolveEntryUrl) ? "" : js;
-        pushRun(scriptRuns, scriptItem.scene, chunk);
+        pushRun(scriptRuns, scene, chunk);
         continue;
       }
     }

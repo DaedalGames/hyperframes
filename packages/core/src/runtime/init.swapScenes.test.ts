@@ -1839,6 +1839,21 @@ describe("the preview's scene window", () => {
     expect(sceneHost("s2").getAttribute("style")).not.toContain("display: none");
   });
 
+  it("shows a scene mounted again after the visibility pass hid it by display and it unmounted", async () => {
+    const leaf: Scene = { ...S2, body: "<p>two</p>", extraAttrs: ' style="position: static"' };
+    bootWindowed([S0, S1, leaf], trackingRoot().root);
+    await tick();
+    // Paused in the middle scene, the last one mounts as next, hidden until it plays.
+    await seekAndSettle(2.5);
+    for (let i = 0; i < 5; i++) await tick();
+    expect(sceneHost("s2").getAttribute("style")).toContain("display: none");
+    await seekAndSettle(0.5);
+    for (let i = 0; i < 5; i++) await tick();
+    expect(parked()).toContain("s2");
+    await seekAndSettle(5);
+    expect(sceneHost("s2").getAttribute("style")).not.toContain("display: none");
+  });
+
   it("mounts a scene Studio holds for editing and keeps it until Studio lets go", async () => {
     bootWindowed([S0, S1, S2], trackingRoot().root);
     await tick();
