@@ -2183,7 +2183,7 @@ describe.skipIf(!HAS_FFMPEG)("frame sampling at the output frame rate", () => {
       requested = opts;
       return real(["-stats_period", "0.1", "-re", ...args], {
         ...opts,
-        stallTimeout: 60_000,
+        timeout: 60_000,
         onStderr: readStats,
       });
     });
@@ -2198,8 +2198,7 @@ describe.skipIf(!HAS_FFMPEG)("frame sampling at the output frame rate", () => {
         { ffmpegProcessTimeout: 2000 },
       );
       expect(extracted.totalFrames).toBe(20);
-      expect(requested).toMatchObject({ stallTimeout: 2000 });
-      expect(requested).not.toHaveProperty("timeout");
+      expect(requested).toMatchObject({ timeout: 2000 });
       expect(new Set(reported).size).toBeGreaterThan(1);
     } finally {
       vi.mocked(runFfmpeg).mockImplementation(real);
@@ -2210,7 +2209,7 @@ describe.skipIf(!HAS_FFMPEG)("frame sampling at the output frame rate", () => {
     // stdin stays open and empty, so ffmpeg waits for its first frame forever.
     const stalled = await runFfmpeg(
       ["-f", "rawvideo", "-pix_fmt", "gray", "-s", "2x2", "-i", "pipe:0", "-f", "null", "-"],
-      { stallTimeout: 500 },
+      { timeout: 500 },
     );
     expect(stalled.terminationReason).toBe("inactivity");
   }, 30_000);
