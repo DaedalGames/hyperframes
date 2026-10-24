@@ -1233,6 +1233,85 @@ describe("core runtime browser contract", () => {
     30_000,
   );
 
+  it.each([true, false])(
+    "skips rendering preview scenes far from the playhead, measuring them unchanged (scene parts: %s)",
+    async (sceneParts) => {
+      const dir = mkdtempSync(resolve(tmpdir(), "far-scenes-browser-"));
+      const scenePage = await browser.newPage();
+      try {
+        // Content-sized hosts, so a skipped one that lost its size would shrink what it holds.
+        const hosts = [0, 1, 2, 3, 4]
+          .map(
+            (i) =>
+              `<div data-composition-id="s${i}" data-composition-src="s${i}.html" data-start="${2 * i}" data-duration="2" style="position:absolute;top:${30 * i}px"></div>`,
+          )
+          .join("");
+        writeFileSync(
+          resolve(dir, "index.html"),
+          `<!doctype html><html><body><div data-composition-id="main" data-duration="10" data-width="320" data-height="180">${hosts}</div></body></html>`,
+        );
+        for (const i of [0, 1, 2, 3, 4])
+          writeFileSync(
+            resolve(dir, `s${i}.html`),
+            `<template id="s${i}-template"><div data-composition-id="s${i}" data-duration="2"><p style="width:${40 + i}px;padding:3px">S${i}</p><i style="position:absolute;inset:0"></i></div></template>`,
+          );
+        await scenePage.setContent(
+          await bundleToSingleHtml(dir, { sceneParts, staticGuard: false }),
+        );
+        await scenePage.waitForFunction(() => window.__playerReady && window.__renderReady);
+        const result = await scenePage.evaluate(async () => {
+          const far = () =>
+            Array.from(document.querySelectorAll("[data-hf-far-scene]"), (el) =>
+              el.getAttribute("data-composition-id"),
+            );
+          const atStart = far();
+          window.__player!.seek(7);
+          await new Promise(requestAnimationFrame);
+          const afterSeek = far();
+          const skipped = Array.from(
+            document.querySelectorAll<HTMLElement>("[data-hf-far-scene]"),
+            (el) => getComputedStyle(el).contentVisibility,
+          );
+          const boxes = () =>
+            Array.from(
+              document.querySelectorAll<HTMLElement>(
+                "[data-hf-scene] :is(p, i), [data-hf-scene]:not(style, script)",
+              ),
+              (el) => {
+                const { x, y, width, height } = el.getBoundingClientRect();
+                return [
+                  x,
+                  y,
+                  width,
+                  height,
+                  el.offsetWidth,
+                  el.offsetHeight,
+                  getComputedStyle(el).width,
+                ];
+              },
+            );
+          const measured = boxes();
+          for (const el of document.querySelectorAll("[data-hf-far-scene]"))
+            el.removeAttribute("data-hf-far-scene");
+          return { atStart, afterSeek, skipped, measured, rendered: boxes() };
+        });
+        if (!sceneParts) {
+          expect(result.atStart).toEqual([]);
+          expect(result.afterSeek).toEqual([]);
+          return;
+        }
+        expect(result.atStart).toEqual(["s2", "s3", "s4"]);
+        expect(result.afterSeek).toEqual(["s0", "s1"]);
+        expect(result.skipped).toEqual(["hidden", "hidden"]);
+        expect(result.measured).toEqual(result.rendered);
+      } finally {
+        await scenePage.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    30_000,
+  );
+
   it("removes the control bridge during teardown", async () => {
     const result = await page.evaluate(async () => {
       const runtimeWindow = window as unknown as {

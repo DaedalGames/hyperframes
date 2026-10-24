@@ -1,5 +1,6 @@
 // fallow-ignore-file code-duplication complexity
 import { setPreviewRasterScale } from "./previewRasterHints";
+import { createFarSceneSkip } from "./farScenes";
 import { refreshSvgSelectorAliases } from "../compiler/svgSelectorAliases";
 import { RUNTIME_FILLER } from "./protocol";
 import { preloadMedia, releaseMedia, lengthIsAuthored, stopMediaDownload } from "./preloadMedia";
@@ -2824,6 +2825,12 @@ export function initSandboxRuntimeModular(): void {
 
   const hiddenImagesSkipped = skipsHiddenImages();
   const mediaDeferred = defersMedia();
+  const skipFarScenes = createFarSceneSkip((host) =>
+    runtimeElementWindow(host, {
+      timelineRegistry: window.__timelines ?? {},
+      resolver: timingResolverFor(true),
+    }),
+  );
   const LOOKAHEAD_SECONDS = 2;
   const RELEASE_LOOKAHEAD_SECONDS = 4;
   // Unskipped while within the window on either side of the playhead, so a step or shuttle back
@@ -3124,6 +3131,7 @@ export function initSandboxRuntimeModular(): void {
       }
     }
     if (decidedTimedClip && revealTimedClipsAfterFirstPass()) colorGradingRuntime?.refresh();
+    skipFarScenes(currentTime);
     // Only when a `data-hidden` mutation actually moved something: the skips
     // this reschedule exists to re-run are what change the active set, so
     // firing it otherwise was an audible stop-and-restart across the whole mix
