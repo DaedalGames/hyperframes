@@ -332,7 +332,7 @@ export {
   declareContentAddressedUrl,
   declareProbeFactsUrl,
   PROBE_FACTS_VERSION,
-  readProbeJson,
+  buildProbeFactsText,
   probeMediaProfile,
   analyzeKeyframeIntervals,
   type VideoMetadata,
