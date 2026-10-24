@@ -50,7 +50,7 @@ import { SCENE_NO_SWAP_ATTR, SCENE_PART_ATTR } from "../sceneParts";
 // Anything a scene script can leave running, pending or registered outside its timeline, or that
 // throws when run again: only the timeline is torn down when a scene is swapped, so when unsure, refuse.
 const SIDE_EFFECT_RE =
-  /\b(addEventListener|requestAnimationFrame|requestIdleCallback|setTimeout|setInterval|queueMicrotask|getContext|WebGL\w*|WebGPU\w*|gpu|Worker|WebSocket|EventSource|Audio\w*|\w*Observer|fetch|import|eval|Function|Promise|async|await|delayedCall|ScrollTrigger|Draggable|anime|customElements|registerProperty|addListener|BroadcastChannel|pushState|replaceState|adoptedStyleSheets|documentElement|getElementsByTagName|lottie|THREE|__hf[A-Z]\w*)\b|\.then\s*\(|\.animate\s*\(|\.ticker\b|repeat\s*:\s*-1|\.repeat\s*\(\s*-1|defineProperty\s*\(\s*(window|globalThis|self|document)\b|\bfonts\s*\.\s*add\b|\.on[a-z]+\s*=(?!=)|\bon(resize|scroll|message|key\w+|click|pointer\w+|mouse\w+|wheel|visibilitychange|hashchange|popstate|error|load)\s*=(?!=)|\[\s*["']on[a-z]+["']\s*\]|document\s*\.\s*(head|body)\b|querySelector(All)?\(\s*["'](head|body)["']|\bgsap\s*\.\s*(?:to|from|fromTo)\s*\(|\bgsap\s*\.\s*timeline\s*\((?:[^()]|\([^()]*\))*\)\s*\.\s*(?:to|from|fromTo|set|add|call)\s*\(/;
+  /\b(addEventListener|requestAnimationFrame|requestIdleCallback|setTimeout|setInterval|queueMicrotask|getContext|WebGL\w*|WebGPU\w*|gpu|Worker|WebSocket|EventSource|Audio\w*|\w*Observer|fetch|import|eval|Function|Promise|async|await|delayedCall|ScrollTrigger|Draggable|anime|customElements|registerProperty|addListener|BroadcastChannel|pushState|replaceState|adoptedStyleSheets|documentElement|getElementsByTagName|lottie|THREE|__hf[A-Z]\w*)\b|\.then\s*\(|\.ticker\b|repeat\s*:\s*-1|\.repeat\s*\(\s*-1|defineProperty\s*\(\s*(window|globalThis|self|document)\b|\bfonts\s*\.\s*add\b|\.on[a-z]+\s*=(?!=)|\bon(resize|scroll|message|key\w+|click|pointer\w+|mouse\w+|wheel|visibilitychange|hashchange|popstate|error|load)\s*=(?!=)|\[\s*["']on[a-z]+["']\s*\]|document\s*\.\s*(head|body)\b|querySelector(All)?\(\s*["'](head|body)["']|\bgsap\s*\.\s*(?:to|from|fromTo)\s*\(|\bgsap\s*\.\s*timeline\s*\((?:[^()]|\([^()]*\))*\)\s*\.\s*(?:to|from|fromTo|set|add|call)\s*\(/;
 
 // npm packages that only define globals when loaded; lottie-web is absent because it scans the page on load.
 const SWAP_SAFE_LIBRARY_URL =
@@ -58,16 +58,57 @@ const SWAP_SAFE_LIBRARY_URL =
 const isSwapSafeLibrary = (src: string) =>
   URL.canParse(src) && SWAP_SAFE_LIBRARY_URL.test(new URL(src).href);
 
-const FONT_READY_WAIT_RE =
-  /\bdocument\s*\.\s*fonts\s*\.\s*ready\s*\.\s*then\s*\(|\bawait\s+document\s*\.\s*fonts\s*\.\s*ready\b/g;
+// Waits on the page's fonts, ready or loading named faces: each settles once, leaving nothing behind.
+const STRING_ARG = String.raw`(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*')`;
+const FONT_LOAD = String.raw`document\s*\.\s*fonts\s*\.\s*load\s*\(\s*${STRING_ARG}\s*(?:,\s*${STRING_ARG}\s*)?\)`;
+const FONT_PROMISE = String.raw`(?:document\s*\.\s*fonts\s*\.\s*ready\b|${FONT_LOAD}|Promise\s*\.\s*all\s*\(\s*\[\s*${FONT_LOAD}(?:\s*,\s*${FONT_LOAD})*\s*,?\s*\]\s*\))`;
+const FONT_WAIT_RE = new RegExp(
+  String.raw`\b${FONT_PROMISE}\s*\.\s*then\s*\(|\bawait\s+${FONT_PROMISE}`,
+  "g",
+);
+
+// A canvas made only to measure text: never named, so nothing attaches it to the page or draws on it there.
+const TEXT_MEASURE_CANVAS_RE =
+  /\bdocument\s*\.\s*createElement\s*\(\s*(["'])canvas\1\s*\)\s*\.\s*getContext\s*\(\s*(["'])2d\2\s*\)/g;
+
+/** Whether a call of the browser's Element.animate may leave an animation: it gets timing, its second argument. */
+function lastingAnimateCall(script: string): boolean {
+  for (const call of script.matchAll(/\.animate\s*\(/g)) {
+    if (topLevelArgs(script, call.index + call[0].length) !== 1) return true;
+  }
+  return false;
+}
+
+// Arguments of the call whose "(" ends before `from`; none, a spread or an unclosed call never count as one.
+function topLevelArgs(script: string, from: number): number {
+  let depth = 0;
+  let args = 1;
+  if (/^\s*(\.\.\.|\))/.test(script.slice(from))) return Number.POSITIVE_INFINITY;
+  for (let i = from; i < script.length; i++) {
+    const ch = script[i]!;
+    if (ch === '"' || ch === "'" || ch === "`") {
+      const end = script.indexOf(ch, i + 1);
+      if (end < 0) return Number.POSITIVE_INFINITY;
+      i = end;
+    } else if ("([{".includes(ch)) depth++;
+    else if (")]}".includes(ch)) {
+      if (depth === 0) return args;
+      depth--;
+    } else if (ch === "," && depth === 0) args++;
+  }
+  return Number.POSITIVE_INFINITY;
+}
 
 /** Why an authored scene script cannot be swapped out cleanly, or null when it can. */
 function sceneScriptSwapRefusal(script: string): string | null {
-  const withoutFontWaits = script.replace(FONT_READY_WAIT_RE, "");
+  const withoutFontWaits = script.replace(FONT_WAIT_RE, "");
   const awaitedFontsOnly = /\bawait\b/.test(script) && !/\bawait\b/.test(withoutFontWaits);
-  const checked = awaitedFontsOnly ? withoutFontWaits.replace(/\basync\b/g, "") : withoutFontWaits;
+  let checked = awaitedFontsOnly ? withoutFontWaits.replace(/\basync\b/g, "") : withoutFontWaits;
+  // The context hands its canvas back through .canvas, which could then reach the page.
+  if (!/\.\s*canvas\b/.test(checked)) checked = checked.replace(TEXT_MEASURE_CANVAS_RE, "");
   const match = SIDE_EFFECT_RE.exec(checked);
-  return match ? `its script uses ${match[0].trim()}` : null;
+  if (match) return `its script uses ${match[0].trim()}`;
+  return lastingAnimateCall(checked) ? "its script uses .animate(" : null;
 }
 
 const projectScriptRefusal = (text: string | null) =>

@@ -3525,6 +3525,59 @@ describe("bundleToSingleHtml sceneParts", () => {
     });
   });
 
+  it("lets a scene measure text on an unattached canvas, call its own animate and wait on font loads, and nothing more", async () => {
+    const measure = `let ctx = null; window.measure = (s) => { if (!ctx) { ctx = document.createElement("canvas").getContext("2d"); } ctx.font = "800 46px Outfit"; return ctx.measureText(s).width; };`;
+    const scenes: Record<string, string> = {
+      measureCanvas: `<script>${measure}</script>`,
+      ownAnimate: `<script>const built = { animate(t) { return t; } }; window.step = (t) => built.animate(t);</script>`,
+      fontLoads: `<script>Promise.all([document.fonts.load("800 46px Outfit"), document.fonts.load('112px "Gochi Hand"')]).then(window.build, window.build);</script>`,
+      fontLoadThen: `<script>document.fonts.load("700 30px Outfit").then(() => window.fit("fontLoadThen"));</script>`,
+      fontLoadAwait: `<script>(async () => { await document.fonts.load("700 30px Outfit"); window.fit("fontLoadAwait"); })();</script>`,
+      namedCanvas: `<script>const c = document.createElement("canvas"); c.getContext("2d");</script>`,
+      canvasBack: `<script>const x = document.createElement("canvas").getContext("2d"); window.keep = x.canvas;</script>`,
+      webglCanvas: `<script>document.createElement("canvas").getContext("webgl");</script>`,
+      browserAnimate: `<script>document.querySelector("p").animate([{ opacity: 0 }], { duration: 1000 });</script>`,
+      spreadAnimate: `<script>document.querySelector("p").animate(...window.frames);</script>`,
+      otherPromise: `<script>Promise.all([fetch("a.json")]).then(() => {});</script>`,
+      dynamicFontLoad: `<script>document.fonts.load(window.face).then(() => {});</script>`,
+    };
+    const names = Object.keys(scenes);
+    const dir = makeTempProject({
+      "index.html": `<!doctype html><html><head></head><body>
+  <div data-composition-id="main" data-width="1920" data-height="1080" data-duration="2">
+    ${names.map((n) => `<div data-composition-id="${n}" data-composition-src="compositions/${n}.html" data-start="0" data-duration="2"></div>`).join("\n")}
+  </div></body></html>`,
+      ...Object.fromEntries(
+        names.map((n) => [
+          `compositions/${n}.html`,
+          `<template id="${n}-template"><div data-composition-id="${n}"><p>${n}</p>${scenes[n]}</div></template>`,
+        ]),
+      ),
+    });
+    const doc = parseHTML(await bundleToSingleHtml(dir, { sceneParts: true })).document;
+    const refusals = Object.fromEntries(
+      names.map((n) => [
+        n,
+        doc.querySelector(`div[data-hf-scene="${n}"]`)?.getAttribute("data-hf-scene-no-swap") ??
+          null,
+      ]),
+    );
+    expect(refusals).toEqual({
+      measureCanvas: null,
+      ownAnimate: null,
+      fontLoads: null,
+      fontLoadThen: null,
+      fontLoadAwait: null,
+      namedCanvas: "its script uses getContext",
+      canvasBack: "its script uses getContext",
+      webglCanvas: "its script uses getContext",
+      browserAnimate: "its script uses .animate(",
+      spreadAnimate: "its script uses .animate(",
+      otherPromise: "its script uses Promise",
+      dynamicFontLoad: "its script uses .then(",
+    });
+  });
+
   const rootProject = (root: string, extra: Record<string, string> = {}) =>
     makeTempProject({
       "index.html": `<!doctype html><html><head></head><body>
