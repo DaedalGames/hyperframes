@@ -5496,6 +5496,7 @@ export function initSandboxRuntimeModular(): void {
       }
 
       if (clock.isPlaying()) {
+        scheduleDueWebAudio();
         syncMediaForCurrentState(timingRevision);
       } else if (hasRunningTimedMedia()) {
         // Nothing may run while the clock is paused, and the paused side used to
@@ -5550,8 +5551,32 @@ export function initSandboxRuntimeModular(): void {
     webAudio.releaseDecodedExcept(clips);
     scheduleWebAudioFor(clips, gen);
   };
+  // Clips of the playing generation that start beyond the horizon: the tick schedules each as it comes near.
+  const WEB_AUDIO_AHEAD_SECONDS = 10;
+  let laterWebAudio: { gen: number; clips: Array<{ el: HTMLMediaElement; start: number }> } = {
+    gen: -1,
+    clips: [],
+  };
+  const webAudioHorizon = () =>
+    clock.now() + WEB_AUDIO_AHEAD_SECONDS * Math.max(1, state.playbackRate);
+  const scheduleDueWebAudio = () => {
+    const later = laterWebAudio;
+    if (later.gen !== webAudio.currentGeneration() || later.clips.length === 0) return;
+    if (state.nativeMediaSyncDisabled || state.webAudioMediaDisabled) return;
+    const horizon = webAudioHorizon();
+    const due = later.clips.filter((clip) => clip.start <= horizon);
+    if (due.length === 0) return;
+    later.clips = later.clips.filter((clip) => clip.start > horizon);
+    scheduleWebAudioFor(
+      due.flatMap(({ el }) => (el.isConnected ? [el] : [])),
+      later.gen,
+    );
+  };
   // Within one play generation, so a clip added mid-play joins the mix without restarting it.
   const scheduleWebAudioFor = (clips: HTMLMediaElement[], gen: number) => {
+    if (laterWebAudio.gen !== gen) laterWebAudio = { gen, clips: [] };
+    const now = clock.now();
+    const horizon = webAudioHorizon();
     for (const rawEl of clips) {
       if (isSilencedByHidden(rawEl)) continue;
       const compStart = resolveAbsoluteMediaStartSeconds(rawEl);
@@ -5574,6 +5599,11 @@ export function initSandboxRuntimeModular(): void {
       if (slots.length > 0) {
         if (kept.end <= kept.start) continue;
         clipDuration = kept.end - compStart;
+      }
+      if (kept.end <= now) continue;
+      if (kept.start > horizon) {
+        laterWebAudio.clips.push({ el: rawEl, start: kept.start });
+        continue;
       }
       // Decided BEFORE the transport is asked, because the two verdicts want
       // two different fallback chains — and only one of them is the chain

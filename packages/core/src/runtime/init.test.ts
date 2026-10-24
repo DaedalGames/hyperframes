@@ -6024,6 +6024,54 @@ describe("initSandboxRuntimeModular", () => {
     });
   });
 
+  describe("Web Audio on a long film", () => {
+    const ctx = useMockAudioContext();
+
+    it("schedules a clip only as the playhead comes near it, and none that already ended", async () => {
+      const raf = createManualRaf();
+      vi.spyOn(performance, "now").mockImplementation(() => raf.now());
+      window.requestAnimationFrame =
+        raf.requestAnimationFrame as typeof window.requestAnimationFrame;
+      window.cancelAnimationFrame = raf.cancelAnimationFrame as typeof window.cancelAnimationFrame;
+      document.body.innerHTML =
+        `<div data-composition-id="main" data-root="true" data-start="0" data-duration="200" data-width="1920" data-height="1080">` +
+        `<audio id="past" src="/past.mp3" data-start="0" data-duration="5"></audio>` +
+        `<audio id="now" src="/now.mp3" data-start="0" data-duration="60"></audio>` +
+        `<audio id="later" src="/later.mp3" data-start="100" data-duration="10"></audio>` +
+        `</div>`;
+      for (const audio of document.querySelectorAll("audio")) {
+        audio.load = () => {};
+        audio.play = vi.fn(() => Promise.resolve());
+        // Loaded: a buffering clip would hold the playhead.
+        Object.defineProperty(audio, "readyState", { value: 4, configurable: true });
+      }
+      window.__timelines = { main: createMockTimeline(200) };
+      const capture = vi
+        .spyOn(WebAudioTransport.prototype, "scheduleMediaElementPlayback")
+        .mockResolvedValue(null);
+      vi.spyOn(WebAudioTransport.prototype, "decodeAudioElement").mockResolvedValue(null);
+      const scheduled = () => capture.mock.calls.map(([el]) => el.id);
+      initSandboxRuntimeModular();
+      await Promise.resolve();
+      window.__player?.seek(20);
+      window.__player?.play();
+      await Promise.resolve();
+      expect(scheduled()).toEqual(["now"]);
+      const playTo = (time: number) => {
+        // Steps under the clock's stall threshold, which would fold a longer gap away.
+        for (let i = 0; i < 400 && (window.__player?.getTime() ?? 0) < time; i++) {
+          ctx.time += 0.4;
+          raf.step(400);
+        }
+        expect(window.__player?.getTime()).toBeGreaterThanOrEqual(time);
+      };
+      playTo(85);
+      expect(scheduled()).toEqual(["now"]);
+      playTo(92);
+      expect(scheduled()).toEqual(["now", "later"]);
+    });
+  });
+
   // `el.volume` stops at 1, so a video's authored boost can only be carried by a Web Audio gain.
   describe("a video's sound above unity", () => {
     const ctx = useMockAudioContext();
