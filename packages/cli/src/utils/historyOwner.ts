@@ -225,11 +225,9 @@ async function directOwner(
   };
 }
 
-/** The first release whose preview serves POST /history/checkpoint, which every command files its reports through. */
 const FIRST_PREVIEW_WITH_CHECKPOINT = "0.8.152";
 
-/** A dev server, or any version that is not a release number, is taken as current. */
-function previewTooOld(version: string): boolean {
+function isReleaseBeforeCheckpointRoute(version: string): boolean {
   return (
     /^\d+\.\d+\.\d+/.test(version) && compareVersions(version, FIRST_PREVIEW_WITH_CHECKPOINT) < 0
   );
@@ -241,7 +239,7 @@ async function connect(
   ownerWaitMs?: number,
 ): Promise<{ owner: Owner; turn: Turn | null }> {
   const server = await historyDeps.findServer(projectDir);
-  if (server && previewTooOld(server.version)) {
+  if (server && isReleaseBeforeCheckpointRoute(server.version)) {
     return directOwner(projectDir, ownerWaitMs).catch((error) => {
       if (!(error instanceof HistoryBusyError)) throw error;
       throw new Refusal(
