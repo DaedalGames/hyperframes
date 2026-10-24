@@ -1112,6 +1112,26 @@ describe.skipIf(spawnSync(getFfmpegBinary(), ["-version"]).status !== 0)(
       expect(existsSync(join(withCfr, "audio.m4a"))).toBe(true);
     }, 60_000);
 
+    it("logs the audio task's phase times through the plan's logger", async () => {
+      const project = audioProject("project-audio-phases");
+      const work = join(runRoot, "audio-phases-work");
+      mkdirSync(work, { recursive: true });
+      const info = mock(() => {});
+      const logger = { info, warn: mock(() => {}), error: mock(() => {}), debug: mock(() => {}) };
+
+      await buildPlanAudio(
+        project,
+        { fps: 30, width: 320, height: 240, format: "mp4", logger },
+        work,
+        join(work, "audio.m4a"),
+      );
+
+      expect(info).toHaveBeenCalledWith(
+        "[audio] phases",
+        expect.objectContaining({ prepare: expect.any(Number), guard: expect.any(Number) }),
+      );
+    }, 60_000);
+
     it("leaves webm and mov audio to buildPlanAudio too; png-sequence keeps its own", async () => {
       const project = audioProject("project-separate-audio-formats");
       const config = { fps: 30, width: 320, height: 240 } as const;
