@@ -903,28 +903,39 @@ export class WebAudioTransport {
   }
 
   stopAll(): void {
-    for (const source of this._activeSources) {
-      try {
-        if (isBufferSource(source)) source.sourceNode.stop();
-        source.sourceNode.disconnect();
-        source.fx?.dispose();
-        source.clipGainNode.disconnect();
-        source.laneNode.disconnect();
-        source.gainNode.disconnect();
-      } catch {
-        // already stopped
-      }
-      if (isBufferSource(source)) source.el.muted = source.priorMuted;
-      else {
-        source.el.volume = source.priorVolume;
-        // Captured, it has no native output; outside a play it sounds through the destination.
-        if (this._ctx) source.sourceNode.connect(this._ctx.destination);
-      }
-    }
+    for (const source of this._activeSources) this.dispose(source);
     this._activeSources = [];
     this._paused = true;
     this._playGeneration += 1;
     this.rest();
+  }
+
+  /** Stops what plays from media gone from the page, without sending it to the destination as a stop does. */
+  releaseDetached(): void {
+    this._activeSources = this._activeSources.filter((source) => {
+      if (source.el.isConnected) return true;
+      this.dispose(source, false);
+      return false;
+    });
+  }
+
+  private dispose(source: ScheduledSource, keepsSounding = true): void {
+    try {
+      if (isBufferSource(source)) source.sourceNode.stop();
+      source.sourceNode.disconnect();
+      source.fx?.dispose();
+      source.clipGainNode.disconnect();
+      source.laneNode.disconnect();
+      source.gainNode.disconnect();
+    } catch {
+      // already stopped
+    }
+    if (isBufferSource(source)) source.el.muted = source.priorMuted;
+    else {
+      source.el.volume = source.priorVolume;
+      // Captured, it has no native output; outside a play it sounds through the destination.
+      if (this._ctx && keepsSounding) source.sourceNode.connect(this._ctx.destination);
+    }
   }
 
   setVolume(volume: number): void {

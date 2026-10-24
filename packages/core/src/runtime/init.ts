@@ -1535,6 +1535,15 @@ export function initSandboxRuntimeModular(): void {
     (timeline as { __hfReal?: object }).__hfReal ?? timeline;
   // The composite that holds the children of a root with no timeline, and how many it holds.
   let missingRootComposite: { timeline: RuntimeTimelineLike; size: number } | null = null;
+  // Roots the runtime built. One it no longer holds would stay on GSAP's global timeline with all it last held.
+  const builtRoots = new Set<RuntimeTimelineLike>();
+  const dropUnusedBuiltRoots = () => {
+    for (const root of builtRoots) {
+      if (root === state.capturedTimeline || root === missingRootComposite?.timeline) continue;
+      builtRoots.delete(root);
+      (root as { kill?: () => void }).kill?.();
+    }
+  };
 
   const resolveRootTimelineFromDocument = (): TimelineResolution => {
     const timelines = (window.__timelines ?? {}) as Record<string, RuntimeTimelineLike | undefined>;
@@ -1626,6 +1635,7 @@ export function initSandboxRuntimeModular(): void {
       const gsapApi = window.gsap;
       if (!gsapApi || typeof gsapApi.timeline !== "function") return null;
       const compositeTimeline = gsapApi.timeline({ paused: true }) as RuntimeTimelineLike;
+      builtRoots.add(compositeTimeline);
       for (const candidate of candidates) nestAtHostStart(compositeTimeline, candidate);
       // Before any duration read: GSAP leaves paused children out of the duration it caches.
       ensureChildCandidatesActive(nestedCandidates(compositeTimeline, candidates));
@@ -1639,6 +1649,7 @@ export function initSandboxRuntimeModular(): void {
       const gsapApi = window.gsap;
       if (!gsapApi || typeof gsapApi.timeline !== "function") return null;
       const fallbackTimeline = gsapApi.timeline({ paused: true }) as RuntimeTimelineLike;
+      builtRoots.add(fallbackTimeline);
       if (existingRootTimeline) {
         try {
           fallbackTimeline.add(existingRootTimeline, 0);
@@ -2072,6 +2083,7 @@ export function initSandboxRuntimeModular(): void {
       return false;
     }
     state.capturedTimeline = resolution.timeline;
+    dropUnusedBuiltRoots();
     if (typeof state.capturedTimeline.timeScale === "function") {
       state.capturedTimeline.timeScale(state.playbackRate);
     }
@@ -2448,6 +2460,7 @@ export function initSandboxRuntimeModular(): void {
     }
     const previousTime = Math.max(0, state.currentTime || 0);
     state.capturedTimeline = resolution.timeline;
+    dropUnusedBuiltRoots();
     if (typeof state.capturedTimeline.timeScale === "function") {
       state.capturedTimeline.timeScale(state.playbackRate);
     }
@@ -2613,7 +2626,10 @@ export function initSandboxRuntimeModular(): void {
       unbindMedia(mediaEl);
       mediaEl.pause();
       stopMediaDownload(mediaEl);
+      // An element Web Audio captured lives as long as the audio context: alone, it keeps no detached tree.
+      mediaEl.remove();
     }
+    webAudio.releaseDetached();
   };
 
   const authoredMediaVolume = (el: HTMLMediaElement): number | null => {
@@ -3617,7 +3633,11 @@ export function initSandboxRuntimeModular(): void {
     }
     bindRootTimelineIfAvailable();
     timelinePostHeld = clock.isPlaying();
-    if (timelinePostHeld) return;
+    if (timelinePostHeld) {
+      // Stale until the held post rebuilds it, and its elements would keep unmounted scenes alive meanwhile.
+      delete window.__clipTree;
+      return;
+    }
     if (jumpLanding && !renderCaptureSeekStarted && hasPendingSeekCompletion())
       return postTimelineAfterSeek();
     jumpLanding = false;
@@ -4650,14 +4670,7 @@ export function initSandboxRuntimeModular(): void {
   bindMediaMetadataListeners();
   runAdapters("discover");
   const publishRenderReadyAfterTimelineBinding = () => {
-    const prevTimeline = state.capturedTimeline;
-    const rebound = bindRootTimelineIfAvailable();
-    if (
-      state.capturedTimeline &&
-      (rebound || state.capturedTimeline !== prevTimeline || !player._timeline)
-    ) {
-      player._timeline = state.capturedTimeline;
-    }
+    bindRootTimelineIfAvailable();
     const boundDuration = getSafeTimelineDurationSeconds(state.capturedTimeline, 0);
     if (boundDuration > 0) {
       clock.setDuration(boundDuration);
@@ -4822,17 +4835,24 @@ export function initSandboxRuntimeModular(): void {
     }
   };
 
-  const standaloneHosts = new Map<string, Element | { missingAt: number }>();
+  // Weak: a scene the preview unmounted must not stay alive, whole, in this cache.
+  const standaloneHosts = new Map<string, WeakRef<Element> | { missingAt: number }>();
   const standaloneHostOf = (compositionId: string): Element | null => {
     const known = standaloneHosts.get(compositionId);
     if (!renderCaptureSeekStarted && known) {
-      if (!isElementNode(known)) {
+      if (!(known instanceof WeakRef)) {
         if (known.missingAt === compositionTimingRevision) return null;
-      } else if (known.isConnected && known.getAttribute("data-composition-id") === compositionId)
-        return known;
+      } else {
+        const host = known.deref();
+        if (host?.isConnected && host.getAttribute("data-composition-id") === compositionId)
+          return host;
+      }
     }
     const node = document.querySelector(`[data-composition-id="${CSS.escape(compositionId)}"]`);
-    standaloneHosts.set(compositionId, node ?? { missingAt: compositionTimingRevision });
+    standaloneHosts.set(
+      compositionId,
+      node ? new WeakRef(node) : { missingAt: compositionTimingRevision },
+    );
     return node;
   };
   type SceneClock = {
@@ -5398,9 +5418,6 @@ export function initSandboxRuntimeModular(): void {
       ) {
         const prevTimeline = state.capturedTimeline;
         if (bindRootTimelineIfAvailable()) {
-          if (state.capturedTimeline && !player._timeline) {
-            player._timeline = state.capturedTimeline;
-          }
           if (state.capturedTimeline && state.capturedTimeline !== prevTimeline) {
             pauseTimelineIfPossible(state.capturedTimeline);
           }
