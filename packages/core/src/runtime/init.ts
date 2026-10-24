@@ -2,6 +2,7 @@
 import { setPreviewRasterScale } from "./previewRasterHints";
 import { createFarSceneSkip } from "./farScenes";
 import {
+  clipLengthsWritten,
   hostOf as sceneHostOf,
   isParked,
   parkedClips,
@@ -4057,17 +4058,32 @@ export function initSandboxRuntimeModular(): void {
     }
     const edited = names.filter((name) => nextParts.scenes[name] !== liveParts.scenes[name]);
     if (edited.length === 0) throw new Error("no scene changed");
-    const nextPartsOf = (name: string) =>
-      Array.from(next.querySelectorAll(`[${SCENE_PART_ATTR}="${CSS.escape(name)}"]`));
+    const partsOf = (doc: Document, name: string) =>
+      Array.from(doc.querySelectorAll(`[${SCENE_PART_ATTR}="${CSS.escape(name)}"]`));
     // A parked scene runs nothing, so only the markup it mounts with changes.
     const parkedHost = (name: string) => {
       const host = sceneHostOf(name);
       return host !== null && isParked(host);
     };
-    for (const name of edited.filter(parkedHost)) {
-      const parts = nextPartsOf(name);
+    const styles = (parts: Element[]) => parts.filter((el) => el.tagName === "STYLE");
+    const parkedEdits = edited.filter(parkedHost).map((name) => {
+      const parts = partsOf(next, name);
       const host = parts.find((el) => el.tagName !== "STYLE" && el.tagName !== "SCRIPT");
       if (!host) throw new Error(`scene ${name} cannot be swapped: it has no single host`);
+      // A mount runs the scene as a load would, so only what keeps it parkable is checked.
+      const refusal = host.getAttribute(SCENE_NO_SWAP_ATTR);
+      if (refusal !== null) throw new Error(`scene ${name} cannot be swapped: ${refusal}`);
+      if (!clipLengthsWritten(host))
+        throw new Error(`scene ${name} cannot be swapped: a clip's length is not written`);
+      const oldStyles = styles(partsOf(document, name));
+      if (oldStyles.length !== styles(parts).length)
+        throw new Error(`scene ${name} cannot be swapped: its styles moved`);
+      return { name, parts, host, oldStyles };
+    });
+    if (parkedEdits.length > 0) addNewFontFaces(next);
+    for (const { name, parts, host, oldStyles } of parkedEdits) {
+      const newStyles = styles(parts);
+      oldStyles.forEach((el, i) => el.replaceWith(document.importNode(newStyles[i]!, true)));
       rememberScene(
         name,
         host,
@@ -4083,11 +4099,9 @@ export function initSandboxRuntimeModular(): void {
       return;
     }
     const swaps = changed.map((name) => {
-      const partsIn = (doc: Document) =>
-        Array.from(doc.querySelectorAll(`[${SCENE_PART_ATTR}="${CSS.escape(name)}"]`));
       const isHost = (el: Element) => el.tagName !== "STYLE" && el.tagName !== "SCRIPT";
-      const oldParts = partsIn(document);
-      const newParts = partsIn(next);
+      const oldParts = partsOf(document, name);
+      const newParts = partsOf(next, name);
       const oldHosts = oldParts.filter(isHost);
       const newHosts = newParts.filter(isHost);
       const oldHost = oldHosts[0];
@@ -4108,8 +4122,7 @@ export function initSandboxRuntimeModular(): void {
           `scene ${name} cannot be swapped: it loads media this scene has not loaded`,
         );
       }
-      const styleCount = (parts: Element[]) => parts.filter((el) => el.tagName === "STYLE").length;
-      if (styleCount(oldParts) !== styleCount(newParts)) {
+      if (styles(oldParts).length !== styles(newParts).length) {
         throw new Error(`scene ${name} cannot be swapped: its styles moved`);
       }
       return {
@@ -4186,10 +4199,8 @@ export function initSandboxRuntimeModular(): void {
     clock.detachAudioSource();
     for (const { oldParts, newParts, oldHost, newHost } of swaps) {
       // Each new style takes its own old one's place: same-named @keyframes resolve by order.
-      const newStyles = newParts.filter((el) => el.tagName === "STYLE");
-      oldParts
-        .filter((el) => el.tagName === "STYLE")
-        .forEach((el, i) => el.replaceWith(document.importNode(newStyles[i]!, true)));
+      const newStyles = styles(newParts);
+      styles(oldParts).forEach((el, i) => el.replaceWith(document.importNode(newStyles[i]!, true)));
       for (const el of oldParts) if (el !== oldHost) el.remove();
       const host = document.importNode(newHost, true);
       // Text only: a live script that ran no longer carries the deferred type its new copy has.

@@ -1850,11 +1850,62 @@ describe("the preview's scene window", () => {
   it("gives an edit to a parked scene to its next mount, without mounting it", async () => {
     bootWindowed([S0, S1, S2], trackingRoot().root);
     await tick();
-    const edited: Scene = { ...S2, body: "<p>two, edited</p>", hash: "h2b" };
+    const edited: Scene = { ...S2, body: "<p>two, edited</p>", css: ".two{}", hash: "h2b" };
     await window.__hfSwapScenes!(preview([S0, S1, edited]).html);
     expect(parked()).toEqual(["s2"]);
+    expect(cssText()).toContain(".two{}");
     await seekAndSettle(5);
     expect(sceneHost("s2").textContent).toBe("two, edited");
+  });
+
+  it("still mounts parked scenes after an edit to a mounted one", async () => {
+    bootWindowed([S0, S1, S2], trackingRoot().root);
+    await tick();
+    await window.__hfSwapScenes!(
+      preview([{ ...S0, body: "<p>zero, edited</p>", hash: "h0b" }, S1, S2]).html,
+    );
+    await seekAndSettle(5);
+    expect(sceneHost("s2").textContent).toBe("two");
+  });
+
+  it("refuses an edit that would leave a parked scene unable to mount or to show its clips", async () => {
+    bootWindowed([S0, S1, S2], trackingRoot().root);
+    await tick();
+    const fetching: Scene = {
+      ...S2,
+      extraAttrs: ' data-hf-scene-no-swap="its script uses fetch"',
+      hash: "h2b",
+    };
+    const untrimmed: Scene = {
+      ...S2,
+      body: '<audio src="/two.mp3" data-start="0"></audio>',
+      hash: "h2c",
+    };
+    for (const edit of [fetching, untrimmed])
+      await expect(window.__hfSwapScenes!(preview([S0, S1, edit]).html)).rejects.toThrow("s2");
+    await seekAndSettle(5);
+    expect(sceneHost("s2").textContent).toBe("two");
+  });
+
+  it("keeps mounted a scene whose clip lengths come from its media, from boot or from an edit", async () => {
+    quietMedia();
+    const untrimmed = '<audio src="/a.mp3" data-start="0"></audio>';
+    bootWindowed([S0, S1, { ...S2, body: untrimmed }], trackingRoot().root);
+    await tick();
+    expect(parked()).toEqual([]);
+    window.__hfRuntimeTeardown?.();
+    vi.restoreAllMocks();
+    quietMedia();
+    const trimmed = {
+      ...S0,
+      body: '<audio src="/a.mp3" data-start="0" data-duration="1"></audio>',
+    };
+    bootWindowed([trimmed, S1, S2], trackingRoot().root);
+    await tick();
+    await window.__hfSwapScenes!(preview([{ ...S0, body: untrimmed, hash: "h0b" }, S1, S2]).html);
+    await seekAndSettle(5);
+    for (let i = 0; i < 5; i++) await tick();
+    expect(parked()).toEqual([]);
   });
 
   const audio = (src: string) => `<audio src="${src}" data-start="0.5" data-duration="1"></audio>`;

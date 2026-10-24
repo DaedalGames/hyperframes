@@ -58,21 +58,18 @@ const SWAP_SAFE_LIBRARY_URL =
 const isSwapSafeLibrary = (src: string) =>
   URL.canParse(src) && SWAP_SAFE_LIBRARY_URL.test(new URL(src).href);
 
-// Waiting for web fonts settles once, so a script re-run after a swap is not left with anything pending.
 const FONT_READY_WAIT_RE =
   /\bdocument\s*\.\s*fonts\s*\.\s*ready\s*\.\s*then\s*\(|\bawait\s+document\s*\.\s*fonts\s*\.\s*ready\b/g;
 
 /** Why an authored scene script cannot be swapped out cleanly, or null when it can. */
 function sceneScriptSwapRefusal(script: string): string | null {
   const withoutFontWaits = script.replace(FONT_READY_WAIT_RE, "");
-  // An async function whose only await is the font wait pends no more than the wait itself.
   const awaitedFontsOnly = /\bawait\b/.test(script) && !/\bawait\b/.test(withoutFontWaits);
   const checked = awaitedFontsOnly ? withoutFontWaits.replace(/\basync\b/g, "") : withoutFontWaits;
   const match = SIDE_EFFECT_RE.exec(checked);
   return match ? `its script uses ${match[0].trim()}` : null;
 }
 
-// A project file is held to the inline rules; one that cannot be read is not known.
 const projectScriptRefusal = (text: string | null) =>
   text === null ? "it runs a script that is not a known library" : sceneScriptSwapRefusal(text);
 
@@ -251,7 +248,6 @@ export interface InlineSubCompositionsOptions {
   onMissingComposition?: (srcPath: string, reason?: string) => void;
   /** Tag each top-level host with `data-hf-scene` and report every part's scene, for preview swaps. */
   tagScenes?: boolean;
-  /** With `tagScenes`: the text of a project script a scene loads, by its rebased path, or null. */
   readProjectScript?: (path: string) => string | null;
 }
 

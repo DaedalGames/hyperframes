@@ -101,7 +101,7 @@ function parseNum(value: string | null | undefined): number | null {
   return parseStrictFiniteTimingNumber(value);
 }
 
-function parseElementDurationAttr(element: Element): number | null {
+export function parseElementDurationAttr(element: Element): number | null {
   const publicDuration = element.getAttribute("data-duration");
   const authoredDuration = element.getAttribute(AUTHORED_DURATION_ATTR);
   const resolved = resolveAuthoredTimingWindow({
@@ -259,13 +259,11 @@ function buildTimelineClipLabel(node: Element, kind: RuntimeTimelineClip["kind"]
   return `${humanizeTimelineToken(kind)} ${ordinal + 1}`;
 }
 
-/** A scene the preview unmounted: `host` builds its markup detached, under a copy of the film root. */
 export type ParkedTimelineScene = { name: string; host: () => Element };
 
 export function collectRuntimeTimelinePayload(params: {
   canonicalFps: number;
   parked?: ParkedTimelineScene[];
-  /** Clips of parked scenes by scene, kept across calls; a parked scene's markup only changes by an edit. */
   parkedClips?: Map<string, RuntimeTimelineClip[]>;
 }): RuntimeTimelineMessage {
   const stackingByParent = new Map<Element | null, string>();

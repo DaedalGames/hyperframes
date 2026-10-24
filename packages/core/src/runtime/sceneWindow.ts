@@ -1,7 +1,7 @@
 import { SCENE_NO_SWAP_ATTR, SCENE_PART_ATTR, SCENE_PARTS_META } from "../sceneParts";
 import { STUDIO_PREVIEW_PARKED_SCENE_ATTR as PARKED } from "../studioPreviewMark";
 import { nearPlayhead } from "./farScenes";
-import type { ParkedTimelineScene } from "./timeline";
+import { parseElementDurationAttr, type ParkedTimelineScene } from "./timeline";
 import type { RuntimeTimelineClip } from "./types";
 
 /** A scene the preview may unmount: its host's own attributes time it, and its parts can be run again. */
@@ -12,24 +12,35 @@ const pristine = new Map<string, { html: string; scripts: Element[] }>();
 
 const partsSelector = (name: string, tag = "") =>
   `${tag}[${SCENE_PART_ATTR}="${CSS.escape(name)}"]`;
-const ownNumber = (el: Element, attr: string) =>
-  Number(el.getAttribute(attr)?.trim() || Number.NaN);
+// What the timeline reads: the runtime moves a nested host's authored length off `data-duration`.
+const ownDuration = (el: Element) => parseElementDurationAttr(el) ?? 0;
+
+/** Parked, a clip whose length only its loaded media or its own timeline gives would show to the scene's end. */
+export const clipLengthsWritten = (host: Element): boolean =>
+  Array.from(host.querySelectorAll("video, audio, [data-composition-id]")).every(
+    (el) => ownDuration(el) > 0,
+  );
+
+// A scene of the film itself, whose script a mount may run again and whose clips keep their lengths parked.
+const parkable = (host: Element): boolean => {
+  const film = host.parentElement;
+  return (
+    !host.hasAttribute(SCENE_NO_SWAP_ATTR) &&
+    !host.hasAttribute("data-hf-original-composition-id") &&
+    (isParked(host) || clipLengthsWritten(host)) &&
+    film?.hasAttribute("data-composition-id") === true &&
+    film.closest(`[${SCENE_PART_ATTR}]`) === null
+  );
+};
 
 function windowedHosts(): Array<WindowedScene & { host: Element }> {
   if (!document.querySelector(`meta[name="${SCENE_PARTS_META}"]`)) return [];
   return Array.from(document.querySelectorAll(`[${SCENE_PART_ATTR}]:not(style, script)`))
     .flatMap((host) => {
-      const start = ownNumber(host, "data-start");
-      const duration = ownNumber(host, "data-duration");
-      const film = host.parentElement;
-      const windowed =
-        Number.isFinite(start) &&
-        duration > 0 &&
-        !host.hasAttribute(SCENE_NO_SWAP_ATTR) &&
-        !host.hasAttribute("data-hf-original-composition-id") &&
-        film?.hasAttribute("data-composition-id") === true &&
-        film.closest(`[${SCENE_PART_ATTR}]`) === null;
+      const start = Number(host.getAttribute("data-start")?.trim() || Number.NaN);
+      const duration = ownDuration(host);
       const name = host.getAttribute(SCENE_PART_ATTR)!;
+      const windowed = Number.isFinite(start) && duration > 0 && parkable(host);
       return windowed ? [{ name, host, start, end: start + duration }] : [];
     })
     .sort((a, b) => a.start - b.start);
