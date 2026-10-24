@@ -1,15 +1,7 @@
 // fallow-ignore-file complexity code-duplication
 import { isSelfOrAncestorHidden, memberGroupKey, isMemberGroupHidden } from "./mediaHidden.js";
-import {
-  closeSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  openSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from "fs";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, rmSync, writeFileSync } from "fs";
+import { renameWithRetry } from "../utils/renameWithRetry.js";
 import { join, dirname, isAbsolute, relative } from "path";
 import { parseHTML } from "linkedom";
 import { extractAudioMetadata, type AudioMetadata } from "../utils/ffprobe.js";
@@ -582,11 +574,12 @@ export function parseAudioElements(html: string): AudioElement[] {
   const visiting = new Set<RefResolverEl>();
   const resolveStart = (el: RefResolverEl): number =>
     el.getAttribute("data-start") ? resolveReferencedStart(document, el, startCache, visiting) : 0;
-  // `end` stays a plain numeric read (the mixer derives the real segment length
-  // from data-duration / natural media downstream); guard NaN so a malformed
-  // value never poisons the mix instead of falling back to 0.
-  const parseEnd = (raw: string | null): number => {
-    return parseStrictFiniteTimingNumber(raw) ?? 0;
+  // Same rule as core's compileTimingAttrs: data-end, else start + data-duration, else 0 (unknown).
+  const resolveEnd = (el: RefResolverEl): number => {
+    const end = parseStrictFiniteTimingNumber(el.getAttribute("data-end"));
+    if (end != null) return end;
+    const duration = parseStrictFiniteTimingNumber(el.getAttribute("data-duration"));
+    return duration != null && duration > 0 ? resolveStart(el) + duration : 0;
   };
   const isHidden = isSelfOrAncestorHidden;
 
@@ -619,7 +612,7 @@ export function parseAudioElements(html: string): AudioElement[] {
       id,
       src,
       start: resolveStart(el),
-      end: parseEnd(el.getAttribute("data-end")),
+      end: resolveEnd(el),
       mediaStart: readMediaStart(el),
       playbackRate: readElementRateSpec(el),
       loop: el.getAttribute("loop") !== null,
@@ -1287,7 +1280,7 @@ async function mixGroupMembers(
   try {
     const summed = await sumInSlices(memberTracks, scratchDir, totalDuration, signal, config);
     if (!summed.success) return summed;
-    renameSync(summed.track.srcPath, outputPath);
+    renameWithRetry(summed.track.srcPath, outputPath);
     return { success: true, degradedAutomation: summed.degradedAutomation };
   } finally {
     rmSync(scratchDir, { recursive: true, force: true });
@@ -1355,9 +1348,11 @@ async function mixThroughFloatSum(
   },
 ): Promise<MixResult> {
   const sumPath = join(workDir, "master-sum.wav");
+  const mixStart = Date.now();
   const sum = await mixAudioTracks(tracks, sumPath, totalDuration, signal, config);
   if (!sum.success) return { ...sum, outputPath };
 
+  const masterStart = Date.now();
   const encoderInput = masterChain
     ? (
         await applyAudioFxChain(sumPath, masterChain, join(workDir, "master-fx.wav"), {
@@ -1366,6 +1361,7 @@ async function mixThroughFloatSum(
         })
       ).path
     : sumPath;
+  const encodeStart = Date.now();
   const encoded = await encodeAac(encoderInput, outputPath, totalDuration, {
     signal,
     timeout: config?.ffmpegProcessTimeout ?? DEFAULT_CONFIG.ffmpegProcessTimeout,
@@ -1385,8 +1381,17 @@ async function mixThroughFloatSum(
       failures: [failure],
     };
   }
-  if (config?.keepEncoderInputAt) renameSync(encoderInput, config.keepEncoderInputAt);
-  return { ...sum, outputPath, durationMs: sum.durationMs + encoded.durationMs };
+  if (config?.keepEncoderInputAt) renameWithRetry(encoderInput, config.keepEncoderInputAt);
+  return {
+    ...sum,
+    outputPath,
+    durationMs: sum.durationMs + encoded.durationMs,
+    phaseMs: {
+      mix: masterStart - mixStart,
+      master: encodeStart - masterStart,
+      encode: Date.now() - encodeStart,
+    },
+  };
 }
 
 export async function processCompositionAudio(
@@ -1518,6 +1523,9 @@ export async function processCompositionAudio(
 
           // Fallback: if no duration was specified, probe the actual file
           if (element.end - element.start <= 0) {
+            console.warn(
+              `[audioMixer] ${element.id} has no data-duration or data-end; its length is unknown, so it plays to the end of its source`,
+            );
             let metadata;
             try {
               metadata = await extractAudioMetadata(
@@ -1756,6 +1764,7 @@ export async function processCompositionAudio(
       failures,
     };
   };
+  const prepareMs = Date.now() - startMs;
   if (failures.length > 0) return bail();
 
   // Parsed before any group is mixed, so a malformed master chain fails fast and
@@ -1903,6 +1912,7 @@ export async function processCompositionAudio(
   }
   if (failures.length > 0) return bail();
 
+  const groupsMs = Date.now() - startMs - prepareMs;
   let mixResult: MixResult;
   try {
     mixResult =
@@ -1932,6 +1942,7 @@ export async function processCompositionAudio(
   return {
     ...mixResult,
     durationMs: Date.now() - startMs,
+    phaseMs: { prepare: prepareMs, groups: groupsMs, ...mixResult.phaseMs },
     // Both, when both degraded. `mixResult.error ?? degradedNote` reported only
     // the outer mix and dropped the one that names which GROUPS lost their
     // members' automation — two different losses, and the operator needs to
