@@ -10,7 +10,8 @@ import {
   parkedTimelineScenes,
   park as parkScene,
   rememberScene,
-  scenesNear,
+  scenesToKeep,
+  scenesWanted,
   unpark,
   windowedScenes,
 } from "./sceneWindow";
@@ -4264,16 +4265,20 @@ export function initSandboxRuntimeModular(): void {
   );
   let windowWork: Promise<void> | null = null;
   let windowNear = "";
+  const nextTask = () => new Promise((resolve) => window.setTimeout(resolve, 0));
+  // In three tasks, so frames draw between them; the scene counts as parked, its last frame held, until it settles.
   const mountScene = async (name: string) => {
     const unparked = unpark(name);
     if (!unparked) return;
-    parkedNames.delete(name);
     const { host, scripts } = unparked;
     recordAuthoredMedia(host);
     refreshSvgSelectorAliases();
     const captionHosts = host.querySelector(".caption-group") ? [host] : [];
     const captionOverrides = captionHosts.length > 0 ? await fetchCaptionOverrides() : [];
+    await nextTask();
     await runScriptsAfterFonts(scripts.map((el) => document.body.appendChild(el)));
+    await nextTask();
+    parkedNames.delete(name);
     if (!state.tornDown) settleChangedScenes([host], captionHosts, captionOverrides, true);
   };
   const retireScene = (name: string) => {
@@ -4290,6 +4295,8 @@ export function initSandboxRuntimeModular(): void {
   };
   // Scenes Studio holds mounted for selecting or editing, whatever the playhead does.
   let heldScenes = new Set<string>();
+  // Scenes the window wanted, most recently first: those it left stay mounted while they fit the budget.
+  let recentScenes: string[] = [];
   moveSceneWindow = (time: number): boolean => {
     if (windowScenes.length === 0 || state.tornDown) return false;
     const parked = (name: string) => parkedNames.has(name);
@@ -4297,29 +4304,32 @@ export function initSandboxRuntimeModular(): void {
       ({ name, start, end }) => start <= time && time <= end && parked(name),
     );
     if (windowWork) return landed !== undefined;
-    const near = scenesNear(windowScenes, time);
+    const near = scenesWanted(windowScenes, time, clock.isPlaying());
     for (const name of heldScenes) near.add(name);
     const key = [...near].join("\n");
     if (key === windowNear) return landed !== undefined;
+    recentScenes = [...near, ...recentScenes.filter((name) => !near.has(name))];
     // One step at a time, planned again after each, so a later seek or scrub overtakes the rest.
     const neighbour = windowScenes
       .filter(({ name }) => near.has(name) && parked(name))
       .sort((a, b) => Math.abs(a.start - time) - Math.abs(b.start - time))[0];
     const toMount = landed ?? neighbour;
-    const toRetire = toMount
-      ? []
-      : windowScenes.filter(({ name }) => !near.has(name) && !parked(name));
+    const kept = toMount ? null : scenesToKeep(recentScenes.filter((name) => !near.has(name)));
+    const toRetire = windowScenes.filter(
+      ({ name }) => kept && !near.has(name) && !kept.has(name) && !parked(name),
+    );
     if (!toMount && toRetire.length === 0) {
       windowNear = key;
       return false;
     }
     const wantedNow = (name: string) =>
-      heldScenes.has(name) || scenesNear(windowScenes, state.currentTime).has(name);
+      heldScenes.has(name) ||
+      scenesWanted(windowScenes, state.currentTime, clock.isPlaying()).has(name);
     windowWork = (async () => {
       if (landed) await mountScene(landed.name);
       else if (toMount) {
         // A neighbour waits a turn: a seek queued meanwhile may want another scene first.
-        await new Promise((resolve) => window.setTimeout(resolve, 0));
+        await nextTask();
         if (wantedNow(toMount.name)) await mountScene(toMount.name);
       } else for (const { name } of toRetire) retireScene(name);
     })().finally(() => {

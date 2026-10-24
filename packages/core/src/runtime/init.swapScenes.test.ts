@@ -8,7 +8,7 @@ import { WebAudioTransport } from "./webAudioTransport";
 import { probeAndCacheElementVolume } from "./mediaVolumeEnvelope.js";
 import { wrapScopedCompositionScript } from "../compiler/compositionScoping";
 import { AFTER_FONTS_SCRIPT_TYPE } from "../compiler/scriptRuns";
-import { parkFarScenesAtBoot } from "./sceneWindow";
+import { parkFarScenesAtBoot, setKeptSceneElementsForTests } from "./sceneWindow";
 
 vi.mock("./mediaVolumeEnvelope.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./mediaVolumeEnvelope.js")>();
@@ -54,9 +54,9 @@ function tl(label: string, duration = 2): Tl {
   } as unknown as Tl;
 }
 
-function trackingRoot() {
+function trackingRoot(duration = 6) {
   const children: Array<{ child: unknown; at: number | undefined }> = [];
-  const root = tl("root", 6) as Tl & { remove: (c: unknown) => void };
+  const root = tl("root", duration) as Tl & { remove: (c: unknown) => void };
   root.add = ((child: unknown, at?: number) => void children.push({ child, at })) as Tl["add"];
   root.getChildren = (() => children.map((c) => c.child)) as Tl["getChildren"];
   root.remove = (child) => {
@@ -92,7 +92,7 @@ function preview(scenes: Scene[], shared = "s1", sharedMarkup = "") {
     `<meta name="hf-scene-parts" content="${manifest}"><style>.shared{}</style>` +
     scenes.map((s) => `<style data-hf-scene="${s.id}">${s.css}</style>`).join("");
   const body =
-    `<div data-composition-id="main" data-root="true" data-start="0" data-duration="6">${sharedMarkup}` +
+    `<div data-composition-id="main" data-root="true" data-start="0" data-duration="${Math.max(6, ...scenes.map((s) => s.start + 2))}">${sharedMarkup}` +
     scenes
       .map(
         (s) =>
@@ -1764,6 +1764,8 @@ describe("the preview's scene window", () => {
     for (const k of Object.keys(made)) delete made[k];
     for (const label of ["a1", "a2", "b"]) made[label] = tl(label);
     (window as unknown as { __made: typeof made }).__made = made;
+    // None kept: every scene the window leaves parks, unless a test gives a budget.
+    keptBudget = setKeptSceneElementsForTests(0);
   });
   afterEach(() => {
     window.__hfRuntimeTeardown?.();
@@ -1771,7 +1773,9 @@ describe("the preview's scene window", () => {
     document.body.innerHTML = "";
     delete window.__hfSceneAnimations;
     vi.restoreAllMocks();
+    setKeptSceneElementsForTests(keptBudget);
   });
+  let keptBudget = 0;
 
   it("parks a scene away from the start, keeping its timing, and never runs its script", async () => {
     bootWindowed([S0, S1, S2], trackingRoot().root);
@@ -1803,7 +1807,7 @@ describe("the preview's scene window", () => {
     Reflect.deleteProperty(document, "fonts");
     expect(sceneHost("s2").textContent).toBe("two");
     for (let i = 0; i < 5; i++) await tick();
-    expect(parked()).toEqual(["s0"]);
+    expect(parked()).toEqual(["s0", "s1"]);
     expect(window.__timelines?.s2).toBe(made.a2);
     expect(children.map((c) => c.child)).toContain(made.a2);
     expect(made.a1!.kill).toHaveBeenCalled();
@@ -1819,6 +1823,10 @@ describe("the preview's scene window", () => {
     bootWindowed([S0, S1, S2], trackingRoot().root);
     await tick();
     await seekAndSettle(0.5);
+    window.__player?.seek(5);
+    expect(sceneHost("s0").getAttribute("style")).toContain("visibility: visible");
+    // A frame drawn between the mount's tasks, the scene not yet settled, still holds.
+    await tick();
     window.__player?.seek(5);
     expect(sceneHost("s0").getAttribute("style")).toContain("visibility: visible");
     await window.__hfWaitForSeekCompletion?.();
@@ -1914,7 +1922,38 @@ describe("the preview's scene window", () => {
     await window.__hfSwapScenes!(preview([{ ...S0, body: untrimmed, hash: "h0b" }, S1, S2]).html);
     await seekAndSettle(5);
     for (let i = 0; i < 5; i++) await tick();
+    expect(parked()).toEqual(["s1"]);
+  });
+
+  it("mounts the next scene once its cut is within the lead of a playing film, not at the cut before it", async () => {
+    window.requestAnimationFrame = (() => 1) as typeof window.requestAnimationFrame;
+    bootWindowed([S0, S1, { ...S2, start: 30 }], trackingRoot(32).root);
+    await tick();
+    window.__player?.play();
+    window.__player?.seek(2.5, { keepPlaying: true });
+    await window.__hfWaitForSeekCompletion?.();
+    for (let i = 0; i < 5; i++) await tick();
+    expect(parked()).toEqual(["s0", "s2"]);
+    window.__player?.seek(21, { keepPlaying: true });
+    for (let i = 0; i < 5; i++) await tick();
+    expect(parked()).toEqual(["s0", "s1"]);
+    expect(sceneHost("s2").textContent).toBe("two");
+  });
+
+  it("keeps the scenes the playhead left mounted, most recent first, while they fit the budget", async () => {
+    // Each scene here is its host and one child: two elements.
+    setKeptSceneElementsForTests(2);
+    bootWindowed([S0, S1, S2], trackingRoot().root);
+    await tick();
+    await seekAndSettle(2.5);
+    for (let i = 0; i < 5; i++) await tick();
     expect(parked()).toEqual([]);
+    const left = sceneHost("s1");
+    await seekAndSettle(5);
+    for (let i = 0; i < 5; i++) await tick();
+    expect(parked()).toEqual(["s0"]);
+    await seekAndSettle(2.5);
+    expect(sceneHost("s1")).toBe(left);
   });
 
   const audio = (src: string) => `<audio src="${src}" data-start="0.5" data-duration="1"></audio>`;
@@ -1940,7 +1979,7 @@ describe("the preview's scene window", () => {
     await window.__hfWaitForSeekCompletion?.();
     for (const spy of [schedule, stop]) spy.mockClear();
     for (let i = 0; i < 5; i++) await tick();
-    expect(parked()).toEqual([]);
+    expect(parked()).toEqual(["s0"]);
     expect(stop).not.toHaveBeenCalled();
     expect(schedule.mock.calls.map(([el]) => el.getAttribute("src"))).toEqual(["/two.mp3"]);
   });
@@ -1956,7 +1995,7 @@ describe("the preview's scene window", () => {
     release.mockClear();
     await seekAndSettle(5);
     for (let i = 0; i < 5; i++) await tick();
-    expect(parked()).toEqual(["s0"]);
+    expect(parked()).toEqual(["s0", "s1"]);
     const kept = release.mock.calls.at(-1)?.[0].map((el) => el.getAttribute("src"));
     expect(kept).toEqual(["/two.mp3"]);
   });

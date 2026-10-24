@@ -1,6 +1,5 @@
 import { SCENE_NO_SWAP_ATTR, SCENE_PART_ATTR, SCENE_PARTS_META } from "../sceneParts";
 import { STUDIO_PREVIEW_PARKED_SCENE_ATTR as PARKED } from "../studioPreviewMark";
-import { nearPlayhead } from "./farScenes";
 import { parseElementDurationAttr, type ParkedTimelineScene } from "./timeline";
 import type { RuntimeTimelineClip } from "./types";
 
@@ -52,10 +51,39 @@ export const windowedScenes = (): WindowedScene[] =>
     .filter(({ name }) => pristine.has(name))
     .map(({ name, start, end }) => ({ name, start, end }));
 
-/** The names of the scenes to keep mounted at `time`: the playing scene and a neighbour each side. */
-export function scenesNear(scenes: WindowedScene[], time: number): Set<string> {
-  const near = nearPlayhead(scenes, time);
-  return new Set(scenes.filter((_, i) => near[i]).map((s) => s.name));
+// Playing, a scene mounts this long before its cut, so the cut's frames do no mount work.
+const MOUNT_AHEAD_SECONDS = 10;
+
+/** The scenes wanted mounted at `time`: the playing ones, then those starting within the lead, or paused, the next. */
+export function scenesWanted(scenes: WindowedScene[], time: number, playing: boolean): Set<string> {
+  const next = scenes.find((s) => s.start > time);
+  const wanted = (s: WindowedScene) => {
+    if (s.start <= time) return time <= s.end;
+    return playing ? s.start <= time + MOUNT_AHEAD_SECONDS : s === next;
+  };
+  return new Set(scenes.filter(wanted).map((s) => s.name));
+}
+
+// At most about 120 MB at the ~2 KB of renderer memory per element a long film measured.
+let keptSceneElements = 60_000;
+export const setKeptSceneElementsForTests = (elements: number): number => {
+  const was = keptSceneElements;
+  keptSceneElements = elements;
+  return was;
+};
+
+/** Of the mounted scenes the playhead left, most recent first, those that stay mounted within the element budget. */
+export function scenesToKeep(recentFirst: string[]): Set<string> {
+  const kept = new Set<string>();
+  let elements = 0;
+  for (const name of recentFirst) {
+    const host = hostOf(name);
+    if (!host || isParked(host)) continue;
+    elements += host.getElementsByTagName("*").length + 1;
+    if (elements > keptSceneElements) break;
+    kept.add(name);
+  }
+  return kept;
 }
 
 export const hostOf = (name: string): Element | null =>
@@ -96,7 +124,7 @@ export function parkFarScenesAtBoot(time = 0): void {
   pristine.clear();
   parkedClips.clear();
   const hosts = windowedHosts();
-  const near = scenesNear(hosts, time);
+  const near = scenesWanted(hosts, time, false);
   for (const { name, host } of hosts) {
     const scripts = Array.from(document.querySelectorAll(partsSelector(name, "script")));
     pristine.set(name, {

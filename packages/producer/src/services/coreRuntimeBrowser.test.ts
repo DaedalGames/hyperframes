@@ -1344,6 +1344,8 @@ describe("core runtime browser contract", () => {
     });
     try {
       const scenes = [0, 1, 2, 3, 4, 5];
+      // Over half the preview's kept-scene budget each, so of the scenes the playhead left only the latest stays.
+      const filler = `<p>${"<i></i>".repeat(31_000)}</p>`;
       const hosts = scenes
         .map(
           (i) =>
@@ -1358,7 +1360,7 @@ describe("core runtime browser contract", () => {
       for (const i of scenes)
         writeFileSync(
           resolve(dir, `s${i}.html`),
-          `<template id="s${i}-template"><div data-composition-id="s${i}" data-duration="2">${"<b>x</b>".repeat(400)}<audio src="tone.wav" data-start="0" data-duration="1"></audio><script>const tl = gsap.timeline({ paused: true }); tl.to('[data-composition-id="s${i}"] b', { opacity: 0.5, duration: 1 }); window.__timelines["s${i}"] = tl;</script></div></template>`,
+          `<template id="s${i}-template"><div data-composition-id="s${i}" data-duration="2">${"<b>x</b>".repeat(400)}${filler}<audio src="tone.wav" data-start="0" data-duration="1"></audio><script>const tl = gsap.timeline({ paused: true }); tl.to('[data-composition-id="s${i}"] b', { opacity: 0.5, duration: 1 }); window.__timelines["s${i}"] = tl;</script></div></template>`,
         );
       const html = addScenePartsManifest(
         await bundleToSingleHtml(dir, { sceneParts: true, staticGuard: false }),
@@ -1392,7 +1394,7 @@ describe("core runtime browser contract", () => {
         return metrics.find((m) => m.name === "Nodes")!.value - inPage;
       };
       const before = await kept();
-      const unmounted = await page.evaluate(async () => {
+      await page.evaluate(async () => {
         const player = window.__player as unknown as {
           play: () => void;
           seek: (time: number, options: { keepPlaying: boolean }) => void;
@@ -1403,11 +1405,16 @@ describe("core runtime browser contract", () => {
           await window.__hfWaitForSeekCompletion?.();
           await new Promise((settle) => setTimeout(settle, 200));
         }
-        return document.querySelectorAll("[data-hf-parked-scene]").length;
       });
-      // Four scenes went out of the window, each over 800 nodes. Chrome keeps a captured element alive while
+      // The window unmounts only once it has mounted what is ahead.
+      await page.waitForFunction(
+        () => document.querySelectorAll("[data-hf-parked-scene]").length >= 4,
+      );
+      // Four scenes unmounted, each over 30k nodes. Chrome keeps a captured element alive while
       // its audio context lives, so each scene's audio element stays, but nothing of the scene around it.
-      expect(unmounted).toBe(4);
+      expect(
+        await page.evaluate(() => document.querySelectorAll("[data-hf-parked-scene]").length),
+      ).toBe(4);
       expect((await kept()) - before).toBeLessThan(800);
     } finally {
       await audioBrowser.close();
