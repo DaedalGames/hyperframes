@@ -4863,7 +4863,18 @@ export function initSandboxRuntimeModular(): void {
     if (revision !== tweensRenderedThrough.revision)
       tweensRenderedThrough = { revision, time: Number.NEGATIVE_INFINITY };
     const firstRenders = t > tweensRenderedThrough.time;
-    const hideClipsAgain = firstRenders ? showHiddenClips() : null;
+    // Only clips live in the span rendered for the first time hold tweens that render now.
+    const windowOptions = {
+      timelineRegistry: window.__timelines ?? {},
+      resolver: timingResolverFor(true),
+    };
+    const renderedFrom = tweensRenderedThrough.time;
+    const hideClipsAgain = firstRenders
+      ? showHiddenClips((el) => {
+          const span = runtimeElementWindow(el, windowOptions);
+          return !span || (span.start <= t && span.end >= renderedFrom);
+        })
+      : null;
     if (tl) {
       // #10: when data-duration exceeds the timeline's intrinsic length the
       // engine requests frames past the last tween. Seeking a paused GSAP

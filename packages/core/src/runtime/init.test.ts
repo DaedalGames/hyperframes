@@ -563,6 +563,27 @@ describe("initSandboxRuntimeModular", () => {
       },
     );
 
+    it("shows only the clips a first render crosses, not later ones", () => {
+      document.body.innerHTML =
+        `<div data-composition-id="main" data-root="true" data-start="0" data-duration="10" data-width="1920" data-height="1080">` +
+        `<div id="line" style="position: absolute" data-start="2" data-duration="2"></div>` +
+        `<div id="later" style="position: absolute" data-start="8" data-duration="1"></div>` +
+        `</div>`;
+      const seen: string[] = [];
+      const read = () => {
+        for (const id of ["line", "later"])
+          seen.push(document.getElementById(id)!.style.visibility);
+        return 1;
+      };
+      const tl = gsap.timeline({ paused: true });
+      tl.to({ x: 0 }, { x: read, duration: 0.1 }, 3);
+      window.__timelines = { main: tl as unknown as RuntimeTimelineLike };
+      initSandboxRuntimeModular();
+      window.__player?.seek(1);
+      window.__player?.seek(3.5);
+      expect(seen).toEqual(["visible", "hidden"]);
+    });
+
     it("keeps a hidden scene's contents hidden when a rewound GSAP set marks one visible inline", () => {
       hideTimedClipsUntilFirstPass();
       try {
