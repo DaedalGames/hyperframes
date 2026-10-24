@@ -81,7 +81,9 @@ export function park(name: string): Element | null {
 }
 
 /** Puts a parked scene back as the page first had it, with what the runtime wrote on its host; returns its scripts. */
-export function unpark(name: string): { host: Element; scripts: Element[] } | null {
+export function unpark(
+  name: string,
+): { host: Element; placeholder: Element; scripts: Element[] } | null {
   const placeholder = hostOf(name);
   const parts = pristine.get(name);
   if (!placeholder || !isParked(placeholder) || !parts) return null;
@@ -91,7 +93,7 @@ export function unpark(name: string): { host: Element; scripts: Element[] } | nu
   for (const { name: attr, value } of Array.from(placeholder.attributes))
     if (attr !== PARKED) host.setAttribute(attr, value);
   placeholder.replaceWith(host);
-  return { host, scripts: parts.scripts.map((el) => el.cloneNode(true) as Element) };
+  return { host, placeholder, scripts: parts.scripts.map((el) => el.cloneNode(true) as Element) };
 }
 
 /**

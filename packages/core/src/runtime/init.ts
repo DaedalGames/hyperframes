@@ -4269,7 +4269,10 @@ export function initSandboxRuntimeModular(): void {
   const mountScene = async (name: string) => {
     const unparked = unpark(name);
     if (!unparked) return;
-    const { host, scripts } = unparked;
+    const { host, placeholder, scripts } = unparked;
+    // The host took the stand-in's style, a display:none the visibility pass gave it included; showing undoes it.
+    const hidden = displayBeforeHide.get(placeholder as StylableElement);
+    if (hidden) displayBeforeHide.set(host as StylableElement, hidden);
     recordAuthoredMedia(host);
     refreshSvgSelectorAliases();
     const captionHosts = host.querySelector(".caption-group") ? [host] : [];

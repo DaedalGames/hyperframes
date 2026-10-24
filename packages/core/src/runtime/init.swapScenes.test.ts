@@ -1829,6 +1829,16 @@ describe("the preview's scene window", () => {
     expect(sceneHost("s2").getAttribute("style")).toContain("visibility: visible");
   });
 
+  it("shows a mounted scene whose empty stand-in the visibility pass hid by display", async () => {
+    // In flow, an empty stand-in is a leaf clip, which the visibility pass hides with display:none.
+    bootWindowed([S0, S1, { ...S2, extraAttrs: ' style="position: static"' }], trackingRoot().root);
+    await tick();
+    expect(sceneHost("s2").getAttribute("style")).toContain("display: none");
+    await seekAndSettle(5);
+    expect(sceneHost("s2").textContent).toBe("two");
+    expect(sceneHost("s2").getAttribute("style")).not.toContain("display: none");
+  });
+
   it("mounts a scene Studio holds for editing and keeps it until Studio lets go", async () => {
     bootWindowed([S0, S1, S2], trackingRoot().root);
     await tick();
