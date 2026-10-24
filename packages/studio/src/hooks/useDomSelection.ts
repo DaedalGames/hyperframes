@@ -309,8 +309,8 @@ export function useDomSelection({
       }
       if (!doc) return null;
 
-      // A long film's preview mounts only the scenes near the playhead: have the element's scene mounted first.
-      await holdScenesOf(iframe, element);
+      const held = holdScenesOf(iframe, element);
+      if (held) await held;
       reapplyPositionEditsAfterSeek(doc);
 
       const targetElement = findElementForTimelineElement(doc, element, {
@@ -348,7 +348,7 @@ export function useDomSelection({
       // and Delete acts on the canvas first — so it removed that, not the clip.
       applyDomSelection(null, { revealPanel: false, announce: false });
     },
-    [applyDomSelection, buildDomSelectionForTimelineElement],
+    [applyDomSelection, buildDomSelectionForTimelineElement, previewIframeRef],
   );
 
   // Forward handle to the group refresher defined below: the single-selection

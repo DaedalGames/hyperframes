@@ -22,8 +22,8 @@ describe("holdScenesOf", () => {
     expect(hold.mock.calls).toEqual([[["main", "s23", "s23"]], [[]]]);
   });
 
-  it("does nothing in a preview that mounts every scene", async () => {
-    await expect(holdScenesOf(previewWith(), null)).resolves.toBeUndefined();
-    await expect(holdScenesOf(null, null)).resolves.toBeUndefined();
+  it("gives nothing to wait for in a preview that mounts every scene", () => {
+    expect(holdScenesOf(previewWith(), null)).toBeUndefined();
+    expect(holdScenesOf(null, null)).toBeUndefined();
   });
 });
