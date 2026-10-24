@@ -877,7 +877,8 @@ export async function renderChunk(
         ? "mp4"
         : (plan.dimensions.format as "mp4" | "mov" | "webm");
       const basePreset = getEncoderPreset(job.config.quality, presetFormat, undefined);
-      const preset = resolvePresetForLockedEncoder(basePreset, encoder.encoder);
+      const lockedPreset = resolvePresetForLockedEncoder(basePreset, encoder.encoder);
+      const preset = { ...lockedPreset, preset: process.env.HF_CHUNK_X264_PRESET || lockedPreset.preset };
       const effectiveQuality = encoder.crf ?? preset.quality;
       const effectiveBitrate = encoder.crf != null ? undefined : encoder.bitrate;
       // For non-pngseq, encodeStage writes to `outputPath` when `isPngSequence`
