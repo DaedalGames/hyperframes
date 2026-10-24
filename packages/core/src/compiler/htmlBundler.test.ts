@@ -3525,6 +3525,33 @@ describe("bundleToSingleHtml sceneParts", () => {
     });
   });
 
+  it("gives each scene its own copy of a helper it shares, so a scene mounts without the one that loaded it first", async () => {
+    const dir = makeTempProject({
+      "index.html": `<!doctype html><html><head></head><body>
+  <div data-composition-id="main" data-width="1920" data-height="1080" data-duration="4">
+    <div data-composition-id="late" data-composition-src="compositions/late.html" data-start="2" data-duration="2"></div>
+    <div data-composition-id="early" data-composition-src="compositions/early.html" data-start="0" data-duration="2"></div>
+  </div></body></html>`,
+      "lib/kit.js": `window.Kit = { build: function (id) { return id; } };`,
+      ...Object.fromEntries(
+        ["late", "early"].map((n) => [
+          `compositions/${n}.html`,
+          `<template id="${n}-template"><div data-composition-id="${n}"><p>${n}</p><script src="../lib/kit.js"></script><script>window.Kit.build("${n}");</script></div></template>`,
+        ]),
+      ),
+    });
+    const doc = parseHTML(await bundleToSingleHtml(dir, { sceneParts: true })).document;
+    const runs = (scene: string) =>
+      [...doc.querySelectorAll(`script[data-hf-scene="${scene}"]`)]
+        .map((el) => el.textContent)
+        .join("");
+    expect([runs("late").includes("window.Kit ="), runs("early").includes("window.Kit =")]).toEqual(
+      [true, true],
+    );
+    const rendered = parseHTML(await bundleToSingleHtml(dir)).document.documentElement.outerHTML;
+    expect(rendered.match(/window\.Kit =/g)).toHaveLength(1);
+  });
+
   it("lets a scene measure text on an unattached canvas, call its own animate and wait on font loads, and nothing more", async () => {
     const measure = `let ctx = null; window.measure = (s) => { if (!ctx) { ctx = document.createElement("canvas").getContext("2d"); } ctx.font = "800 46px Outfit"; return ctx.measureText(s).width; };`;
     const scenes: Record<string, string> = {

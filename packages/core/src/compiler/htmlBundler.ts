@@ -1254,8 +1254,10 @@ async function bundleProject(projectDir: string, options?: BundleOptions): Promi
       seenCompScriptSrcs.add(extSrc);
       continue;
     }
-    if (seenCompScriptSrcs.has(extSrc)) continue;
-    seenCompScriptSrcs.add(extSrc);
+    // A scene mounts and runs alone, so each scene keeps its own copy of what it loads.
+    const seenKey = scriptItem.scene === undefined ? extSrc : `${scriptItem.scene}\n${extSrc}`;
+    if (seenCompScriptSrcs.has(seenKey)) continue;
+    seenCompScriptSrcs.add(seenKey);
     if (isRelativeUrl(extSrc) && scriptItem.type !== "module") {
       const jsPath = resolveEntryUrl(extSrc);
       const js = jsPath ? safeReadFile(jsPath) : null;
