@@ -2,16 +2,21 @@ import { isElementNode } from "./domRealm";
 import { CLIP_HIDDEN_ATTR } from "./timedClipHide";
 import type { RuntimeTimelineChildLike } from "./types";
 
-type Child = RuntimeTimelineChildLike & { timeScale?: () => number; repeat?: () => number };
+type Child = RuntimeTimelineChildLike & {
+  timeScale?: () => number;
+  repeat?: () => number;
+  totalDuration?: () => number;
+  getChildren?: (
+    nested?: boolean,
+    tweens?: boolean,
+    timelines?: boolean,
+    ignoreBeforeTime?: number,
+  ) => Child[];
+};
 
-/**
- * The hidden clips holding a target of a tween that starts in (from, to], so renders for the first time on a seek
- * there. Null when a nested timeline is scaled or repeats, as its children's times are then not plain offsets.
- */
 const plain = (child: Child) => (child.timeScale?.() ?? 1) === 1 && (child.repeat?.() ?? 0) === 0;
-const childrenOf = (parent: RuntimeTimelineChildLike) =>
-  (parent.getChildren?.(false, true, true) ?? []) as Child[];
 const startOf = (child: Child, offset: number) => offset + (child.startTime?.() ?? 0);
+const endOf = (child: Child, start: number) => start + (child.totalDuration?.() ?? Infinity);
 const targetsOf = (child: Child) => child.targets?.() ?? [];
 
 function addHiddenClipsHolding(target: unknown, clips: Set<Element>): void {
@@ -19,20 +24,34 @@ function addHiddenClipsHolding(target: unknown, clips: Set<Element>): void {
     if (el.hasAttribute(CLIP_HIDDEN_ATTR)) clips.add(el);
 }
 
+/**
+ * The hidden clips holding a target of a tween that starts in (from, to], so renders for the first time on a seek
+ * there. Null when a nested timeline is scaled or repeats, as its children's times are then not plain offsets.
+ */
 export function clipsFirstRenderedIn(
   timeline: RuntimeTimelineChildLike,
   from: number,
   to: number,
 ): Set<Element> | null {
   const clips = new Set<Element>();
-  const visit = (parent: RuntimeTimelineChildLike, offset: number): boolean =>
-    childrenOf(parent).every((child) => {
-      if (!plain(child)) return false;
-      const start = startOf(child, offset);
-      if (child.getChildren) return visit(child, start);
-      if (start > from && start <= to)
-        for (const target of targetsOf(child)) addHiddenClipsHolding(target, clips);
-      return true;
+  const overlaps = (start: number, end: number) => end > from && start <= to;
+  const timelinesIn = (parent: Child) => parent.getChildren?.(false, false, true) ?? [];
+  // ignoreBeforeTime leaves out tweens that started before the span, which were drawn already.
+  const tweensIn = (parent: Child, offset: number) =>
+    parent.getChildren?.(false, true, false, from - offset) ?? [];
+  const addTargets = (tween: Child, offset: number) => {
+    const start = startOf(tween, offset);
+    if (start > from && start <= to)
+      for (const target of targetsOf(tween)) addHiddenClipsHolding(target, clips);
+  };
+  // Timelines wholly before the span were drawn already and ones after it are not reached, so neither is opened.
+  const visit = (parent: Child, offset: number): boolean => {
+    const nestedPlain = timelinesIn(parent).every((nested) => {
+      const start = startOf(nested, offset);
+      return plain(nested) && (!overlaps(start, endOf(nested, start)) || visit(nested, start));
     });
-  return visit(timeline, 0) ? clips : null;
+    if (nestedPlain) for (const tween of tweensIn(parent, offset)) addTargets(tween, offset);
+    return nestedPlain;
+  };
+  return visit(timeline as Child, 0) ? clips : null;
 }
