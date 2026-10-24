@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { compareVersions } from "compare-versions";
 import {
   DEFAULT_HISTORY_ROOT,
   HistoryBusyError,
@@ -224,12 +225,30 @@ async function directOwner(
   };
 }
 
+/** The first release whose preview serves POST /history/checkpoint, which every command files its reports through. */
+const FIRST_PREVIEW_WITH_CHECKPOINT = "0.8.152";
+
+/** A dev server, or any version that is not a release number, is taken as current. */
+function previewTooOld(version: string): boolean {
+  return (
+    /^\d+\.\d+\.\d+/.test(version) && compareVersions(version, FIRST_PREVIEW_WITH_CHECKPOINT) < 0
+  );
+}
+
 /** One owner: a preview that keeps this project's history, else the engine, which refuses a second opener. */
 async function connect(
   projectDir: string,
   ownerWaitMs?: number,
 ): Promise<{ owner: Owner; turn: Turn | null }> {
   const server = await historyDeps.findServer(projectDir);
+  if (server && previewTooOld(server.version)) {
+    return directOwner(projectDir, ownerWaitMs).catch((error) => {
+      if (!(error instanceof HistoryBusyError)) throw error;
+      throw new Refusal(
+        `The preview on port ${server.port} is v${server.version}, older than this CLI, and holds this project's history without the routes it needs. Restart it with hyperframes preview.`,
+      );
+    });
+  }
   if (server) {
     const route = (path: string) => studioApiUrl(server, `history${path}`);
     // 404, or gone since the scan: no preview keeps this history, and the engine's lock guards the rest.
