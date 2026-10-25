@@ -1,7 +1,6 @@
 // fallow-ignore-file code-duplication complexity
 import { setPreviewRasterScale } from "./previewRasterHints";
 import { refreshSvgSelectorAliases } from "../compiler/svgSelectorAliases";
-import { COMPOSITION_SCRIPT_ERROR_LABEL } from "../compiler/compositionScoping";
 import { RUNTIME_FILLER } from "./protocol";
 import {
   preloadMedia,
@@ -166,7 +165,7 @@ import type {
   SceneAnimation,
 } from "./types";
 import type { PlayerAPI } from "../core.types";
-import { recordStartupError, swallow } from "./diagnostics";
+import { recordStartupError, SCENE_CALLBACK_ERROR_PREFIX, swallow } from "./diagnostics";
 import { readTimelineDurationSeconds } from "./timelineDuration";
 import {
   CHANGE_DRIVEN_SERVICE_MIN_INTERVAL_MS,
@@ -4668,12 +4667,13 @@ export function initSandboxRuntimeModular(): void {
       pauseTimelineIfPossible(timeline);
       seekGsapTimeline(timeline, timeSeconds, suppressEvents, gsapStructureOf(timeline));
     } catch (err) {
-      // Usually the scene's own callback threw; say so once, in the log a render keeps.
+      // The scene's own callback threw. A warning, not a script error: it must not turn a
+      // timed-out timeline wait into a script failure.
       const detail = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
       const key = `${compositionId}\n${detail}`;
       if (reportedSceneErrors.has(key)) return;
       reportedSceneErrors.add(key);
-      console.error(`${COMPOSITION_SCRIPT_ERROR_LABEL} ${detail} (in "${compositionId}" timeline)`);
+      console.warn(`${SCENE_CALLBACK_ERROR_PREFIX} "${compositionId}" ${detail}`);
     }
   };
 
