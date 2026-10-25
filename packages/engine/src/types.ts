@@ -168,6 +168,8 @@ export interface CaptureOptions {
    */
   fps: Fps;
   format?: "jpeg" | "png";
+  /** Page background stays transparent so frames carry alpha. Defaults to `format === "png"`. */
+  transparent?: boolean;
   quality?: number;
   /**
    * Opt into sub-frame multi-sample motion blur (issue #4010). Absent means off and the
