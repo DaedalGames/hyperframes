@@ -1557,7 +1557,7 @@ describe("core runtime browser contract", () => {
           `<!doctype html><html><body><div data-composition-id="main" data-duration="12" data-width="320" data-height="180">${hosts}</div></body></html>`,
         );
         writeFileSync(resolve(dir, "tone.wav"), silentWav());
-        // s0 and s1 are mounted at open, their scripts run with the film's: a font wait's work there has no known scene.
+        // s0 and s1 mount at open and their scripts run with the film's: a font wait's work there has no known scene.
         for (const i of scenes)
           writeFileSync(
             resolve(dir, `s${i}.html`),

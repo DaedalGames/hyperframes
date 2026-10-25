@@ -8,7 +8,7 @@ const OUT_OF_FLOW = new Set(["absolute", "fixed"]);
 
 type Timed = { host: HTMLElement; span: { start: number; end: number } };
 
-/** Whether each span, sorted by start, is the playing one or a neighbour; between scenes, the one before the gap plays. */
+/** Whether each span, sorted by start, is the playing one or a neighbour; in a gap, the one before it plays. */
 function nearPlayhead(spans: Array<{ start: number; end: number }>, time: number): boolean[] {
   const playing = spans.flatMap((span, i) => (span.start <= time && time <= span.end ? [i] : []));
   const before = spans.filter((span) => span.start <= time).length - 1;
@@ -33,9 +33,8 @@ const boxOf = (host: Element, size: string): Box => ({
 });
 
 /**
- * Each host's box and position as of its last render, reported after layout: read at a cut, where the cut
- * leaves the page's style dirty, they would force a full style and layout pass first. A host not reported
- * yet is read directly.
+ * Each host's box and position as of its last render, so a cut reads them without forcing style and layout.
+ * A host not reported yet is read directly.
  */
 function createLastRender() {
   const rendered = new WeakMap<Element, Box>();
@@ -66,9 +65,8 @@ function createLastRender() {
 }
 
 /**
- * Preview scenes beyond the playing scene's neighbours stay mounted but skip style, layout and paint.
- * Each keeps the size it had when last rendered, so a script measuring its host reads the same box.
- * Only preview bundles tag scene hosts, so a render never gets here with any.
+ * Preview scenes beyond the playing scene's neighbours stay mounted but skip style, layout and paint,
+ * keeping their last rendered size. Only preview bundles tag scene hosts, so renders never skip.
  */
 export function createFarSceneSkip(spanOf: (host: Element) => Span): (time: number) => void {
   let hosts: HTMLElement[] | null = null;

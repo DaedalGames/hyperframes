@@ -2037,7 +2037,7 @@ describe("the preview's scene window", () => {
       set: () => {},
       globalTimeline: { getChildren: () => onGlobal },
     };
-    // While s2's scripts run, the root lands on GSAP's global timeline, as a rebuild of it does, beside one of s2's own.
+    // While s2's scripts run, the root lands on GSAP's global timeline, as a rebuild does, beside one of s2's own.
     (window as unknown as { __lateStart: () => void }).__lateStart = () => (onGlobal = [root, own]);
     bootWindowed([S0, S1, { ...S2, script: "window.__lateStart && window.__lateStart();" }], root);
     window.__hfSceneAnimations = {};
