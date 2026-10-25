@@ -6076,6 +6076,14 @@ describe("initSandboxRuntimeModular", () => {
       expect(cached()).toEqual(audios.map((a) => a.getAttribute("src")).sort());
       expect(fetchMock).toHaveBeenCalledTimes(12);
     });
+
+    it("plays the film when a clip's src cannot be read as a URL", async () => {
+      mountAudio("http://localhost:PORT/vo.mp3");
+
+      await startPlayback();
+
+      expect(window.__player?.isPlaying()).toBe(true);
+    });
   });
 
   describe("Web Audio on a long film", () => {
