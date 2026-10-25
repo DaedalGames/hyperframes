@@ -3674,7 +3674,7 @@ describe("bundleToSingleHtml sceneParts", () => {
     ]);
   });
 
-  it("lets a scene draw in 2D, chain a timeline into the registry, call its own animate and wait on font loads, and nothing more", async () => {
+  it("lets a scene measure text on an unattached canvas, chain a timeline into the registry, call its own animate and wait on font loads, and nothing more", async () => {
     const measure = `let ctx = null; window.measure = (s) => { if (!ctx) { ctx = document.createElement("canvas").getContext("2d"); } ctx.font = "800 46px Outfit"; return ctx.measureText(s).width; };`;
     const scenes: Record<string, string> = {
       measureCanvas: `<script>${measure}</script>`,
@@ -3728,9 +3728,9 @@ describe("bundleToSingleHtml sceneParts", () => {
       fontLoads: null,
       fontLoadThen: null,
       fontLoadAwait: null,
-      namedCanvas: null,
-      canvasBack: null,
-      drawOnStage: null,
+      namedCanvas: "its script uses getContext",
+      canvasBack: "its script uses getContext",
+      drawOnStage: "its script uses getContext",
       registeredChain: null,
       registeredChainByKey: null,
       unregisteredChain: "its script uses gsap.timeline().to(",

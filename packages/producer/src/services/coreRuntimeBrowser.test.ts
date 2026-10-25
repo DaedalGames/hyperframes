@@ -1606,15 +1606,15 @@ describe("core runtime browser contract", () => {
     }
   }, 60_000);
 
-  it("draws a mounted-again scene's 2D canvas as it first did, drawn once at load or on each update", async () => {
+  it("keeps a scene that draws on a 2D canvas mounted, and mounts a chained-timeline scene again as it was", async () => {
     const dir = mkdtempSync(resolve(tmpdir(), "scene-window-canvas-"));
     const scenePage = await browser.newPage();
     try {
       const scripts = [
-        // Drawn once, as the script runs.
-        `const g = document.querySelector("canvas").getContext('2d'); g.fillStyle = "#c33"; g.fillRect(10, 10, 60, 30); g.font = "20px sans-serif"; g.fillText("once", 20, 80); const tl = gsap.timeline({ paused: true }); tl.to({ t: 0 }, { t: 1, duration: 2 }); window.__timelines["s0"] = tl;`,
-        // Cleared and drawn again by its timeline, chained as it is registered.
-        `const g = document.querySelector("canvas").getContext('2d'); const clock = { t: 0 }; window.__timelines["s1"] = gsap.timeline({ paused: true, onUpdate: () => { g.clearRect(0, 0, 320, 180); g.fillStyle = "#36c"; g.fillRect(20 + clock.t * 50, 20, 30, 30); } }).to(clock, { t: 2, duration: 2, ease: "none" });`,
+        // Drawn once, as the script runs: a mount would need the script to draw again.
+        `const g = document.querySelector("canvas").getContext('2d'); g.fillStyle = "#c33"; g.fillRect(10, 10, 60, 30); const tl = gsap.timeline({ paused: true }); tl.to({ t: 0 }, { t: 1, duration: 2 }); window.__timelines["s0"] = tl;`,
+        // Placed by its timeline, chained as it is registered.
+        `const box = document.querySelector(".box"); const clock = { t: 0 }; window.__timelines["s1"] = gsap.timeline({ paused: true, onUpdate: () => { box.style.transform = "translateX(" + Math.round(clock.t * 50) + "px)"; } }).to(clock, { t: 2, duration: 2, ease: "none" });`,
         `window.__timelines["s2"] = gsap.timeline({ paused: true });`,
       ];
       writeFileSync(
@@ -1629,7 +1629,7 @@ describe("core runtime browser contract", () => {
       scripts.forEach((script, i) =>
         writeFileSync(
           resolve(dir, `s${i}.html`),
-          `<template id="s${i}-template"><div data-composition-id="s${i}" data-duration="2"><canvas width="320" height="180"></canvas><script>${script}</script></div></template>`,
+          `<template id="s${i}-template"><div data-composition-id="s${i}" data-duration="2"><canvas width="320" height="180"></canvas><div class="box"></div><script>${script}</script></div></template>`,
         ),
       );
       const html = addScenePartsManifest(
@@ -1648,54 +1648,56 @@ describe("core runtime browser contract", () => {
       );
       await scenePage.goto("http://scenes.test/");
       await scenePage.waitForFunction(() => window.__playerReady && window.__renderReady);
-      expect(
-        await scenePage.evaluate(() => document.querySelectorAll("[data-hf-scene-no-swap]").length),
-      ).toBe(0);
-      const canvasAt = (time: number, scene: string) =>
-        scenePage.evaluate(
-          async (time, scene) => {
-            window.__player!.seek(time);
-            await window.__hfWaitForSeekCompletion?.();
-            for (let i = 0; i < 2; i++) await new Promise(requestAnimationFrame);
-            return document
-              .querySelector<HTMLCanvasElement>(`[data-hf-scene="${scene}"] canvas`)!
-              .toDataURL();
-          },
-          time,
-          scene,
+      const refusals = () =>
+        scenePage.evaluate(() =>
+          ["s0", "s1"].map((s) =>
+            document
+              .querySelector(`[data-hf-scene="${s}"]:not(style, script)`)!
+              .getAttribute("data-hf-scene-no-swap"),
+          ),
         );
-      const blank = await scenePage.evaluate(() => document.createElement("canvas").toDataURL());
-      const first = [await canvasAt(1, "s0"), await canvasAt(3.4, "s1")];
-      expect(first).not.toContain(blank);
+      expect(await refusals()).toEqual(["its script uses getContext", null]);
+      const seek = (time: number) =>
+        scenePage.evaluate(async (time) => {
+          window.__player!.seek(time);
+          await window.__hfWaitForSeekCompletion?.();
+          for (let i = 0; i < 2; i++) await new Promise(requestAnimationFrame);
+        }, time);
+      const canvas = () =>
+        scenePage.evaluate(() =>
+          document.querySelector<HTMLCanvasElement>('[data-hf-scene="s0"] canvas')!.toDataURL(),
+        );
+      const boxAt = async (time: number) => {
+        await seek(time);
+        return scenePage.evaluate(
+          () => document.querySelector<HTMLElement>('[data-hf-scene="s1"] .box')!.style.transform,
+        );
+      };
+      await seek(1);
+      const drawn = await canvas();
+      const placed = await boxAt(3.4);
       await scenePage.evaluate(() => {
-        (window as unknown as { first: unknown[] }).first = [
-          window.__timelines!.s0,
-          window.__timelines!.s1,
-        ];
+        (window as unknown as { first: unknown }).first = window.__timelines!.s1;
         window.__player!.seek(5);
       });
       await scenePage.waitForFunction(
-        () => document.querySelectorAll('[data-hf-parked-scene][data-hf-scene^="s"]').length === 2,
+        () => document.querySelector('[data-hf-parked-scene][data-hf-scene="s1"]') !== null,
       );
-      for (const [time, scene, i] of [
-        [1, "s0", 0],
-        [3.4, "s1", 1],
-      ] as const) {
-        await scenePage.evaluate((time) => window.__player!.seek(time), time);
-        // Mounted again once its script has run and registered a fresh timeline.
-        await scenePage.waitForFunction(
-          (scene, i) => {
-            const fresh = window.__timelines?.[scene];
-            return (
-              fresh !== undefined && fresh !== (window as unknown as { first: unknown[] }).first[i]
-            );
-          },
-          {},
-          scene,
-          i,
-        );
-        expect(await canvasAt(time, scene)).toBe(first[i]);
-      }
+      const parked = await scenePage.evaluate(() =>
+        [...document.querySelectorAll("[data-hf-parked-scene]")].map((el) =>
+          el.getAttribute("data-hf-scene"),
+        ),
+      );
+      expect(parked).not.toContain("s0");
+      await seek(1);
+      expect(await canvas()).toBe(drawn);
+      await scenePage.evaluate(() => window.__player!.seek(3.4));
+      // Mounted again once its script has run and registered a fresh timeline.
+      await scenePage.waitForFunction(() => {
+        const fresh = window.__timelines?.s1;
+        return fresh !== undefined && fresh !== (window as unknown as { first: unknown }).first;
+      });
+      expect(await boxAt(3.4)).toBe(placed);
     } finally {
       await scenePage.close();
       rmSync(dir, { recursive: true, force: true });
