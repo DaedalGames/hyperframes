@@ -20,7 +20,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { mkdtempSync, renameSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   DEFAULT_CONFIG,
@@ -29,6 +29,7 @@ import {
   extractAudioMetadata,
   getFfprobeBinary,
   ManagedChildProcess,
+  renameWithRetry,
   runFfmpeg,
   trackChildProcess,
   type AudioMetadata,
@@ -373,9 +374,13 @@ export async function padOrTrimAudioToVideoFrameCount(
  */
 export async function constrainAacTruePeak(input: {
   audioPath: string;
+  /** The PCM `audioPath` was encoded from: a correction re-encodes it instead of decoding the AAC. */
+  sourcePath?: string;
   targetDurationSeconds: number;
   signal?: AbortSignal;
   timeoutMs?: number;
+  probeTruePeakDbfs?: (audioPath: string, signal?: AbortSignal) => Promise<number>;
+  encodeAac?: AacEncoder;
 }): Promise<{
   success: boolean;
   error?: string;
@@ -385,15 +390,19 @@ export async function constrainAacTruePeak(input: {
   const timeoutMs = input.timeoutMs ?? DEFAULT_CONFIG.ffmpegProcessTimeout;
   return enforceAacTruePeak({
     audioPath: input.audioPath,
+    sourcePath: input.sourcePath,
     targetDurationSeconds: input.targetDurationSeconds,
     signal: input.signal,
-    probeTruePeak: (audioPath, signal) => measureTruePeakDbfs(audioPath, { timeoutMs, signal }),
-    encode: defaultAacEncoder(timeoutMs, input.signal),
+    probeTruePeak:
+      input.probeTruePeakDbfs ??
+      ((audioPath, signal) => measureTruePeakDbfs(audioPath, { timeoutMs, signal })),
+    encode: input.encodeAac ?? defaultAacEncoder(timeoutMs, input.signal, input.sourcePath),
   });
 }
 
 interface EnforceAacTruePeakInput {
   audioPath: string;
+  sourcePath?: string;
   targetDurationSeconds: number;
   signal?: AbortSignal;
   probeTruePeak: (audioPath: string, signal?: AbortSignal) => Promise<number>;
@@ -410,9 +419,9 @@ async function enforceAacTruePeak(input: EnforceAacTruePeakInput): Promise<{
   try {
     scratchDir = mkdtempSync(join(dirname(input.audioPath), ".true-peak-"));
     const correctedPath = join(scratchDir, "audio.m4a");
-    const correctionTargetDbfs = AAC_DELIVERY_TRUE_PEAK_DBFS - AAC_TRUE_PEAK_CORRECTION_HEADROOM_DB;
     const measurements: string[] = [];
     let attenuationDb = 0;
+    let sourcePeakDbfs: number | undefined;
     let measuredPath = input.audioPath;
     for (let pass = 0; pass <= MAX_TRUE_PEAK_CORRECTION_PASSES; pass += 1) {
       const truePeakDbfs = await input.probeTruePeak(measuredPath, input.signal);
@@ -424,14 +433,21 @@ async function enforceAacTruePeak(input: EnforceAacTruePeakInput): Promise<{
       }
       if (truePeakDbfs <= AAC_DELIVERY_TRUE_PEAK_DBFS) {
         if (measuredPath !== correctedPath) return { success: true };
-        renameSync(correctedPath, input.audioPath);
+        renameWithRetry(correctedPath, input.audioPath);
         return { success: true, loweredDb: Number((-attenuationDb).toFixed(2)) };
       }
       if (pass === MAX_TRUE_PEAK_CORRECTION_PASSES) break;
 
-      // Aim below the acceptance ceiling because this correction itself is
-      // another lossy AAC encode and can regenerate content-dependent peaks.
-      attenuationDb += correctionTargetDbfs - truePeakDbfs;
+      // Aim below the ceiling, twice as far each pass: the correction is another lossy AAC encode,
+      // whose peak can stall or rise over a few dB of attenuation instead of falling dB for dB.
+      const headroomDb = AAC_TRUE_PEAK_CORRECTION_HEADROOM_DB * 2 ** pass;
+      // The encoder clips what is left above full scale, so the AAC under-reads a hotter PCM and a
+      // cut sized from it never gets the PCM under: size it from the louder of the two.
+      if (input.sourcePath && sourcePeakDbfs === undefined) {
+        sourcePeakDbfs = await input.probeTruePeak(input.sourcePath, input.signal);
+      }
+      const referenceDbfs = Math.max(truePeakDbfs, (sourcePeakDbfs ?? -Infinity) + attenuationDb);
+      attenuationDb += AAC_DELIVERY_TRUE_PEAK_DBFS - headroomDb - referenceDbfs;
       const result = await input.encode(
         input.audioPath,
         correctedPath,
@@ -581,12 +597,18 @@ async function defaultRunFfmpeg(
   return toStepResult(await runFfmpeg(args, { signal, timeout: timeoutMs }), timeoutMs);
 }
 
-function defaultAacEncoder(timeoutMs: number, signal?: AbortSignal): AacEncoder {
+function defaultAacEncoder(
+  timeoutMs: number,
+  signal?: AbortSignal,
+  pcmSourcePath?: string,
+): AacEncoder {
   return async (inputPath, outputPath, durationSeconds, filter) => {
-    // One encoder, as before this went through encodeAac: splitting it is a separate change.
-    const options = { signal, timeout: timeoutMs, filter, segments: 1 };
+    // Each segment decodes its input from the start: cheap from PCM, a second lossy pass from AAC.
+    const options = pcmSourcePath
+      ? { signal, timeout: timeoutMs, filter }
+      : { signal, timeout: timeoutMs, filter, segments: 1 };
     return toStepResult(
-      await encodeAac(inputPath, outputPath, durationSeconds, options),
+      await encodeAac(pcmSourcePath ?? inputPath, outputPath, durationSeconds, options),
       timeoutMs,
     );
   };

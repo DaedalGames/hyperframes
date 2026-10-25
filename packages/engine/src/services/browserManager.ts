@@ -6,6 +6,7 @@
  * launch args, pooled browser acquisition/release.
  */
 
+import { withHyperframesBrowserMarker } from "@hyperframes/core/browser-marker";
 import { scanHtmlOpeningTags } from "@hyperframes/parsers/html-attribute-spans";
 import type { Browser, LaunchOptions, Page, PuppeteerNode } from "puppeteer-core";
 import { execSync } from "child_process";
@@ -13,6 +14,7 @@ import { existsSync, readdirSync, statSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import {
+  browserPathFromEnv,
   chromeMajorCeiling,
   compareBrowserVersionsDescending,
   exceedsChromeCeiling,
@@ -110,7 +112,7 @@ async function probeHardwareWebGlInfo(
     const launchOptions: LaunchOptions = {
       ...sigintLaunchOptions(),
       headless: true,
-      args: options.args,
+      args: withHyperframesBrowserMarker(options.args),
       defaultViewport: { width: 64, height: 64 },
       executablePath: options.executablePath,
       env: options.env,
@@ -251,25 +253,15 @@ export function resolveHeadlessShellPath(
   if (config?.chromePath) {
     return config.chromePath;
   }
-  if (process.env.PRODUCER_HEADLESS_SHELL_PATH) {
-    const envPath = process.env.PRODUCER_HEADLESS_SHELL_PATH;
-    if (!existsSync(envPath)) {
+  const fromEnv = browserPathFromEnv();
+  if (fromEnv) {
+    if (!existsSync(fromEnv.path)) {
       throw new Error(
-        `[BrowserManager] Chrome binary not found at PRODUCER_HEADLESS_SHELL_PATH="${envPath}". ` +
+        `[BrowserManager] Chrome binary not found at ${fromEnv.name}="${fromEnv.path}". ` +
           "Run `hyperframes browser ensure` to re-download.",
       );
     }
-    return envPath;
-  }
-  if (process.env.HYPERFRAMES_BROWSER_PATH) {
-    const envPath = process.env.HYPERFRAMES_BROWSER_PATH;
-    if (!existsSync(envPath)) {
-      throw new Error(
-        `[BrowserManager] Chrome binary not found at HYPERFRAMES_BROWSER_PATH="${envPath}". ` +
-          "Run `hyperframes browser ensure` to re-download.",
-      );
-    }
-    return envPath;
+    return fromEnv.path;
   }
   const ours = join(homedir(), ".cache", "hyperframes", "chrome", "chrome-headless-shell");
   const shared = join(homedir(), ".cache", "puppeteer", "chrome-headless-shell");
@@ -356,7 +348,6 @@ interface BeginFrameProbeResult {
   durationMs: number;
 }
 
-const BEGINFRAME_SCREENSHOT_PROBE_ATTEMPTS = 10;
 const BEGINFRAME_PROBE_TIMEOUT_MS = 2000;
 const BEGINFRAME_PROBE_CLEANUP_TIMEOUT_MS = 250;
 
@@ -472,7 +463,8 @@ async function probeBeginFrameSupport(
     let bytes = Buffer.alloc(0);
     let isPng = false;
     let attempts = 0;
-    for (attempts = 1; attempts <= BEGINFRAME_SCREENSHOT_PROBE_ATTEMPTS; attempts += 1) {
+    while (!isPng && Date.now() < deadline) {
+      attempts += 1;
       const response = await awaitBeforeDeadline(
         client.send("HeadlessExperimental.beginFrame", {
           frameTimeTicks: 1000 + (attempts - 1) * 33,
@@ -490,7 +482,7 @@ async function probeBeginFrameSupport(
         bytes[1] === 0x50 &&
         bytes[2] === 0x4e &&
         bytes[3] === 0x47;
-      if (isPng) break;
+      if (isPng || Date.now() + 10 >= deadline) break;
       await awaitBeforeDeadline(
         new Promise((resolveDelay) => setTimeout(resolveDelay, 10)),
         deadline,
@@ -500,7 +492,7 @@ async function probeBeginFrameSupport(
     if (!isPng) {
       throw new Error(
         `beginFrame screenshot returned ${bytes.length} bytes after ` +
-          `${BEGINFRAME_SCREENSHOT_PROBE_ATTEMPTS} attempts with signature ` +
+          `${attempts} attempts in ${Date.now() - started}ms with signature ` +
           `${bytes.length >= 4 ? bytes.subarray(0, 4).toString("hex") : "<empty>"}`,
       );
     }
@@ -520,11 +512,7 @@ async function probeBeginFrameSupport(
     };
   }
   if (page && !(await settleWithin(page.close(), BEGINFRAME_PROBE_CLEANUP_TIMEOUT_MS))) {
-    return {
-      supported: false,
-      detail: `${result.detail}; probe page cleanup timed out`,
-      durationMs: Date.now() - started,
-    };
+    return { ...result, detail: `${result.detail}; probe page cleanup timed out` };
   }
   return result;
 }
@@ -653,6 +641,26 @@ async function probeWebGlMode(
 
 function envWithoutWaylandDisplay(): NodeJS.ProcessEnv {
   const { WAYLAND_DISPLAY: _wslg, ...env } = process.env;
+  return env;
+}
+
+// ANGLE and Dawn load SwiftShader via VK_ICD_FILENAMES, which these override or filter:
+// https://github.com/KhronosGroup/Vulkan-Loader/blob/main/docs/LoaderDriverInterface.md
+const VULKAN_VARS_THAT_OVERRIDE_SWIFTSHADER = [
+  "VK_DRIVER_FILES",
+  "VK_LOADER_DRIVERS_SELECT",
+  "VK_LOADER_DRIVERS_DISABLE",
+];
+
+function launchEnv(fingerprint: Readonly<BrowserLaunchFingerprint>): NodeJS.ProcessEnv | undefined {
+  if (fingerprint.withoutWaylandDisplay) return envWithoutWaylandDisplay();
+  const swiftShader = fingerprint.args.some(
+    (arg) => arg === "--use-angle=swiftshader" || arg === "--use-vulkan=swiftshader",
+  );
+  const overriding = VULKAN_VARS_THAT_OVERRIDE_SWIFTSHADER.filter((name) => name in process.env);
+  if (!swiftShader || overriding.length === 0) return undefined;
+  const env = { ...process.env };
+  for (const name of overriding) delete env[name];
   return env;
 }
 
@@ -860,14 +868,14 @@ async function launchBrowser(
   fingerprint: Readonly<BrowserLaunchFingerprint>,
 ): Promise<{ browser: Browser; captureMode: CaptureMode }> {
   const ppt = await getPuppeteer();
-  const env = fingerprint.withoutWaylandDisplay ? envWithoutWaylandDisplay() : undefined;
+  const env = launchEnv(fingerprint);
   let captureMode = fingerprint.requestedCaptureMode;
   let browser: Browser | undefined;
   try {
     browser = await ppt.launch({
       ...sigintLaunchOptions(),
       headless: true,
-      args: [...fingerprint.args],
+      args: withHyperframesBrowserMarker(fingerprint.args),
       defaultViewport: null,
       executablePath: fingerprint.executablePath,
       env,
@@ -900,7 +908,7 @@ async function launchBrowser(
         browser = await ppt.launch({
           ...sigintLaunchOptions(),
           headless: true,
-          args: stripBeginFrameFlags([...fingerprint.args]),
+          args: withHyperframesBrowserMarker(stripBeginFrameFlags([...fingerprint.args])),
           defaultViewport: null,
           executablePath: fingerprint.executablePath,
           env,
@@ -1029,6 +1037,7 @@ export interface BuildChromeArgsOptions {
 
 const CANVAS_DRAW_ELEMENT_FEATURE_FLAG = "--enable-features=CanvasDrawElement";
 const WEBGPU_FLAG = "--enable-unsafe-webgpu";
+const DISABLE_DXC_FLAG = "--disable-dawn-features=use_dxc";
 
 type GpuConfig = Partial<
   Pick<EngineConfig, "browserGpuMode" | "disableGpu" | "chromePath" | "allowSoftwareWebGpu">
@@ -1111,6 +1120,9 @@ export function buildChromeArgs(options: BuildChromeArgsOptions, config?: GpuCon
 
   if (browserGpuMode !== "software" || options.requiresWebGpu) {
     chromeArgs.push(WEBGPU_FLAG);
+    if (platform === "win32") {
+      chromeArgs.push(DISABLE_DXC_FLAG);
+    }
   }
   if (softwareWebGpu) chromeArgs.push("--use-vulkan=swiftshader");
 

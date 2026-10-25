@@ -270,6 +270,7 @@ export {
   PREVIEW_PROXY_BOX_PARAM,
   formatPreviewProxyBox,
   parsePreviewProxyBox,
+  quantizePreviewProxyBox,
   type PreviewProxyBox,
 } from "./previewProxyBox";
 
@@ -333,6 +334,7 @@ export { formatRenderOutputTimestamp } from "./utils/renderOutputTimestamp.js";
 
 // Runtime helpers (composition-side)
 export { getVariables } from "./runtime/getVariables.js";
+export { SCENE_CALLBACK_ERROR_PREFIX } from "./runtime/diagnostics.js";
 export {
   parseStartExpression,
   parseNumeric,
@@ -437,3 +439,8 @@ export {
   type HfVfxParam,
   type HfVfxParamValues,
 } from "./vfx.js";
+export {
+  PAGE_DEVICE_SCALE_GLOBAL,
+  PAGE_MOTION_BLUR_OFF_GLOBAL,
+  acceleratedCanvasTrackerSource,
+} from "./pageMotionBlur.js";

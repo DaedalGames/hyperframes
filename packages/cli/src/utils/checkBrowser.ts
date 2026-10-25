@@ -1,5 +1,7 @@
 import type { CheckDeadline } from "./checkDeadline.js";
-import { BrowserCleanupError, closeManagedBrowser } from "../browser/launch.js";
+import { logCheckProgress } from "./checkProgress.js";
+import { BrowserCleanupError, closeManagedBrowser, onStopSignal } from "../browser/launch.js";
+import { collectMotionBlurDrafts, dropMotionBlurConsoleEcho } from "./checkMotionBlur.js";
 import { checkSnapshotDirectory } from "./checkSnapshotDirectory.js";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import os from "node:os";
@@ -32,6 +34,13 @@ import type { LayoutIssue, LayoutIssueCode, LayoutRect } from "./layoutAudit.js"
 import { serveStaticProjectHtml } from "./staticProjectServer.js";
 import { collectTweenRecords, findTweenTails, tweenTailMessage } from "./gsapTweenTails.js";
 import { resolveAutoProxy } from "./projectConfig.js";
+import { findStageProxyBox } from "./compositionViewport.js";
+import type { PreviewProxyBox } from "@hyperframes/core";
+import { injectTagsAtHeadStart } from "@hyperframes/core/compiler/html-document";
+import {
+  STUDIO_PREVIEW_CAPTURE_MODE,
+  STUDIO_PREVIEW_MARK_META,
+} from "@hyperframes/core/studio-preview-mark";
 import {
   decideMediaProxyEligibility,
   proxyVariantFor,
@@ -41,6 +50,7 @@ import {
   FfmpegUnavailableError,
   getProxyCachePath,
   resolveProxies,
+  type ProxyProgress,
 } from "@hyperframes/studio-server/proxy-transcoder";
 import { rectToBbox } from "./checkTypes.js";
 import type {
@@ -57,6 +67,9 @@ import type {
   CheckSeverity,
   ContrastAuditEntry,
   ContrastCapture,
+  CraftFilm,
+  CraftFrame,
+  CraftTextPart,
   GeometryCandidateRequest,
   LayoutOptions,
   MotionSpecResolution,
@@ -78,6 +91,7 @@ interface RuntimeDraft {
   line?: number;
   count?: number;
   abortedImage?: boolean;
+  fixHint?: string;
 }
 
 type RuntimeStamp = Pick<RuntimeDraft, "time" | "timeRange">;
@@ -123,6 +137,43 @@ interface FinishedContrast {
   bg: string;
 }
 
+const COPY_HEARTBEAT_MS = 10_000;
+
+function elapsedText(ms: number): string {
+  const seconds = Math.round(ms / 1000);
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+/** Says on stderr how far each copy is, so a slow copy reads as slow and a stuck one as stuck. */
+function startCopyHeartbeat(
+  sources: ReadonlyArray<{ file: string }>,
+  cached: readonly boolean[],
+): {
+  progress: (index: number, progress: ProxyProgress) => void;
+  settled: (index: number) => void;
+  stop: () => void;
+} {
+  const startedAt = Date.now();
+  const latest = new Map<number, ProxyProgress>();
+  const timer = setInterval(() => {
+    for (const [index, { doneSeconds, totalSeconds }] of latest) {
+      if (cached[index]) continue;
+      const done = totalSeconds
+        ? `${Math.min(100, Math.floor((doneSeconds / totalSeconds) * 100))}%`
+        : "";
+      console.error(
+        `[hyperframes] browser-playable copy of ${sources[index]!.file}: ${done || `${Math.floor(doneSeconds)}s done`} (${elapsedText(Date.now() - startedAt)} so far)`,
+      );
+    }
+  }, COPY_HEARTBEAT_MS);
+  timer.unref();
+  return {
+    progress: (index, progress) => void latest.set(index, progress),
+    settled: (index) => void latest.delete(index),
+    stop: () => clearInterval(timer),
+  };
+}
+
 /**
  * Awaits the H.264 authoring proxy for every browser-hostile local video
  * asset in `html` BEFORE the timed render-ready wait starts. `check`'s
@@ -140,7 +191,7 @@ export async function preResolveHostileMediaProxies(
   html: string,
   autoProxyOverride?: boolean,
 ): Promise<ProxyPreResolution> {
-  const none: ProxyPreResolution = { findings: [], failedPaths: new Set() };
+  const none: ProxyPreResolution = { findings: [], failedPaths: new Set(), files: [] };
   if (!resolveAutoProxy(projectDir, autoProxyOverride)) return none;
   let codecMap: Awaited<ReturnType<typeof scanProjectMediaCodecMap>>;
   try {
@@ -157,6 +208,7 @@ export async function preResolveHostileMediaProxies(
   if (hostileEntries.length === 0) return none;
 
   const startedAt = Date.now();
+  const stageBox = findStageProxyBox(html);
   const sources = hostileEntries.map(([pathname, facts]) => {
     const file = pathname.replace(/^\/+/, "");
     return {
@@ -164,19 +216,34 @@ export async function preResolveHostileMediaProxies(
       file,
       sourcePath: resolve(projectDir, file),
       variant: proxyVariantFor(facts),
+      box: stageBox,
     };
   });
   const total = hostileEntries.length;
-  const toMake = sources.filter((source) => !proxyCached(projectDir, source)).length;
+  const cached = sources.map((source) => proxyCached(projectDir, source));
+  const toMake = cached.filter((isCached) => !isCached).length;
   if (toMake > 0) {
     console.error(
       `[hyperframes] Making browser-playable copies of ${toMake} video${toMake === 1 ? "" : "s"} Chrome cannot decode. Only the first check of these files waits for this; later checks reuse the copies.`,
     );
   }
   let settled = 0;
-  const results = await resolveProxies(projectDir, sources, () => {
-    settled += 1;
-    if (toMake > 0) console.error(`[hyperframes] browser-playable copies: ${settled}/${total}`);
+  const heartbeat = startCopyHeartbeat(sources, cached);
+  const stopped = new AbortController();
+  const forgetStop = onStopSignal(() => stopped.abort());
+  const results = await resolveProxies(
+    projectDir,
+    sources,
+    (index) => {
+      settled += 1;
+      heartbeat.settled(index);
+      if (toMake > 0) console.error(`[hyperframes] browser-playable copies: ${settled}/${total}`);
+    },
+    heartbeat.progress,
+    stopped.signal,
+  ).finally(() => {
+    heartbeat.stop();
+    forgetStop();
   });
   const failures = sources.flatMap((source, index) => {
     const result = results[index]!;
@@ -200,28 +267,55 @@ export async function preResolveHostileMediaProxies(
       ),
     );
   }
-  return { findings, failedPaths: new Set(failures.map(({ pathname }) => pathname)) };
+  const files = sources.map(({ file }, index): PreparedMediaFile => {
+    const result = results[index]!;
+    if (result.status === "rejected") {
+      return { file, state: "failed", reason: normalizeErrorMessage(result.reason) };
+    }
+    return { file, state: cached[index] ? "cached" : "ready" };
+  });
+  return { findings, failedPaths: new Set(failures.map(({ pathname }) => pathname)), files };
 }
 
 function proxyCached(
   projectDir: string,
-  source: { sourcePath: string; variant: ReturnType<typeof proxyVariantFor> },
+  source: {
+    sourcePath: string;
+    variant: ReturnType<typeof proxyVariantFor>;
+    box?: PreviewProxyBox;
+  },
 ): boolean {
   try {
-    return existsSync(getProxyCachePath(projectDir, source.sourcePath, source.variant));
+    return existsSync(getProxyCachePath(projectDir, source.sourcePath, source.variant, source.box));
   } catch {
     return false;
   }
+}
+
+export interface PreparedMediaFile {
+  file: string;
+  state: "ready" | "cached" | "failed";
+  reason?: string;
 }
 
 interface ProxyPreResolution {
   findings: RuntimeDraft[];
   /** Root-relative paths of the videos whose copy failed. */
   failedPaths: Set<string>;
+  /** One entry per browser-hostile video, in project order. */
+  files: PreparedMediaFile[];
 }
 
 function proxyFailedDraft(message: string): RuntimeDraft {
   return { code: "media_proxy_failed", severity: "warning", message, time: 0 };
+}
+
+async function loadCheckHtmlWithDeferredMedia(dir: string): Promise<string> {
+  const { bundleWithLocalizedFonts } = await import("./bundleWithLocalizedFonts.js");
+  return injectTagsAtHeadStart(
+    await bundleWithLocalizedFonts(dir),
+    `<meta name="${STUDIO_PREVIEW_MARK_META}" content="${STUDIO_PREVIEW_CAPTURE_MODE}">`,
+  );
 }
 
 export async function runBrowserCheck(
@@ -232,13 +326,14 @@ export async function runBrowserCheck(
   deadline?: CheckDeadline,
   prelaunched?: PrelaunchedBrowser,
 ): Promise<CheckBrowserResult> {
-  const { bundleWithLocalizedFonts } = await import("./bundleWithLocalizedFonts.js");
-  const html = await bundleWithLocalizedFonts(project.dir);
+  const html = await loadCheckHtmlWithDeferredMedia(project.dir);
+  deadline?.enter("copies");
   const { findings: drafts, failedPaths } = await preResolveHostileMediaProxies(
     project.dir,
     html,
     options.autoProxy,
   );
+  deadline?.enter("launch");
   const server = await serveStaticProjectHtml(
     project.dir,
     html,
@@ -274,12 +369,19 @@ export async function runBrowserCheck(
         wireRuntimeListeners(page, drafts, clock);
         await deadline?.preparePage(page);
       },
+      onLoaded: () => deadline?.enter("settle"),
     });
     chromeBrowser = session.browser;
     const page = session.page;
     await waitForPreferredSeekTarget(page);
 
     const rootAnchor = await resolveRootAnchor(page);
+    deadline?.keepPartial(() => ({
+      runtimeFindings: dropFailedProxyEchoes(
+        keepBrokenImageAborts(drafts, new Set()),
+        failedPaths,
+      ).map((draft) => runtimeFinding(draft, rootAnchor)),
+    }));
     const launchSettleMs = Date.now() - launchSettleStart;
     // validate's per-media-element audit, kept in the consolidation: a clip
     // whose intrinsic duration is meaningfully shorter than its data-duration
@@ -294,9 +396,19 @@ export async function runBrowserCheck(
       const message = tweenTailMessage(tail);
       drafts.push({ code: "gsap_tween_tail", severity: "warning", message, time: tail.later.end });
     }
+    const blur = await collectMotionBlurDrafts(page);
+    drafts.push(...blur);
     const sampleLog = sampleWindow(drafts);
     const driver = createPageDriver(page, clock, sampleLog);
-    const result = await runGrid(driver, options, motion, helpers);
+    const result = await runGrid(
+      driver,
+      options,
+      motion,
+      helpers,
+      deadline?.enter,
+      logCheckProgress,
+      deadline?.keepPartial,
+    );
     helperSession?.stop();
     const helper = await helperOpen?.catch(() => undefined);
     const merged = helper ? mergeHelperDrafts(sampleLog, helper.sampleLog) : drafts;
@@ -305,7 +417,7 @@ export async function runBrowserCheck(
       ...result,
       timings: { ...result.timings, launchSettleMs },
       runtimeFindings: dropFailedProxyEchoes(
-        keepBrokenImageAborts(merged, broken),
+        dropMotionBlurConsoleEcho(keepBrokenImageAborts(merged, broken), blur),
         failedPaths,
       ).map((draft) => runtimeFinding(draft, rootAnchor)),
     };
@@ -447,8 +559,7 @@ export async function captureFindingCrops(
   deadline?: CheckDeadline,
 ): Promise<string[]> {
   if (requests.length === 0) return [];
-  const { bundleWithLocalizedFonts } = await import("./bundleWithLocalizedFonts.js");
-  const html = await bundleWithLocalizedFonts(project.dir);
+  const html = await loadCheckHtmlWithDeferredMedia(project.dir);
   const server = await serveStaticProjectHtml(
     project.dir,
     html,
@@ -729,12 +840,33 @@ function wireNetworkListeners(page: Page, drafts: RuntimeDraft[], clock: Runtime
   });
 }
 
+function failWhenPageDies(page: Page, driver: CheckAuditDriver): CheckAuditDriver {
+  const dead = new Promise<never>((_, reject) => {
+    page.on("error", (error) =>
+      reject(new Error(`The page crashed: ${normalizeErrorMessage(error)}`)),
+    );
+    page.on("close", () => reject(new Error("The page closed before the check finished")));
+  });
+  dead.catch(() => undefined);
+  return Object.fromEntries(
+    Object.entries(driver).map(([name, member]) => [
+      name,
+      typeof member === "function"
+        ? (...args: unknown[]) => {
+            const result: unknown = Reflect.apply(member, driver, args);
+            return result instanceof Promise ? Promise.race([result, dead]) : result;
+          }
+        : member,
+    ]),
+  ) as unknown as CheckAuditDriver;
+}
+
 export function createPageDriver(
   page: Page,
   clock: RuntimeClock = createRuntimeClock(),
   sampleLog?: SampleWindow,
 ): CheckAuditDriver {
-  return {
+  return failWhenPageDies(page, {
     initialize: (contrast) => injectAuditScripts(page, contrast),
     markSamples: (phase) => {
       if (!sampleLog) return;
@@ -788,7 +920,62 @@ export function createPageDriver(
       collectMotionFrame(page, time, selectors, scopes),
     anchorMotionIssues: (issues) => anchorLayoutIssues(page, issues),
     collectContrast: (time, annotations) => collectContrast(page, time, annotations),
+    collectCraftFrame: (time) => collectCraftFrame(page, time),
+    collectCraftFilm: () => collectCraftFilm(page),
+  });
+}
+
+async function collectCraftFrame(page: Page, time: number): Promise<CraftFrame> {
+  const raw = await page.evaluate(() => {
+    const sample = Reflect.get(window, "__hyperframesCraftSample");
+    return typeof sample === "function" ? Reflect.apply(sample, window, []) : null;
+  });
+  const record = isRecord(raw) ? raw : {};
+  const parts = Reflect.get(record, "parts");
+  return {
+    time,
+    parts: Array.isArray(parts) ? parts.flatMap(parseCraftTextPart) : [],
+    held: booleanValue(record, "held") ?? false,
+    painted: booleanValue(record, "painted") ?? true,
+    signature: stringValue(record, "signature") ?? "",
   };
+}
+
+async function collectCraftFilm(page: Page): Promise<CraftFilm> {
+  const raw = await page.evaluate(() => {
+    const film = Reflect.get(window, "__hyperframesCraftFilm");
+    return typeof film === "function" ? Reflect.apply(film, window, []) : null;
+  });
+  return { soundSources: (isRecord(raw) ? numberValue(raw, "soundSources") : null) ?? 0 };
+}
+
+const CRAFT_PART_NUMBERS = ["key", "block", "opacity", "fontPx"] as const;
+const CRAFT_PART_STRINGS = ["selector", "blockSelector", "sourceFile", "text"] as const;
+const CRAFT_RECT_NUMBERS = ["left", "top", "width", "height"] as const;
+
+function parseCraftTextPart(value: unknown): CraftTextPart[] {
+  if (!isRecord(value)) return [];
+  const nums = requiredNumbers(value, CRAFT_PART_NUMBERS);
+  const strings = requiredStrings(value, CRAFT_PART_STRINGS);
+  const rect = recordField(value, "rect");
+  const box = rect ? requiredNumbers(rect, CRAFT_RECT_NUMBERS) : null;
+  const captions = booleanValue(value, "captions");
+  return nums && strings && box && captions !== null
+    ? [{ ...nums, ...strings, rect: box, captions }]
+    : [];
+}
+
+function requiredStrings<K extends string>(
+  value: Record<string, unknown>,
+  keys: readonly K[],
+): { [P in K]: string } | null {
+  const out = {} as { [P in K]: string };
+  for (const key of keys) {
+    const entry = stringValue(value, key);
+    if (entry === null) return null;
+    out[key] = entry;
+  }
+  return out;
 }
 
 async function hasNoTimelineDeclaration(page: Page): Promise<boolean> {
@@ -1294,20 +1481,23 @@ function anchorsInPage(values: AnchorRequest[]): CheckAnchor[] {
 }
 
 async function resolveRootAnchor(page: Page): Promise<CheckAnchor> {
+  const selector = await page.evaluate(
+    (explicit) => (document.querySelector(explicit) ? explicit : "[data-composition-id]"),
+    '[data-composition-id][data-root="true"]',
+  );
   const anchors = await resolveAnchors(page, [
-    { selector: "[data-composition-id]", time: 0, bbox: await compositionBbox(page) },
+    { selector, time: 0, bbox: await compositionBbox(page, selector) },
   ]);
   return anchors[0] ?? fallbackAnchor(undefined);
 }
 
-async function compositionBbox(page: Page): Promise<CheckBbox> {
-  return page.evaluate(() => {
-    const element = document.querySelector("[data-composition-id]");
-    const rect = element?.getBoundingClientRect();
+async function compositionBbox(page: Page, selector: string): Promise<CheckBbox> {
+  return page.evaluate((root) => {
+    const rect = document.querySelector(root)?.getBoundingClientRect();
     return rect
       ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
       : { x: 0, y: 0, width: 0, height: 0 };
-  });
+  }, selector);
 }
 
 async function collectContrast(
@@ -1777,6 +1967,7 @@ function runtimeFinding(draft: RuntimeDraft, root: CheckAnchor): CheckFinding {
     ...(draft.timeRange ? { timeRange: draft.timeRange } : {}),
     url: draft.url,
     line: draft.line,
+    ...(draft.fixHint ? { fixHint: draft.fixHint } : {}),
   };
 }
 

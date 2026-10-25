@@ -42,6 +42,7 @@ import {
 import { copyMediaVisualStyles } from "../inline-scripts/parityContract";
 import { readVariablesForElement } from "./variableScope";
 import { swallow } from "./diagnostics";
+import { createRecordFilter } from "./mutationRecords";
 import { findInjectedRenderFrame } from "./renderFrameSibling";
 import {
   isCanvasElement,
@@ -201,6 +202,8 @@ interface EffectRenderState {
   kuwaharaTargets: KuwaharaTargets | null;
   effectError: string | null;
 }
+
+const CONTEXT_RESTORE_GRACE_MS = 3000;
 
 interface ColorGradingRenderer extends EffectRenderState {
   canvas: HTMLCanvasElement;
@@ -1055,6 +1058,15 @@ const FRAGMENT_SHADER = [
   `  vec4 after = texture2D(u_advanced, vec2((upper + 0.5) / ${ADVANCED_TEXTURE_WIDTH_GLSL}, y));`,
   "  return mix(before, after, position - lower);",
   "}",
+  "vec4 sampleHueCurve(float coordinate){",
+  `  float position = fract(coordinate) * ${ADVANCED_TEXTURE_WIDTH_GLSL};`,
+  "  float lower = floor(position);",
+  `  float upper = mod(lower + 1.0, ${ADVANCED_TEXTURE_WIDTH_GLSL});`,
+  `  float y = 1.5 / ${ADVANCED_TEXTURE_HEIGHT_GLSL};`,
+  `  vec4 before = texture2D(u_advanced, vec2((lower + 0.5) / ${ADVANCED_TEXTURE_WIDTH_GLSL}, y));`,
+  `  vec4 after = texture2D(u_advanced, vec2((upper + 0.5) / ${ADVANCED_TEXTURE_WIDTH_GLSL}, y));`,
+  "  return mix(before, after, position - lower);",
+  "}",
   "vec4 advancedConfig(float index){",
   `  return texture2D(u_advanced, vec2((index + 0.5) / ${ADVANCED_TEXTURE_WIDTH_GLSL}, ${ADVANCED_CONFIG_Y_GLSL}));`,
   "}",
@@ -1100,7 +1112,7 @@ const FRAGMENT_SHADER = [
   "vec3 applyHueCurves(vec3 color){",
   "  if (u_hueCurvesEnabled < 0.5) return color;",
   "  vec3 hsv = rgbToHsv(clamp(color, 0.0, 1.0));",
-  "  vec3 curves = sampleAdvancedCurve(hsv.x, 1.0).rgb;",
+  "  vec3 curves = sampleHueCurve(hsv.x).rgb;",
   "  float originalLuma = lumaOf(color);",
   "  hsv.x = fract(hsv.x + decodeSigned(curves.r) * 0.5);",
   "  hsv.y = clamp(hsv.y * max(0.0, 1.0 + decodeSigned(curves.g)), 0.0, 1.0);",
@@ -2162,6 +2174,33 @@ function replaceProgramResources(entry: ColorGradingEntry): boolean {
   return true;
 }
 
+function moveToContext(
+  entry: ColorGradingEntry,
+  context: { canvas: HTMLCanvasElement; gl: WebGLRenderingContext },
+): boolean {
+  const program = createProgramResources(context.gl);
+  if (!program) return false;
+  destroyProgramResources(entry);
+  entry.gl = context.gl;
+  entry.glCanvas = context.canvas;
+  entry.program = program;
+  entry.lut = null;
+  entry.lutLoadingSrc = null;
+  entry.lutError = null;
+  entry.effectError = null;
+  return true;
+}
+
+function adoptContext(
+  entry: ColorGradingEntry,
+  context: { canvas: HTMLCanvasElement; gl: WebGLRenderingContext },
+): void {
+  entry.contextLost = !moveToContext(entry, context);
+  entry.drawError = entry.contextLost ? "WebGL context rebuild failed" : null;
+  if (entry.contextLost) restoreSourceElement(entry);
+  else drawEntry(entry);
+}
+
 function hideFrameBorder(entry: ColorGradingEntry, frame: HTMLElement): void {
   if (entry.borderlessFrame !== frame) restoreFrameBorder(entry);
   entry.borderlessFrame = frame;
@@ -2695,6 +2734,10 @@ function isDrawableSource(source: TexImageSource): boolean {
 function findRenderFrameImage(video: HTMLVideoElement): HTMLImageElement | null {
   const frame = findInjectedRenderFrame(video);
   return frame && isDrawableSource(frame) ? frame : null;
+}
+
+function isShownForColorGrading(element: ColorGradingMediaElement): boolean {
+  return isVisibleForColorGrading(element) || hasInjectedRenderFrame(element);
 }
 
 function hasInjectedRenderFrame(element: ColorGradingMediaElement): boolean {
@@ -3831,12 +3874,14 @@ export function createColorGradingRuntime(pausedMediaLease?: {
 }): RuntimeColorGradingApi {
   const entries = new WeakMap<ColorGradingMediaElement, ColorGradingEntry>();
   const trackedElements = new Set<ColorGradingMediaElement>();
+  const hiddenAtRefresh = new Set<ColorGradingMediaElement>();
   const idleRenderers: ColorGradingRenderer[] = [];
   let observer: MutationObserver | null = null;
   let previewRenderer: ColorGradingPreviewRenderer | null = null;
   let previewQueue = Promise.resolve();
   let destroyed = false;
   let shared: { canvas: HTMLCanvasElement; gl: WebGLRenderingContext } | null = null;
+  let rebuildTimer: ReturnType<typeof setTimeout> | undefined;
   const trackedEntries = () =>
     [...trackedElements].flatMap((element) => entries.get(element) ?? []);
 
@@ -3854,17 +3899,40 @@ export function createColorGradingRuntime(pausedMediaLease?: {
         entry.canvas.style.display = "none";
         restoreSourceElement(entry);
       }
+      watchForRestore(canvas, gl);
     });
     canvas.addEventListener("webglcontextrestored", () => {
+      if (shared?.canvas !== canvas) return;
+      clearTimeout(rebuildTimer);
       for (const entry of trackedEntries()) {
         entry.contextLost = !replaceProgramResources(entry);
         entry.drawError = entry.contextLost ? "WebGL context restore failed" : null;
         if (entry.contextLost) restoreSourceElement(entry);
         else drawEntry(entry);
       }
+      refresh();
     });
     shared = { canvas, gl };
     return shared;
+  };
+
+  const watchForRestore = (canvas: HTMLCanvasElement, gl: WebGLRenderingContext): void => {
+    clearTimeout(rebuildTimer);
+    rebuildTimer = setTimeout(() => rebuildLostContext(canvas, gl), CONTEXT_RESTORE_GRACE_MS);
+  };
+
+  const rebuildLostContext = (canvas: HTMLCanvasElement, gl: WebGLRenderingContext): void => {
+    if (destroyed || shared?.canvas !== canvas || !gl.isContextLost?.()) return;
+    const stale = shared;
+    shared = null;
+    const next = sharedContext();
+    if (!next) {
+      shared = stale;
+      watchForRestore(canvas, gl);
+      return;
+    }
+    for (const entry of trackedEntries()) adoptContext(entry, next);
+    refresh();
   };
 
   const newRenderer = (element: ColorGradingMediaElement): ColorGradingRenderer | null => {
@@ -3887,6 +3955,7 @@ export function createColorGradingRuntime(pausedMediaLease?: {
     grading: ResolvedHfColorGrading,
     source: EntrySource,
   ): boolean => {
+    hiddenAtRefresh.delete(element);
     const existing = entries.get(element);
     if (existing) {
       existing.grading = grading;
@@ -3966,6 +4035,7 @@ export function createColorGradingRuntime(pausedMediaLease?: {
   };
 
   const removeElement = (element: ColorGradingMediaElement): void => {
+    hiddenAtRefresh.delete(element);
     const entry = entries.get(element);
     if (!entry) return;
     const renderer = detachEntry(entry);
@@ -3983,16 +4053,18 @@ export function createColorGradingRuntime(pausedMediaLease?: {
   const refresh = (): number => {
     if (destroyed) return 0;
     const attributeElements = new Set<ColorGradingMediaElement>();
+    hiddenAtRefresh.clear();
     const nodes = document.querySelectorAll(COLOR_GRADING_SOURCE_SELECTOR);
     nodes.forEach((node) => {
       if (!isColorGradingMediaElement(node)) return;
       attributeElements.add(node);
       const grading = readColorGradingAttribute(node);
       if (isRuntimeColorGradingActive(node, grading)) {
-        if (isVisibleForColorGrading(node) || hasInjectedRenderFrame(node)) {
+        if (isShownForColorGrading(node)) {
           upsert(node, grading, "attribute");
         } else {
           removeElement(node);
+          hiddenAtRefresh.add(node);
         }
       } else {
         removeElement(node);
@@ -4011,8 +4083,20 @@ export function createColorGradingRuntime(pausedMediaLease?: {
     return trackedElements.size;
   };
 
+  const adoptShownMedia = (): void => {
+    for (const element of hiddenAtRefresh) {
+      if (element.isConnected && !isShownForColorGrading(element)) continue;
+      hiddenAtRefresh.delete(element);
+      const grading = readColorGradingAttribute(element);
+      if (element.isConnected && isRuntimeColorGradingActive(element, grading)) {
+        upsert(element, grading, "attribute");
+      }
+    }
+  };
+
   const redraw = (): number => {
     if (destroyed) return 0;
+    adoptShownMedia();
     let drawn = 0;
     for (const element of trackedElements) {
       const entry = entries.get(element);
@@ -4039,6 +4123,7 @@ export function createColorGradingRuntime(pausedMediaLease?: {
 
   const redrawAnimated = (): number => {
     if (destroyed) return 0;
+    adoptShownMedia();
     let drawn = 0;
     for (const element of trackedElements) {
       const entry = entries.get(element);
@@ -4111,7 +4196,7 @@ export function createColorGradingRuntime(pausedMediaLease?: {
     }
     const grading = readColorGradingAttribute(element);
     if (isRuntimeColorGradingActive(element, grading)) {
-      if (!isVisibleForColorGrading(element) && !hasInjectedRenderFrame(element)) {
+      if (!isShownForColorGrading(element)) {
         return { state: "pending", message: "Waiting for visible media" };
       }
       return { state: "unavailable", message: "WebGL unavailable" };
@@ -4176,9 +4261,11 @@ export function createColorGradingRuntime(pausedMediaLease?: {
   const destroy = (): void => {
     if (destroyed) return;
     destroyed = true;
+    clearTimeout(rebuildTimer);
     observer?.disconnect();
     observer = null;
     for (const element of trackedElements) removeElement(element);
+    hiddenAtRefresh.clear();
     for (const renderer of idleRenderers) destroyProgramResources(renderer);
     idleRenderers.length = 0;
     shared?.gl.getExtension("WEBGL_lose_context")?.loseContext();
@@ -4190,7 +4277,12 @@ export function createColorGradingRuntime(pausedMediaLease?: {
   };
 
   if (document.body) {
-    observer = new MutationObserver(() => refresh());
+    const recordsTouchGrading = createRecordFilter(COLOR_GRADING_SOURCE_SELECTOR, (node) =>
+      Array.from(trackedElements).some((element) => node.contains(element)),
+    );
+    observer = new MutationObserver((records) => {
+      if (recordsTouchGrading(records)) refresh();
+    });
     observer.observe(document.body, {
       childList: true,
       subtree: true,

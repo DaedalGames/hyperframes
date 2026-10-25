@@ -45,6 +45,7 @@ export interface RenderRequestOptions {
   gifLoop?: number;
   hlsSegmentSeconds?: number;
   workers?: number;
+  maxRenderMs?: number;
   useGpu?: boolean;
   debug?: boolean;
   /** Segmented capture: reuse segments recorded in a matching manifest. */
@@ -57,6 +58,7 @@ export interface RenderRequestOptions {
   videoBitrate?: string;
   videoFrameFormat?: VideoFrameFormat;
   hdrMode?: RenderConfig["hdrMode"];
+  pageMotionBlur?: RenderConfig["pageMotionBlur"];
   variables?: Record<string, unknown>;
   outputResolution?: CanvasResolution;
   outputResolutionAspectAgnostic?: boolean;
@@ -171,6 +173,7 @@ function assertRequestOptionScalars(options: Record<string, unknown>): void {
   assertOptionalInteger(options, "gifLoop");
   assertOptionalInteger(options, "hlsSegmentSeconds", 1);
   assertOptionalInteger(options, "workers", 1);
+  assertOptionalInteger(options, "maxRenderMs");
   assertOptionalInteger(options, "crf");
   for (const field of ["useGpu", "debug", "outputResolutionAspectAgnostic"] as const) {
     assertOptionalBoolean(options, field);
@@ -180,6 +183,7 @@ function assertRequestOptionScalars(options: Record<string, unknown>): void {
   }
   assertOptionalEnum(options, "strictness", ["strict", "best-effort"]);
   assertOptionalEnum(options, "hdrMode", ["auto", "force-hdr", "force-sdr"]);
+  assertOptionalEnum(options, "pageMotionBlur", ["off"]);
   if (options.videoFrameFormat !== undefined && !isVideoFrameFormat(options.videoFrameFormat)) {
     throw new Error("Render request videoFrameFormat is invalid");
   }
@@ -297,6 +301,7 @@ export function distributedConfigFromRequest(
     codec: distributed.codec,
     quality: options.quality,
     crf: options.crf,
+    pageMotionBlur: options.pageMotionBlur,
     bitrate: options.videoBitrate,
     videoFrameFormat: options.videoFrameFormat,
     outputResolution: options.outputResolution,
@@ -352,6 +357,7 @@ export function renderRequestFromDistributedConfig(input: {
     format: config.format,
     distributed,
     ...optionalProperty("crf", config.crf),
+    ...optionalProperty("pageMotionBlur", config.pageMotionBlur),
     ...optionalProperty("videoBitrate", config.bitrate),
     ...optionalProperty("videoFrameFormat", config.videoFrameFormat),
     ...optionalProperty("outputResolution", config.outputResolution),

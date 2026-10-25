@@ -1,6 +1,7 @@
 import type { LintContext, HyperframeLintFinding } from "../context";
 import postcss from "postcss";
 import selectorParser from "postcss-selector-parser";
+import { GLSL_SCRIPT_TYPES } from "../shaderDomains";
 import {
   HTML_BODY_CSS_WIDTH_FIRST_RE,
   HTML_BODY_CSS_HEIGHT_FIRST_RE,
@@ -12,6 +13,7 @@ import {
   truncateSnippet,
   stripJsComments,
   stripStringLiterals,
+  blankInlinedGsapLibrary,
   extractCompositionIdsFromCss,
   extractTimelineRegistryKeys,
   getInlineScriptSyntaxError,
@@ -27,6 +29,7 @@ const SCRIPT_SYNTAX_EXEMPT_TYPES = new Set([
   "application/hyperframes-slideshow+json",
   "importmap",
   "module",
+  ...GLSL_SCRIPT_TYPES,
 ]);
 
 function repeatedDescendantId(selector: string): string | null {
@@ -940,9 +943,9 @@ export const coreRules: Array<(ctx: LintContext) => HyperframeLintFinding[]> = [
     ];
 
     for (const script of scripts) {
-      const withoutComments = stripJsComments(script.content);
+      const withoutComments = stripJsComments(blankInlinedGsapLibrary(script.content));
       // Strings are content, not code. A composition that DISPLAYS source (the
-      // code-snippet blocks, /pr-to-video) carries `Math.random()` inside a string
+      // code-snippet blocks) carries `Math.random()` inside a string
       // literal it never executes, and reported itself non-deterministic with no
       // way to clear the error while still rendering the snippet.
       const executable = stripStringLiterals(withoutComments);

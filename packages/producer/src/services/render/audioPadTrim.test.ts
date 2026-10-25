@@ -13,12 +13,14 @@
  * No real ffmpeg/ffprobe runs in these tests.
  */
 
-import { describe, expect, it, mock } from "bun:test";
+import { describe, expect, it, mock, spyOn } from "bun:test";
+import * as fs from "node:fs";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   buildPadTrimAudioPlan,
+  constrainAacTruePeak,
   padOrTrimAudioToVideoFrameCount,
   type AudioProbeInfo,
   type PadTrimAudioInput,
@@ -311,6 +313,40 @@ describe("padOrTrimAudioToVideoFrameCount", () => {
     });
   });
 
+  it("rides out a transient Windows file lock when the corrected AAC replaces the audio", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hf-peak-lock-"));
+    const outputPath = join(dir, "o.aac");
+    writeFileSync(outputPath, "original");
+    const { input } = harness({
+      video: { frameCount: 90, fpsNum: 30, fpsDen: 1 },
+      audio: { durationSeconds: 3 },
+    });
+    input.outputPath = outputPath;
+    let peaks = [1.5, -3];
+    input.probeAudioTruePeakDbfs = async () => peaks.shift()!;
+    input.encodeAac = async (_input, output) => {
+      writeFileSync(output, "corrected");
+      return { success: true };
+    };
+    const real = fs.renameSync;
+    let locked = 2;
+    const rename = spyOn(fs, "renameSync").mockImplementation(((from: string, to: string) => {
+      if (locked-- > 0) throw Object.assign(new Error("EPERM: rename"), { code: "EPERM" });
+      return real(from, to);
+    }) as typeof fs.renameSync);
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    try {
+      const result = await padOrTrimAudioToVideoFrameCount(input);
+      expect(result.success).toBe(true);
+      expect(fs.readFileSync(outputPath, "utf-8")).toBe("corrected");
+    } finally {
+      Object.defineProperty(process, "platform", platform);
+      rename.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("keeps the end of a long correction failure, where ffmpeg says what went wrong", async () => {
     const { input } = harness({
       video: { frameCount: 90, fpsNum: 30, fpsDen: 1 },
@@ -356,8 +392,8 @@ describe("padOrTrimAudioToVideoFrameCount", () => {
       const result = await padOrTrimAudioToVideoFrameCount(input);
 
       expect(result.success, result.error).toBe(true);
-      expect(corrections).toEqual([-1.5, -2.4, -2.94]);
-      expect(result.audioLoweredDb).toBe(2.94);
+      expect(corrections).toEqual([-1.5, -2.9]);
+      expect(result.audioLoweredDb).toBe(2.9);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -377,8 +413,55 @@ describe("padOrTrimAudioToVideoFrameCount", () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain("pass 0: 0.000 dBFS at 0.000 dB attenuation");
     expect(result.error).toContain("pass 1: -0.400 dBFS at -1.500 dB attenuation");
-    expect(result.error).toContain("pass 2: -0.600 dBFS at -2.600 dB attenuation");
-    expect(result.error).toContain("pass 3: -0.800 dBFS at -3.500 dB attenuation");
+    expect(result.error).toContain("pass 2: -0.600 dBFS at -3.100 dB attenuation");
+    expect(result.error).toContain("pass 3: -0.800 dBFS at -5.500 dB attenuation");
+  });
+
+  it("gets under the ceiling when the AAC peak stalls as attenuation grows", async () => {
+    // A failed render's measured peaks (pass 0..3), then the peak falling dB for dB again.
+    const stalled: [number, number][] = [
+      [0, 1.9],
+      [-3.4, -0.5],
+      [-4.4, -0.6],
+      [-5.3, -0.6],
+    ];
+    const peakAt = (db: number) => {
+      const i = stalled.findIndex(([at]) => at <= db);
+      if (i === -1) return -0.6 + (db + 5.3);
+      if (i === 0) return stalled[0]![1];
+      const [[a, pa], [b, pb]] = [stalled[i - 1]!, stalled[i]!];
+      return pa + ((pb - pa) * (db - a)) / (b - a);
+    };
+    const dir = mkdtempSync(join(tmpdir(), "hf-aac-stall-"));
+    const corrections: number[] = [];
+    let attenuationDb = 0;
+    const { input } = harness({
+      video: { frameCount: 90, fpsNum: 30, fpsDen: 1 },
+      audio: { durationSeconds: 3 },
+    });
+    input.videoPath = join(dir, "video.mp4");
+    input.audioPath = join(dir, "source.m4a");
+    input.outputPath = join(dir, "normalized.m4a");
+    input.probeAudioTruePeakDbfs = async () => peakAt(attenuationDb);
+    input.encodeAac = async (_input, output, _durationSeconds, filter) => {
+      const volume = /^volume=(-?[\d.]+)dB/.exec(filter);
+      if (volume) {
+        attenuationDb = Number(volume[1]);
+        corrections.push(attenuationDb);
+      }
+      writeFileSync(output, "");
+      return { success: true };
+    };
+
+    try {
+      const result = await padOrTrimAudioToVideoFrameCount(input);
+
+      expect(result.success, result.error).toBe(true);
+      expect(corrections).toEqual([-3.4, -4.9, -7.3]);
+      expect(result.audioLoweredDb).toBe(7.3);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -487,6 +570,39 @@ describe("PadTrimAudioResult.error never carries the input path", () => {
         expect(result.success).toBe(false);
         expect(result.error ?? "").toContain("failed to probe audio");
       });
+    }
+  });
+});
+
+describe("constrainAacTruePeak from a PCM source", () => {
+  it("cuts a clipped mix by its PCM peak, not the AAC reading the encoder already clipped", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hf-aac-pcm-"));
+    try {
+      const audioPath = join(dir, "mix.m4a");
+      const sourcePath = join(dir, "pcm.wav");
+      writeFileSync(audioPath, "aac");
+      writeFileSync(sourcePath, "pcm");
+      const pcmPeakDbfs = 10;
+      let cutDb = 0;
+      // A hot PCM comes out of the encoder at full scale; once the cut gets it under, the AAC
+      // peak follows with ~1 dB of overshoot.
+      const peakOf = (cut: number) => (pcmPeakDbfs + cut > 0 ? -0.4 : pcmPeakDbfs + cut + 1);
+      const result = await constrainAacTruePeak({
+        audioPath,
+        sourcePath,
+        targetDurationSeconds: 1,
+        probeTruePeakDbfs: async (path) =>
+          path === sourcePath ? pcmPeakDbfs : path === audioPath ? 5.2 : peakOf(cutDb),
+        encodeAac: async (_input, output, _seconds, filter) => {
+          cutDb = Number(/volume=(-?[\d.]+)dB/.exec(filter ?? "")?.[1]);
+          writeFileSync(output, "aac");
+          return { success: true };
+        },
+      });
+      expect(result.success).toBe(true);
+      expect(result.loweredDb).toBeGreaterThan(pcmPeakDbfs);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

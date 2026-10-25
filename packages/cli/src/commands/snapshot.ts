@@ -1,6 +1,13 @@
+import {
+  DEFAULT_CONFIG,
+  buildZeroDurationDiagnostic,
+  evaluateHfDiagnostic,
+} from "@hyperframes/engine";
+import type { Page } from "puppeteer-core";
 import { reportArtifacts } from "../utils/toolContext.js";
 import { withProjectLock } from "../utils/projectLock.js";
 import {
+  parseSnapshotAt,
   parseSnapshotRange,
   sampleSnapshotRange,
   resolveSnapshotCompositionRange,
@@ -18,7 +25,7 @@ import {
 } from "@hyperframes/studio-server/history";
 import { pngDimensions } from "../utils/pngDimensions.js";
 import { runWithConcurrencyLimit } from "../utils/concurrency.js";
-import { failCommand } from "../utils/commandResult.js";
+import { CliRuntimeError, failCommand } from "../utils/commandResult.js";
 // fallow-ignore-file complexity
 import { defineCommand } from "citty";
 import { existsSync, mkdtempSync, readFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -31,7 +38,10 @@ import {
   parseZoomTarget,
   resolveCropRegion,
   runFfmpegOnce,
-  seekCompositionTimeline,
+  SCREENSHOT_IMAGE_WAIT_MS,
+  seekCompositionTimelineOnly,
+  settleCompositionSeek,
+  type UnsettledImages,
   type ZoomTarget,
 } from "../capture/captureCompositionFrame.js";
 import {
@@ -59,6 +69,17 @@ import { parseAngle, type Camera } from "./motionShotLayout.js";
 import type { Example } from "./_examples.js";
 import { loadInstalledSharp, loadOptionalPackage } from "../utils/optionalPackages.js";
 import { resolveLocalBrowserGpuMode, type BrowserGpuMode } from "../browser/gpuPolicy.js";
+import {
+  REVIEW_PHONE_WIDTH,
+  planReview,
+  resolveReviewTimeline,
+  reviewFrames,
+  writeReviewSheets,
+  type ReviewFrame,
+  type ReviewPlan,
+  type ReviewSheets,
+} from "./snapshotReview.js";
+import { withMeta } from "../utils/updateCheck.js";
 
 // Runs IN THE BROWSER (serialized into page.evaluate). Tilt the whole stage so
 // the REAL painted pixels are viewed from an orthogonal angle (FINDING [10]:
@@ -98,6 +119,15 @@ function orbitStageSource(): string {
  * clip (corrupt media, stalled network mount, codec edge case) cannot wedge
  * `hyperframes snapshot` indefinitely. */
 const FFMPEG_EXTRACT_TIMEOUT_MS = 30_000;
+const FALLBACK_SEEK_LEAD_SECONDS = 5;
+const RENDER_READY_TIMEOUT_MS = DEFAULT_CONFIG.playerReadyTimeout;
+
+export async function renderNotReadyError(page: Page, timeoutMs: number): Promise<Error> {
+  const diagnostic = await evaluateHfDiagnostic(page).then(buildZeroDurationDiagnostic, () => "");
+  return new Error(
+    `The composition was not render-ready after ${timeoutMs}ms, so no frame was saved (raise --timeout if it loads slowly).\n${diagnostic}`,
+  );
+}
 /** Each 4K decode is already multi-threaded, so a few at once fill the cores without exhausting memory. */
 const VIDEO_FRAME_EXTRACT_CONCURRENCY = 4;
 
@@ -105,6 +135,9 @@ const VIDEO_FRAME_EXTRACT_CONCURRENCY = 4;
 export function formatSnapshotTimestamp(time: number): string {
   return `${Number(time.toFixed(3))}s`;
 }
+
+export const SNAPSHOT_IMAGE_NAME =
+  /^(?:(?:frame-\d+-|ref-(?:\d+-)?)?at-[\d.]+s\.png|pair-(?:\d+-)?at-[\d.]+s\.jpg|(?:beat-\d+|seam-\d+-\d+)-at-[\d.]+s\.png|(?:contact-sheet|review-beats|review-phone)(?:-\d+)?\.jpg|review-seam-\d+\.jpg)$/;
 
 /** --keep names a still by its millisecond label, so two distinct times may not share one. */
 function assertDistinctKeepNames(times: number[]): void {
@@ -227,7 +260,7 @@ export function containingSourceFrameIndex(timestamps: readonly number[], time: 
 }
 
 /** Keyframe seek plus the decoded-time threshold that selects the frame containing `time`, or null. */
-async function probeContainingSourceFrameSeek(
+export async function probeContainingSourceFrameSeek(
   videoPath: string,
   time: number,
   holdLastFrame: boolean,
@@ -321,12 +354,19 @@ async function probeContainingSourceFrameSeek(
     const landed = await landing(candidate.pts);
     if (landed === null) break;
     if (landed <= 0 || landed > frame) continue;
+    // An index that places this keyframe after its own time lands on the one before; an accurate seek
+    // to the keyframe's time decodes from there and drops everything before it.
+    if (landed < candidate.pts - 1e-6) return { seek: candidate.pts, select: mid - candidate.pts };
     const again = Math.abs(landed - candidate.pts) < 1e-6 ? landed : await landing(landed);
     if (again !== null && Math.abs(again - landed) < 1e-6)
       return { seek: landed, select: mid - landed };
   }
-  // No seek: the first frame FFmpeg emits is the first one at or after the file start.
-  return { select: mid - (timestamps.find((t) => t >= 0) ?? frame) };
+  // No usable keyframe landing: an accurate seek to the gap before the frame decodes up to it and drops the rest.
+  // An exact frame time keeps start_t at 0; a time between frames would shift the select by the gap to the next frame.
+  const from = timestamps.filter((t) => t > 0 && t <= mid - FALLBACK_SEEK_LEAD_SECONDS).at(-1) ?? 0;
+  return from > 0
+    ? { seek: from, select: mid - from }
+    : { select: mid - (timestamps.find((t) => t >= 0) ?? frame) };
 }
 
 /** Raw stream time of the packet an input seek to `seek` lands on, read without decoding. */
@@ -352,6 +392,8 @@ async function probeSeekLanding(
     return null;
   }
 }
+
+class FrameExtractTimeoutError extends Error {}
 
 export async function extractVideoFrameToBuffer(
   videoPath: string,
@@ -385,7 +427,12 @@ export async function extractVideoFrameToBuffer(
     if (filters.length > 0) args.push("-vf", filters.join(","));
     args.push("-frames:v", "1", "-q:v", "2", "-y", outPath);
     const result = await runFfmpegOnce(ffmpegPath, args, FFMPEG_EXTRACT_TIMEOUT_MS);
-    if (result.code !== 0 || result.timedOut || !existsSync(outPath)) return null;
+    if (result.timedOut) {
+      throw new FrameExtractTimeoutError(
+        `FFmpeg timed out after ${FFMPEG_EXTRACT_TIMEOUT_MS / 1000}s extracting the frame of ${videoPath} at ${timeSeconds.toFixed(2)}s`,
+      );
+    }
+    if (result.code !== 0 || !existsSync(outPath)) return null;
     return readFileSync(outPath);
   } finally {
     try {
@@ -393,6 +440,21 @@ export async function extractVideoFrameToBuffer(
     } catch {
       /* best-effort */
     }
+  }
+}
+
+/** A timed-out clip becomes a finding naming it, so the other frames of the snapshot still land. */
+export async function extractVideoFrameOrWarn(
+  warnings: string[],
+  ...args: Parameters<typeof extractVideoFrameToBuffer>
+): Promise<Buffer | null> {
+  try {
+    return await extractVideoFrameToBuffer(...args);
+  } catch (error) {
+    if (!(error instanceof FrameExtractTimeoutError)) throw error;
+    warnings.push(error.message);
+    console.warn(`   ${c.warn("⚠")} ${error.message}`);
+    return null;
   }
 }
 
@@ -502,8 +564,13 @@ async function captureSnapshots(
     against?: string;
     /** Add to outputDir without clearing it; name each still by its time, not its place in the run. */
     keep?: boolean;
+    /** Capture the review set (beats, seams) instead of evenly spaced frames. */
+    review?: boolean;
+    /** Progress lines; `--json` sends them to stderr so stdout stays one envelope. */
+    log?: (message: string) => void;
   },
-): Promise<string[]> {
+): Promise<CapturedSnapshots> {
+  const log = opts.log ?? ((message: string) => console.log(message));
   const { bundleWithLocalizedFonts } = await import("../utils/bundleWithLocalizedFonts.js");
 
   const capture = await captureArtifactRevision(projectDir).catch(warnSnapshotsNotRecorded);
@@ -518,6 +585,9 @@ async function captureSnapshots(
   const warnings: string[] = [];
   let completed = false;
   const numFrames = opts.frames ?? 5;
+  let review: ReviewPlan | undefined;
+  let reviewList: ReviewFrame[] | undefined;
+  const reviewPaths = new Map<ReviewFrame, string>();
 
   // Localize fonts (embed remote @font-face as data URIs, matching the render
   // path) so snapshots render the real font instead of a fallback sans.
@@ -532,13 +602,14 @@ async function captureSnapshots(
       page,
       renderReadyTimedOut,
     } = await openSettledCompositionPage(html, server.url, {
-      renderReadyTimeoutMs: opts.timeout ?? 5000,
+      renderReadyTimeoutMs: opts.timeout ?? RENDER_READY_TIMEOUT_MS,
       renderReadyWarningSuffix: "snapshots may be inaccurate",
       browserGpuMode: opts.browserGpuMode,
     });
 
     try {
-      if (renderReadyTimedOut) warnings.push("Render readiness timed out");
+      if (renderReadyTimedOut)
+        throw await renderNotReadyError(page, opts.timeout ?? RENDER_READY_TIMEOUT_MS);
       // Font verification — split into loaded / errored / unused. Only status
       // "error" is a real failure; a face still "unloaded"/"loading" after
       // document.fonts.ready + the settle wait was simply never requested by any
@@ -567,9 +638,9 @@ async function captureSnapshots(
         const parts = [`${fontReport.loaded.length} loaded`];
         if (fontReport.errored.length > 0) parts.push(`${fontReport.errored.length} failed`);
         if (fontReport.unused.length > 0) parts.push(`${fontReport.unused.length} unused`);
-        console.log(`\n   ${c.dim("Fonts:")} ${parts.join(", ")}`);
+        log(`\n   ${c.dim("Fonts:")} ${parts.join(", ")}`);
         if (fontReport.errored.length > 0) {
-          console.log(`   ${c.error("Fonts FAILED:")} ${fontReport.errored.join(", ")}`);
+          log(`   ${c.error("Fonts FAILED:")} ${fontReport.errored.join(", ")}`);
         }
       }
 
@@ -588,12 +659,11 @@ async function captureSnapshots(
       });
 
       if (duration <= 0 && !opts.at?.length) {
-        return [];
+        return { paths: [], warnings };
       }
 
-      let range = opts.range;
-      if (opts.composition) {
-        const timing = await page.evaluate(() => ({
+      const readTiming = () =>
+        page.evaluate(() => ({
           html: document.documentElement.outerHTML,
           durations: Object.fromEntries(
             Object.entries((window as any).__timelines ?? {}).map(([id, timeline]) => [
@@ -602,6 +672,9 @@ async function captureSnapshots(
             ]),
           ),
         }));
+      let range = opts.range;
+      if (opts.composition && !opts.review) {
+        const timing = await readTiming();
         range = resolveSnapshotCompositionRange(
           timing.html,
           timing.durations,
@@ -609,22 +682,40 @@ async function captureSnapshots(
           duration,
         );
       }
-      const { times: positions, appendedTail } = range
-        ? {
-            times: sampleSnapshotRange(range, numFrames, duration, !!opts.composition),
-            appendedTail: false,
-          }
-        : computeSnapshotTimes(duration, {
-            frames: numFrames,
-            at: opts.at,
-            includeEnd: opts.includeEnd,
-          });
+      if (opts.review) {
+        const timing = await readTiming();
+        const timeline = resolveReviewTimeline(
+          timing.html,
+          timing.durations,
+          duration,
+          opts.composition,
+        );
+        // The render's last frame is one 30fps frame before the end, where clips are still mounted.
+        review = planReview(timeline, Math.min(timeline.window[1], duration) - 1 / 30);
+        reviewList = reviewFrames(review);
+      }
+      const { times: positions, appendedTail } = reviewList
+        ? { times: reviewList.map((frame) => frame.time), appendedTail: false }
+        : range
+          ? {
+              times: sampleSnapshotRange(range, numFrames, duration, !!opts.composition),
+              appendedTail: false,
+            }
+          : computeSnapshotTimes(duration, {
+              frames: numFrames,
+              at: opts.at,
+              includeEnd: opts.includeEnd,
+            });
       if (range)
-        console.log(
+        log(
           `   Sampling ${positions.length} frames within ${range[0]}–${range[1]}s${opts.composition ? ` (composition ${opts.composition})` : ""}`,
         );
+      if (review)
+        log(
+          `   Review: ${review.beats.length} beat(s) and ${review.seams.length} seam(s) within ${review.window[0]}–${review.window[1]}s${opts.composition ? ` (composition ${opts.composition})` : ""}`,
+        );
       if (appendedTail) {
-        console.log(
+        log(
           `   ${c.dim(`Note: added an end-of-timeline frame at ${positions[positions.length - 1]!.toFixed(2)}s. Short beats between your --at times may still be skipped — pass them explicitly.`)}`,
         );
       }
@@ -641,7 +732,7 @@ async function captureSnapshots(
       try {
         const { readdirSync } = await import("node:fs");
         for (const file of opts.keep ? [] : readdirSync(snapshotDir)) {
-          if (/\.(png|jpg|jpeg)$/i.test(file)) {
+          if (SNAPSHOT_IMAGE_NAME.test(file)) {
             const path = resolve(snapshotDir, file);
             replaced.push(path);
             rmSync(path, { force: true });
@@ -709,7 +800,8 @@ async function captureSnapshots(
       for (let i = 0; i < positions.length; i++) {
         const time = positions[i]!;
 
-        await seekCompositionTimeline(page, time, { exactTime: true });
+        const seekOptions = { exactTime: true, waitForImagesMs: SCREENSHOT_IMAGE_WAIT_MS };
+        await seekCompositionTimelineOnly(page, time, seekOptions);
 
         if (cameraExpr) await page.evaluate(cameraExpr);
 
@@ -728,7 +820,7 @@ async function captureSnapshots(
               const rawDuration = parseFloat(v.dataset.duration ?? "");
               const srcDur = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : 0;
               return {
-                id: v.id,
+                id: runtimeWindow.__hfMediaId?.(v) || v.id,
                 src: v.currentSrc || v.src,
                 authoredStart,
                 authoredRate: v.dataset.playbackRate,
@@ -812,7 +904,8 @@ async function captureSnapshots(
               const useVp9AlphaDecoder = inputIsLocal
                 ? await shouldUseVp9AlphaDecoder(ffmpegInput)
                 : false;
-              const png = await extractVideoFrameToBuffer(
+              const png = await extractVideoFrameOrWarn(
+                warnings,
                 ffmpegInput,
                 Math.max(0, v.relTime),
                 useVp9AlphaDecoder,
@@ -853,13 +946,19 @@ async function captureSnapshots(
           }
         }
 
+        warnUnsettledImages(await settleCompositionSeek(page, seekOptions), time, warnings);
         await recaptureSnapshotComposite(page);
 
         const timeLabel = formatSnapshotTimestamp(time);
         const slot = opts.keep
           ? `at-${timeLabel}`
           : `${String(i).padStart(2, "0")}-at-${timeLabel}`;
-        const filename = opts.keep ? `${slot}.png` : `frame-${slot}.png`;
+        const reviewFrame = reviewList?.[i];
+        const filename = reviewFrame
+          ? reviewFrame.file
+          : opts.keep
+            ? `${slot}.png`
+            : `frame-${slot}.png`;
         const framePath = join(snapshotDir, filename);
 
         let crop: { x: number; y: number; width: number; height: number } | undefined;
@@ -902,8 +1001,12 @@ async function captureSnapshots(
             zoomScale: opts.zoom ? (opts.zoomScale ?? DEFAULT_ZOOM_SCALE) : 1,
             angle: opts.angle,
             browserGpuMode: opts.browserGpuMode,
+            ...(reviewFrame
+              ? { review: { role: reviewFrame.role, label: reviewFrame.label } }
+              : {}),
           },
         });
+        if (reviewFrame) reviewPaths.set(reviewFrame, framePath);
         if (opts.against) {
           // Frame-exact reference frame beside the render, so a rebuild can be
           // checked against its footage without hand-rolled ffmpeg + montage.
@@ -946,6 +1049,7 @@ async function captureSnapshots(
           opts.zoom,
           warnings,
           completed,
+          log,
         )
       : false;
     if (!recorded) {
@@ -954,7 +1058,42 @@ async function captureSnapshots(
     }
   }
 
-  return savedPaths;
+  return {
+    paths: savedPaths,
+    warnings,
+    ...(review && reviewList
+      ? {
+          review: {
+            plan: review,
+            frames: reviewList.flatMap((frame) => {
+              const path = reviewPaths.get(frame);
+              return path ? [{ ...frame, path }] : [];
+            }),
+          },
+        }
+      : {}),
+  };
+}
+
+interface CapturedSnapshots {
+  /** Project-relative where possible, as printed. */
+  paths: string[];
+  /** Why a frame may differ from the composition: shown on the console and in `--json`. */
+  warnings: string[];
+  review?: { plan: ReviewPlan; frames: Array<ReviewFrame & { path: string }> };
+}
+
+function warnUnsettledImages(images: UnsettledImages, time: number, warnings: string[]): void {
+  const groups = [
+    [images.pending, `did not finish loading within ${SCREENSHOT_IMAGE_WAIT_MS} ms`],
+    [images.failed, "failed to load"],
+  ] as const;
+  for (const [sources, what] of groups) {
+    if (sources.length === 0) continue;
+    const message = `${sources.length} image(s) ${what} at ${time}s, so the frame may be missing them: ${sources.join(", ")}`;
+    warnings.push(message);
+    console.warn(`   ${c.warn("⚠")} ${message}`);
+  }
 }
 
 function warnSnapshotsNotRecorded(error: unknown): undefined {
@@ -969,6 +1108,7 @@ async function recordSnapshotArtifacts(
   zoom: ZoomTarget | undefined,
   warnings: string[],
   completed: boolean,
+  log: (message: string) => void,
 ): Promise<boolean> {
   const records = await recordArtifacts(
     projectDir,
@@ -982,9 +1122,84 @@ async function recordSnapshotArtifacts(
   ).catch(warnSnapshotsNotRecorded);
   const record = records?.[0];
   if (!record) return false;
-  console.log(`   Revision: ${record.revision ?? "none"} (${record.attribution})`);
-  console.log(`   State: ${join(projectDir, ".hyperframes", "video-state.json")}`);
+  log(`   Revision: ${record.revision ?? "none"} (${record.attribution})`);
+  log(`   State: ${join(projectDir, ".hyperframes", "video-state.json")}`);
   return true;
+}
+
+/** `snapshot --json`: every still with its time, the sheets, and under --review the plan behind them. */
+function snapshotEnvelope(
+  projectDir: string,
+  outputDir: string,
+  captured: CapturedSnapshots,
+  extra: { contactSheets: string[]; reviewSheets?: ReviewSheets; describedPath?: string },
+) {
+  const review = captured.review;
+  const frames = review
+    ? review.frames.map((frame) => ({
+        path: frame.path,
+        time: frame.time,
+        role: frame.role,
+        label: frame.label,
+      }))
+    : captured.paths.map((path) => ({ path: resolve(projectDir, path), time: timeFromName(path) }));
+  return {
+    ok: true,
+    outputDir,
+    frames,
+    contactSheets: extra.contactSheets.map((sheet) => resolve(sheet)),
+    ...(captured.warnings.length > 0 ? { warnings: captured.warnings } : {}),
+    ...(extra.describedPath ? { descriptions: extra.describedPath } : {}),
+    ...(review
+      ? {
+          review: {
+            window: review.plan.window,
+            scenes: review.plan.scenes,
+            beats: review.plan.beats.map((beat, index) => ({
+              ...beat,
+              path: review.frames.find(
+                (frame) => frame.role === "beat" && frame.index === index + 1,
+              )?.path,
+            })),
+            seams: review.plan.seams.map((seam, index) => ({
+              ...seam,
+              paths: review.frames
+                .filter((frame) => frame.role === "seam" && frame.index === index + 1)
+                .map((frame) => frame.path),
+              sheet: extra.reviewSheets?.seams[index],
+            })),
+            sheets: extra.reviewSheets ?? { beats: [], seams: [], phone: [] },
+            notes: review.plan.notes,
+          },
+        }
+      : {}),
+  };
+}
+
+function timeFromName(path: string): number | null {
+  const match = /at-([\d.]+)s\.png$/.exec(path);
+  return match ? Number(match[1]) : null;
+}
+
+function printReview(
+  review: NonNullable<CapturedSnapshots["review"]>,
+  sheets: ReviewSheets,
+  log: (message: string) => void,
+): void {
+  const beats = review.plan.beats.map(
+    (beat) => `${formatSnapshotTimestamp(beat.time)} ${beat.label}`,
+  );
+  log(`   Beat sheet (settled frame per scene): ${sheets.beats.join(", ") || "none"}`);
+  log(`     ${c.dim(beats.join(" · "))}`);
+  review.plan.seams.forEach((seam, index) => {
+    const sides = `${seam.from ?? "start"} -> ${seam.to ?? "end"}`;
+    const strip = sheets.seams[index] ?? "not written";
+    log(`   Seam ${index + 1} at ${formatSnapshotTimestamp(seam.time)} (${sides}): ${strip}`);
+  });
+  log(
+    `   Phone sheet (beats at ${REVIEW_PHONE_WIDTH} px wide): ${sheets.phone.join(", ") || "none"}`,
+  );
+  for (const note of review.plan.notes) log(`   ${c.dim(note)}`);
 }
 
 export default defineCommand({
@@ -1026,8 +1241,8 @@ export default defineCommand({
     },
     timeout: {
       type: "string",
-      description: "Ms to wait for runtime to initialize (default: 5000)",
-      default: "5000",
+      description: `Ms to wait for the composition to become render-ready (default: ${RENDER_READY_TIMEOUT_MS})`,
+      default: String(RENDER_READY_TIMEOUT_MS),
     },
     angle: {
       type: "string",
@@ -1061,6 +1276,17 @@ export default defineCommand({
       description:
         "Reference video (e.g. footage being rebuilt): also save its frame at each captured time and a render|reference pair sheet",
     },
+    review: {
+      type: "boolean",
+      description:
+        "Capture the review set instead of evenly spaced frames: each scene at its start + 0.3 s and its middle, and each data-beat at its start + 0.3 s, on review-beats.jpg, a 5-frame strip around every cut (review-seam-NN.jpg), and the beat frames at phone width (review-phone.jpg). Scopes to --composition; ignores --frames.",
+      default: false,
+    },
+    json: {
+      type: "boolean",
+      description: "Print one JSON envelope (paths, times, sheets; the review plan under --review)",
+      default: false,
+    },
     describe: {
       type: "string",
       description:
@@ -1080,10 +1306,26 @@ export default defineCommand({
     },
   },
   async run({ args }) {
+    const asJson = args.json === true;
+    const log = (message: string) => (asJson ? console.error(message) : console.log(message));
+    const fail = (message: string): never => {
+      if (asJson) console.log(JSON.stringify(withMeta({ ok: false, error: message }), null, 2));
+      else log(message);
+      failCommand();
+    };
     if ([args.at, args.range, args.composition].filter((value) => value !== undefined).length > 1)
       throw new Error("Use only one of --at, --range, or --composition");
+    const reviewMode = args.review === true;
+    if (reviewMode) {
+      const clash = (["at", "range", "zoom", "keep", "against"] as const).find(
+        (flag) => args[flag] !== undefined && args[flag] !== false,
+      );
+      if (clash) throw new Error(`--review picks its own frames; drop --${clash}`);
+    }
     const frames = parseInt(args.frames as string, 10) || 5;
     const range = args.range === undefined ? undefined : parseSnapshotRange(String(args.range));
+    const atTimestamps = args.at === undefined ? undefined : parseSnapshotAt(String(args.at));
+    if (args.keep === true && atTimestamps) assertDistinctKeepNames(atTimestamps);
     const composition =
       args.composition === undefined ? undefined : String(args.composition).trim();
     if (composition === "") throw new Error("--composition requires a composition ID");
@@ -1091,38 +1333,35 @@ export default defineCommand({
     const lintResult = await lintProject(project.dir);
     if (hasDefinitiveEntryMismatch(lintResult)) {
       const candidate = definitiveEntryMismatchComposition(lintResult);
-      console.log("");
+      log("");
       for (const line of formatLintFindings(lintResult, { errorsFirst: true })) {
-        console.log(line);
+        log(line);
       }
-      console.log("");
-      console.log(c.error("  Aborting snapshot because the default index.html entry is blank."));
+      log("");
+      log(c.error("  Aborting snapshot because the default index.html entry is blank."));
       if (candidate && posix.basename(candidate) === "index.html") {
         const candidateDir = posix.dirname(candidate);
         const target = `<project>/${candidateDir}`;
-        console.log(
+        log(
           c.dim(
             `  Move or mount the authored file, or snapshot its directory directly: hyperframes snapshot ${target}. Only use the directory form when its assets are self-contained under that directory; otherwise mount it from the project root.`,
           ),
         );
       } else if (candidate) {
-        console.log(
+        log(
           c.dim(
             `  Move or mount ${candidate} as a project index.html before snapshotting; snapshot accepts project directories, not individual HTML files.`,
           ),
         );
       }
-      console.log("");
+      log("");
+      if (asJson) {
+        const error = "The default index.html entry is blank; see the lint findings on stderr.";
+        console.log(JSON.stringify(withMeta({ ok: false, error }), null, 2));
+      }
       failCommand();
     }
-    const timeout = parseInt(args.timeout as string, 10) || 5000;
-    const atTimestamps = args.at
-      ? String(args.at)
-          .split(",")
-          .map((s) => parseFloat(s.trim()))
-          .filter((n) => !isNaN(n))
-      : undefined;
-    if (args.keep === true && atTimestamps) assertDistinctKeepNames(atTimestamps);
+    const timeout = parseInt(args.timeout as string, 10) || RENDER_READY_TIMEOUT_MS;
     // Gemini frame analysis runs by default (silently skipped if
     // GEMINI_API_KEY is not set). `--describe "custom question"` overrides
     // the default prompt with a targeted question. `--describe false` opts
@@ -1138,19 +1377,19 @@ export default defineCommand({
     const zoomTarget = args.zoom ? parseZoomTarget(String(args.zoom)) : undefined;
     const zoomScale = parseZoomScale(args["zoom-scale"]);
     const against = args.against ? resolve(String(args.against)) : undefined;
-    if (against && !existsSync(against)) {
-      console.log(`${c.error("✗")} --against video not found: ${against}`);
-      failCommand();
-    }
+    if (against && !existsSync(against))
+      fail(`${c.error("✗")} --against video not found: ${against}`);
 
-    const label = atTimestamps
-      ? `${atTimestamps.length} frames at [${atTimestamps.map(formatSnapshotTimestamp).join(", ")}]`
-      : `${frames} frames`;
+    const label = reviewMode
+      ? "review frames (beats, seams, phone)"
+      : atTimestamps
+        ? `${atTimestamps.length} frames at [${atTimestamps.map(formatSnapshotTimestamp).join(", ")}]`
+        : `${frames} frames`;
     const angleLabel =
       camera && (camera.yaw !== 0 || camera.pitch !== 0)
         ? ` ${c.dim(`(angle yaw ${camera.yaw}° pitch ${camera.pitch}°)`)}`
         : "";
-    console.log(`${c.accent("◆")}  Capturing ${label} from ${c.accent(project.name)}${angleLabel}`);
+    log(`${c.accent("◆")}  Capturing ${label} from ${c.accent(project.name)}${angleLabel}`);
 
     let managedSnapshotDir: string | undefined;
     try {
@@ -1160,7 +1399,7 @@ export default defineCommand({
       if (!args.output) managedSnapshotDir = snapshotDir;
       if (args.output) retainSnapshotOutput(project.dir, snapshotDir);
       await withProjectLock(project.dir, "snapshot", async () => {
-        const paths = await captureSnapshots(project.dir, {
+        const captured = await captureSnapshots(project.dir, {
           frames,
           range,
           composition,
@@ -1175,43 +1414,54 @@ export default defineCommand({
           browserGpuMode: resolveLocalBrowserGpuMode(args["browser-gpu"] as boolean | undefined),
           against,
           keep: args.keep === true,
+          review: reviewMode,
+          log,
         });
-        reportArtifacts(
-          "snapshot",
-          "frame",
-          paths.map((path) => resolve(project.dir, path)),
-        );
+        const paths = captured.paths;
+        const framePaths = paths.map((path) => resolve(project.dir, path));
+        reportArtifacts("snapshot", "frame", framePaths);
 
         if (paths.length === 0) {
-          console.log(
-            `\n${c.error("✗")} Could not determine composition duration — no frames captured`,
-          );
-          failCommand();
+          fail(`\n${c.error("✗")} Could not determine composition duration — no frames captured`);
         }
 
-        console.log(`\n${c.success("◇")}  ${paths.length} snapshots saved to ${snapshotDir}`);
+        log(`\n${c.success("◇")}  ${paths.length} snapshots saved to ${snapshotDir}`);
         for (const p of paths) {
-          console.log(`   ${p}`);
+          log(`   ${p}`);
         }
         if (against) {
-          console.log(
+          log(
             `   ${c.dim("ref-*.png + pair-*.jpg")} beside each frame (reference frame, render | reference sheet)`,
           );
         }
 
         // Generate contact sheet for quick AI review; a --keep folder mixes runs, so it gets none.
+        let contactSheets: string[] = [];
+        let reviewSheets: ReviewSheets | undefined;
         try {
           const { createSnapshotContactSheet } = await import("../capture/contactSheet.js");
-          const sheets =
-            args.keep === true
-              ? []
-              : await createSnapshotContactSheet(
-                  snapshotDir,
-                  join(snapshotDir, "contact-sheet.jpg"),
-                );
-          reportArtifacts("snapshot", "contact-sheet", sheets);
-          for (const sheet of sheets) {
-            console.log(`   ${resolve(sheet)} (grid view for AI review)`);
+          if (captured.review) {
+            const written = new Map(
+              captured.review.frames.map((frame) => [frame.file, frame.path]),
+            );
+            reviewSheets = await writeReviewSheets(
+              snapshotDir,
+              captured.review.frames,
+              (frame) => written.get(frame.file) ?? null,
+            );
+            contactSheets = [...reviewSheets.beats, ...reviewSheets.seams, ...reviewSheets.phone];
+            printReview(captured.review, reviewSheets, log);
+          } else if (args.keep !== true) {
+            contactSheets = await createSnapshotContactSheet(
+              framePaths,
+              join(snapshotDir, "contact-sheet.jpg"),
+            );
+          }
+          reportArtifacts("snapshot", "contact-sheet", contactSheets);
+          if (!captured.review) {
+            for (const sheet of contactSheets) {
+              log(`   ${resolve(sheet)} (grid view for AI review)`);
+            }
           }
         } catch (err) {
           console.warn(
@@ -1219,6 +1469,7 @@ export default defineCommand({
           );
         }
 
+        let describedPath: string | undefined;
         // Gemini vision descriptions. Runs by default — see describeArg
         // resolution above. `null` means the user explicitly opted out with
         // `--describe false`; missing GEMINI_API_KEY logs a skip and continues.
@@ -1227,9 +1478,9 @@ export default defineCommand({
             const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
             if (!geminiKey) {
               if (args.describe !== undefined)
-                console.log(`   ${c.dim("--describe: GEMINI_API_KEY not set, skipping")}`);
+                log(`   ${c.dim("--describe: GEMINI_API_KEY not set, skipping")}`);
             } else if (paths.length > 0) {
-              console.log(`   ${c.dim("Describing frames with Gemini vision...")}`);
+              log(`   ${c.dim("Describing frames with Gemini vision...")}`);
               const { GoogleGenAI } = await loadOptionalPackage("@google/genai", "--describe");
               const ai = new GoogleGenAI({ apiKey: geminiKey });
               const model = process.env.HYPERFRAMES_GEMINI_MODEL || "gemini-3.1-flash-lite-preview";
@@ -1310,17 +1561,29 @@ export default defineCommand({
 
               const descPath = join(snapshotDir, "descriptions.md");
               writeFileSync(descPath, descriptions.join("\n"));
-              console.log(`   ${c.dim("descriptions.md")} (Gemini frame analysis)`);
+              describedPath = descPath;
+              log(`   ${c.dim("descriptions.md")} (Gemini frame analysis)`);
             }
           } catch (descErr) {
             const msg = normalizeErrorMessage(descErr);
-            console.log(`   ${c.dim(`--describe failed: ${msg}`)}`);
+            log(`   ${c.dim(`--describe failed: ${msg}`)}`);
           }
+        }
+        if (asJson) {
+          const envelope = snapshotEnvelope(project.dir, snapshotDir, captured, {
+            contactSheets,
+            reviewSheets,
+            describedPath,
+          });
+          console.log(JSON.stringify(withMeta(envelope), null, 2));
         }
       });
     } catch (err) {
+      // Already reported where it happened (fail() above).
+      if (err instanceof CliRuntimeError && err.result.presented) throw err;
       const msg = normalizeErrorMessage(err);
-      console.error(`\n${c.error("✗")} Snapshot failed: ${msg}`);
+      if (asJson) console.log(JSON.stringify(withMeta({ ok: false, error: msg }), null, 2));
+      else console.error(`\n${c.error("✗")} Snapshot failed: ${msg}`);
       failCommand();
     } finally {
       if (managedSnapshotDir)

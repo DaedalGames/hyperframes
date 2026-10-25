@@ -1080,6 +1080,54 @@ describe("createColorGradingRuntime", () => {
     expect(canvas.style.opacity).toBe("1");
   });
 
+  it.each([
+    ["a seek", "redraw"],
+    ["a playback tick", "redrawAnimated"],
+  ] as const)("grades an image whose ancestor starts hidden once %s shows it", (_, pass) => {
+    // A layer a timeline reveals, or a sub-composition host that starts later.
+    const scene = document.createElement("div");
+    scene.style.visibility = "hidden";
+    const image = makeDrawableImage();
+    scene.appendChild(image);
+    document.body.appendChild(scene);
+    runtime = createColorGradingRuntime();
+
+    runtime[pass]();
+    expect(runtime.isGraded(image)).toBe(false);
+    expect(webglContexts()).toBe(0);
+
+    scene.style.visibility = "visible";
+    runtime[pass]();
+
+    expect(runtime.isGraded(image)).toBe(true);
+    expect(image.nextElementSibling?.hasAttribute("data-hf-color-grading-canvas")).toBe(true);
+    expect(image.style.getPropertyValue("opacity")).toBe("0");
+  });
+
+  it.each([
+    ["shown", "visible"],
+    ["still hidden", "hidden"],
+  ])("keeps a live grade switched off while %s, though its saved attribute grades", (_, start) => {
+    const scene = document.createElement("div");
+    scene.style.visibility = start;
+    const image = makeDrawableImage();
+    image.style.removeProperty("--hf-color-grading-blur");
+    image.setAttribute(
+      HF_COLOR_GRADING_ATTR,
+      serializeHfColorGrading({ adjust: { exposure: 0.5 } }),
+    );
+    scene.appendChild(image);
+    document.body.appendChild(scene);
+    runtime = createColorGradingRuntime();
+
+    runtime.setGrading(image, {});
+    scene.style.visibility = "visible";
+    runtime.redraw();
+    runtime.redrawAnimated();
+
+    expect(runtime.isGraded(image)).toBe(false);
+  });
+
   it("updates canvas opacity through grading's own hide when CSS animation progresses (#3329)", () => {
     const video = makeDrawableVideo();
     // Simulate a CSS entrance animation: the authored opacity is empty (no
@@ -2154,6 +2202,174 @@ describe("createColorGradingRuntime", () => {
     expect(runtime?.getStatus("#hero-video").state).toBe("active");
     expect(video.hasAttribute("data-hf-color-grading-source-hidden")).toBe(true);
     expect(video.style.getPropertyValue("opacity")).toBe("0");
+  });
+
+  it("does not rescan the document when only text changes", async () => {
+    startRuntimeWithVideo();
+    const caption = document.createElement("p");
+    document.body.appendChild(caption);
+    await Promise.resolve();
+    const scan = vi.spyOn(document, "querySelectorAll");
+    caption.textContent = "Hello";
+    caption.append(document.createElement("span"));
+    await Promise.resolve();
+    expect(
+      scan.mock.calls.filter(([selector]) => selector.includes(HF_COLOR_GRADING_ATTR)),
+    ).toEqual([]);
+  });
+
+  it("still grades media inserted later and drops media removed", async () => {
+    startRuntimeWithVideo();
+    const wrapper = document.createElement("section");
+    const later = makeDrawableVideo();
+    later.id = "later-video";
+    wrapper.appendChild(later);
+    document.body.appendChild(wrapper);
+    await Promise.resolve();
+    expect(runtime!.isGraded(later)).toBe(true);
+    wrapper.remove();
+    await Promise.resolve();
+    expect(runtime!.isGraded(later)).toBe(false);
+  });
+
+  it("drops media graded through the API when a wrapper holding it is removed", async () => {
+    startRuntimeWithVideo();
+    const wrapper = document.createElement("section");
+    const live = makeDrawableVideo();
+    live.id = "live-video";
+    live.removeAttribute(HF_COLOR_GRADING_ATTR);
+    wrapper.appendChild(live);
+    document.body.appendChild(wrapper);
+    runtime!.setGrading(live, { adjust: { exposure: 0.5 } });
+    expect(runtime!.isGraded(live)).toBe(true);
+    wrapper.remove();
+    await Promise.resolve();
+    expect(runtime!.isGraded(live)).toBe(false);
+  });
+});
+
+describe("createColorGradingRuntime after a context loss", () => {
+  it("grades a clip that came on screen while the context was lost once it is restored", () => {
+    let lost = false;
+    const gl = createMockWebGl();
+    gl.createTexture = vi.fn(() => (lost ? null : ({} as WebGLTexture)));
+    const spy = vi
+      .spyOn(HTMLCanvasElement.prototype, "getContext")
+      .mockImplementation(((type: string) =>
+        type === "webgl" ? gl : type === "2d" ? mock2d() : null) as never);
+    try {
+      document.body.innerHTML = "";
+      const first = makeDrawableVideo();
+      first.id = "first";
+      const second = makeDrawableVideo();
+      second.id = "second";
+      second.style.visibility = "hidden";
+      document.body.append(first, second);
+      const runtime = createColorGradingRuntime();
+      const shared = spy.mock.instances[0] as HTMLCanvasElement;
+
+      lost = true;
+      shared.dispatchEvent(new Event("webglcontextlost", { cancelable: true }));
+      second.style.visibility = "visible";
+      runtime.refresh();
+      expect(runtime.getStatus("#second").state).toBe("unavailable");
+
+      lost = false;
+      shared.dispatchEvent(new Event("webglcontextrestored"));
+
+      expect(runtime.getStatus("#first").state).toBe("active");
+      expect(runtime.getStatus("#second").state).toBe("active");
+      runtime.destroy();
+    } finally {
+      spy.mockRestore();
+      document.body.innerHTML = "";
+    }
+  });
+});
+
+describe("createColorGradingRuntime when a lost context is never restored", () => {
+  it("builds a new context and grades the clips again", () => {
+    vi.useFakeTimers();
+    const evicted = createMockWebGl();
+    let lost = false;
+    evicted.isContextLost = () => lost;
+    const replacement = createMockWebGl();
+    const contexts = [evicted, replacement];
+    const spy = vi
+      .spyOn(HTMLCanvasElement.prototype, "getContext")
+      .mockImplementation(((type: string) =>
+        type === "webgl"
+          ? (contexts.shift() ?? replacement)
+          : type === "2d"
+            ? mock2d()
+            : null) as never);
+    try {
+      document.body.innerHTML = "";
+      const video = makeDrawableVideo();
+      video.id = "clip";
+      document.body.append(video);
+      const runtime = createColorGradingRuntime();
+      const shared = spy.mock.instances[0] as HTMLCanvasElement;
+      expect(runtime.getStatus("#clip").state).toBe("active");
+
+      lost = true;
+      shared.dispatchEvent(new Event("webglcontextlost", { cancelable: true }));
+      expect(runtime.getStatus("#clip").state).toBe("unavailable");
+
+      vi.advanceTimersByTime(3000);
+
+      expect(runtime.getStatus("#clip").state).toBe("active");
+      lost = false;
+      shared.dispatchEvent(new Event("webglcontextrestored"));
+      expect(runtime.getStatus("#clip").state).toBe("active");
+      runtime.destroy();
+    } finally {
+      spy.mockRestore();
+      vi.useRealTimers();
+      document.body.innerHTML = "";
+    }
+  });
+});
+
+describe("createColorGradingRuntime when no new context can be made yet", () => {
+  it("keeps the clips ungraded and tries again after the grace period", () => {
+    vi.useFakeTimers();
+    const evicted = createMockWebGl();
+    let lost = false;
+    evicted.isContextLost = () => lost;
+    const replacement = createMockWebGl();
+    const contexts: Array<WebGLRenderingContext | null> = [evicted, null];
+    const spy = vi
+      .spyOn(HTMLCanvasElement.prototype, "getContext")
+      .mockImplementation(((type: string) =>
+        type === "webgl"
+          ? contexts.length > 0
+            ? contexts.shift()
+            : replacement
+          : type === "2d"
+            ? mock2d()
+            : null) as never);
+    try {
+      document.body.innerHTML = "";
+      const video = makeDrawableVideo();
+      video.id = "clip";
+      document.body.append(video);
+      const runtime = createColorGradingRuntime();
+      const shared = spy.mock.instances[0] as HTMLCanvasElement;
+
+      lost = true;
+      shared.dispatchEvent(new Event("webglcontextlost", { cancelable: true }));
+      vi.advanceTimersByTime(3000);
+      expect(runtime.getStatus("#clip").state).toBe("unavailable");
+
+      vi.advanceTimersByTime(3000);
+      expect(runtime.getStatus("#clip").state).toBe("active");
+      runtime.destroy();
+    } finally {
+      spy.mockRestore();
+      vi.useRealTimers();
+      document.body.innerHTML = "";
+    }
   });
 });
 

@@ -1,5 +1,12 @@
 import { EventEmitter } from "node:events";
-import type { Browser, LaunchOptions, PuppeteerNode } from "puppeteer-core";
+import {
+  ProtocolError,
+  type Browser,
+  type LaunchOptions,
+  type PuppeteerNode,
+} from "puppeteer-core";
+import { TargetCloseError } from "puppeteer-core/internal/common/Errors.js";
+import { HYPERFRAMES_BROWSER_MARKER_ARG } from "@hyperframes/core/browser-marker";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { launchManagedBrowser } from "./launch.js";
 
@@ -32,13 +39,13 @@ describe("a browser launch a sandbox refuses", () => {
 
 const fakeBrowser = () => ({ process: () => new EventEmitter() }) as unknown as Browser;
 
-function recordingPuppeteer(failures: string[]) {
+function recordingPuppeteer(failures: (string | Error)[]) {
   const launches: LaunchOptions[] = [];
   const puppeteer = {
     launch: async (options: LaunchOptions) => {
       launches.push(options);
       const failure = failures.shift();
-      if (failure) throw new Error(failure);
+      if (failure) throw typeof failure === "string" ? new Error(failure) : failure;
       return fakeBrowser();
     },
   } as unknown as PuppeteerNode;
@@ -60,7 +67,12 @@ describe("a browser inside an agent's macOS seatbelt", () => {
     expect(launches).toHaveLength(1);
     expect(launches[0]).toMatchObject({
       pipe: true,
-      args: ["--headless", "--single-process", "--disable-gpu-compositing"],
+      args: [
+        "--headless",
+        "--single-process",
+        "--disable-gpu-compositing",
+        HYPERFRAMES_BROWSER_MARKER_ARG,
+      ],
     });
   });
 
@@ -69,12 +81,50 @@ describe("a browser inside an agent's macOS seatbelt", () => {
     const { puppeteer, launches } = recordingPuppeteer([SEATBELT_LAUNCH_FAILURE]);
     await expect(launchManagedBrowser(puppeteer, { args: ["--headless"] })).resolves.toBeDefined();
     expect(launches.map((options) => options.pipe ?? false)).toEqual([true, true]);
-    expect(launches[0]!.args).toEqual(["--headless"]);
+    expect(launches[0]!.args).toEqual(["--headless", HYPERFRAMES_BROWSER_MARKER_ARG]);
     expect(launches[1]!.args).toEqual([
       "--headless",
       "--single-process",
       "--disable-gpu-compositing",
+      HYPERFRAMES_BROWSER_MARKER_ARG,
     ]);
+  });
+  it("relaunches as one process when an unnamed sandbox closes a pipe launch before its first targets", async () => {
+    vi.stubEnv("CODEX_SANDBOX", "");
+    Object.defineProperty(process, "platform", { value: "darwin" });
+    const { puppeteer, launches } = recordingPuppeteer([
+      new TargetCloseError("Protocol error (Target.setDiscoverTargets): Target closed"),
+    ]);
+    await expect(launchManagedBrowser(puppeteer, { args: ["--headless"] })).resolves.toBeDefined();
+    expect(launches.map((options) => options.args)).toEqual([
+      ["--headless", HYPERFRAMES_BROWSER_MARKER_ARG],
+      [
+        "--headless",
+        "--single-process",
+        "--disable-gpu-compositing",
+        HYPERFRAMES_BROWSER_MARKER_ARG,
+      ],
+    ]);
+  });
+
+  it("leaves any other protocol error failed on macOS", async () => {
+    vi.stubEnv("CODEX_SANDBOX", "");
+    Object.defineProperty(process, "platform", { value: "darwin" });
+    const other = new ProtocolError("Protocol error (Target.setDiscoverTargets): Not allowed");
+    const { puppeteer, launches } = recordingPuppeteer([other]);
+    await expect(launchManagedBrowser(puppeteer, { args: ["--headless"] })).rejects.toBe(other);
+    expect(launches).toHaveLength(1);
+  });
+
+  it("leaves a closed pipe launch failed off macOS, where no seatbelt exists", async () => {
+    vi.stubEnv("CODEX_SANDBOX", "");
+    Object.defineProperty(process, "platform", { value: "linux" });
+    const closed = new TargetCloseError(
+      "Protocol error (Target.setDiscoverTargets): Target closed",
+    );
+    const { puppeteer, launches } = recordingPuppeteer([closed]);
+    await expect(launchManagedBrowser(puppeteer, { args: ["--headless"] })).rejects.toBe(closed);
+    expect(launches).toHaveLength(1);
   });
 });
 
