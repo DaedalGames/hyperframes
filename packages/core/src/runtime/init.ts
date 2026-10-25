@@ -3952,10 +3952,19 @@ export function initSandboxRuntimeModular(): void {
     );
   // A timeline a scene's animation drives (a tween of its time, as tweenFromTo makes) is the scene's too, unless
   // another owner registered it. A timeline the script built after it returned, after a font wait, is known only so.
-  const drivenBy = (animation: SceneAnimation, ids: string[]): SceneAnimation[] => {
-    const others = new Set<unknown>([state.capturedTimeline, window.gsap?.globalTimeline]);
+  // What is never a scene's own: the runtime's roots and the timelines other compositions registered.
+  const ownedElsewhere = (ids: string[]): Set<unknown> => {
+    const others = new Set<unknown>([
+      state.capturedTimeline,
+      window.gsap?.globalTimeline,
+      ...builtRoots,
+    ]);
     for (const [id, timeline] of Object.entries(window.__timelines ?? {}))
       if (!ids.includes(id)) others.add(timeline);
+    return others;
+  };
+  const drivenBy = (animation: SceneAnimation, ids: string[]): SceneAnimation[] => {
+    const others = ownedElsewhere(ids);
     const tweens = animation.getChildren ? animation.getChildren(true, true, false) : [animation];
     return tweens.flatMap((tween) =>
       (tween.targets?.() ?? []).filter(
@@ -4018,7 +4027,8 @@ export function initSandboxRuntimeModular(): void {
     // The gate lets a scene's script wait on fonts only, so their settling ends it.
     await waitForFonts();
     await new Promise((resolve) => window.setTimeout(resolve, 0));
-    const known = new Set<unknown>(Object.values(recorded).flat());
+    // The runtime rebuilds its root while the scene settles; that root, and other scenes' records, are not its.
+    const known = new Set<unknown>([...Object.values(recorded).flat(), ...ownedElsewhere([id])]);
     const late = globalTimeline
       .getChildren(false, true, true)
       .filter((animation) => !before.has(animation) && !known.has(animation));

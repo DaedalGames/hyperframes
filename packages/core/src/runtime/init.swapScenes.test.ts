@@ -2029,6 +2029,24 @@ describe("the preview's scene window", () => {
     expect(schedule.mock.calls.map(([el]) => el.getAttribute("src"))).toEqual(["/two.mp3"]);
   });
 
+  it("records only what a mounting scene starts as its own, never the runtime's root", async () => {
+    const { root } = trackingRoot();
+    let onGlobal: unknown[] = [];
+    const own = { label: "late" };
+    (window as unknown as { gsap: unknown }).gsap = {
+      set: () => {},
+      globalTimeline: { getChildren: () => onGlobal },
+    };
+    // While s2's scripts run, the root lands on GSAP's global timeline, as a rebuild of it does, beside one of s2's own.
+    (window as unknown as { __lateStart: () => void }).__lateStart = () => (onGlobal = [root, own]);
+    bootWindowed([S0, S1, { ...S2, script: "window.__lateStart && window.__lateStart();" }], root);
+    window.__hfSceneAnimations = {};
+    await tick();
+    await seekAndSettle(5);
+    expect(window.__hfSceneAnimations?.s2).toEqual([own]);
+    delete (window as unknown as { gsap?: unknown }).gsap;
+  });
+
   it("drops the decoded audio of a scene it parks", async () => {
     const release = vi.spyOn(WebAudioTransport.prototype, "releaseDecodedExcept");
     quietMedia();
