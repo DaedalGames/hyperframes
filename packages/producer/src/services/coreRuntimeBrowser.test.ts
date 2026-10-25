@@ -1420,6 +1420,102 @@ describe("core runtime browser contract", () => {
     }
   }, 60_000);
 
+  it("draws a mounted-again scene's 2D canvas as it first did, drawn once at load or on each update", async () => {
+    const dir = mkdtempSync(resolve(tmpdir(), "scene-window-canvas-"));
+    const scenePage = await browser.newPage();
+    try {
+      const scripts = [
+        // Drawn once, as the script runs.
+        `const g = document.querySelector("canvas").getContext('2d'); g.fillStyle = "#c33"; g.fillRect(10, 10, 60, 30); g.font = "20px sans-serif"; g.fillText("once", 20, 80); const tl = gsap.timeline({ paused: true }); tl.to({ t: 0 }, { t: 1, duration: 2 }); window.__timelines["s0"] = tl;`,
+        // Cleared and drawn again by its timeline, chained as it is registered.
+        `const g = document.querySelector("canvas").getContext('2d'); const clock = { t: 0 }; window.__timelines["s1"] = gsap.timeline({ paused: true, onUpdate: () => { g.clearRect(0, 0, 320, 180); g.fillStyle = "#36c"; g.fillRect(20 + clock.t * 50, 20, 30, 30); } }).to(clock, { t: 2, duration: 2, ease: "none" });`,
+        `window.__timelines["s2"] = gsap.timeline({ paused: true });`,
+      ];
+      writeFileSync(
+        resolve(dir, "index.html"),
+        `<!doctype html><html><body><div data-composition-id="main" data-duration="6" data-width="320" data-height="180">${scripts
+          .map(
+            (_, i) =>
+              `<div data-composition-id="s${i}" data-composition-src="s${i}.html" data-start="${2 * i}" data-duration="2" style="position:absolute;inset:0"></div>`,
+          )
+          .join("")}</div></body></html>`,
+      );
+      scripts.forEach((script, i) =>
+        writeFileSync(
+          resolve(dir, `s${i}.html`),
+          `<template id="s${i}-template"><div data-composition-id="s${i}" data-duration="2"><canvas width="320" height="180"></canvas><script>${script}</script></div></template>`,
+        ),
+      );
+      const html = addScenePartsManifest(
+        await bundleToSingleHtml(dir, { sceneParts: true, staticGuard: false }),
+      );
+      await scenePage.evaluateOnNewDocument(
+        readFileSync(
+          resolve(import.meta.dirname, "../../../core/node_modules/gsap/dist/gsap.min.js"),
+          "utf8",
+        ),
+      );
+      await scenePage.setRequestInterception(true);
+      scenePage.on(
+        "request",
+        (request) => void request.respond({ contentType: "text/html", body: html }),
+      );
+      await scenePage.goto("http://scenes.test/");
+      await scenePage.waitForFunction(() => window.__playerReady && window.__renderReady);
+      expect(
+        await scenePage.evaluate(() => document.querySelectorAll("[data-hf-scene-no-swap]").length),
+      ).toBe(0);
+      const canvasAt = (time: number, scene: string) =>
+        scenePage.evaluate(
+          async (time, scene) => {
+            window.__player!.seek(time);
+            await window.__hfWaitForSeekCompletion?.();
+            for (let i = 0; i < 2; i++) await new Promise(requestAnimationFrame);
+            return document
+              .querySelector<HTMLCanvasElement>(`[data-hf-scene="${scene}"] canvas`)!
+              .toDataURL();
+          },
+          time,
+          scene,
+        );
+      const blank = await scenePage.evaluate(() => document.createElement("canvas").toDataURL());
+      const first = [await canvasAt(1, "s0"), await canvasAt(3.4, "s1")];
+      expect(first).not.toContain(blank);
+      await scenePage.evaluate(() => {
+        (window as unknown as { first: unknown[] }).first = [
+          window.__timelines!.s0,
+          window.__timelines!.s1,
+        ];
+        window.__player!.seek(5);
+      });
+      await scenePage.waitForFunction(
+        () => document.querySelectorAll('[data-hf-parked-scene][data-hf-scene^="s"]').length === 2,
+      );
+      for (const [time, scene, i] of [
+        [1, "s0", 0],
+        [3.4, "s1", 1],
+      ] as const) {
+        await scenePage.evaluate((time) => window.__player!.seek(time), time);
+        // Mounted again once its script has run and registered a fresh timeline.
+        await scenePage.waitForFunction(
+          (scene, i) => {
+            const fresh = window.__timelines?.[scene];
+            return (
+              fresh !== undefined && fresh !== (window as unknown as { first: unknown[] }).first[i]
+            );
+          },
+          {},
+          scene,
+          i,
+        );
+        expect(await canvasAt(time, scene)).toBe(first[i]);
+      }
+    } finally {
+      await scenePage.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   it("removes the control bridge during teardown", async () => {
     const result = await page.evaluate(async () => {
       const runtimeWindow = window as unknown as {

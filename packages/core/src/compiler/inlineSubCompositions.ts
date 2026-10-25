@@ -67,9 +67,11 @@ const FONT_WAIT_RE = new RegExp(
   "g",
 );
 
-// A canvas made only to measure text: never named, so nothing attaches it to the page or draws on it there.
-const TEXT_MEASURE_CANVAS_RE =
-  /\bdocument\s*\.\s*createElement\s*\(\s*(["'])canvas\1\s*\)\s*\.\s*getContext\s*\(\s*(["'])2d\2\s*\)/g;
+// A 2D context keeps no GPU state or callback: a remount runs the script again, which draws again.
+const TWO_D_CONTEXT_RE = /\bgetContext\s*\(\s*(["'])2d\1\s*\)/g;
+// A timeline chained as it is registered: the registry holds it, so unmounting the scene stops it.
+const REGISTERED_CHAIN_RE =
+  /(\b(?:window\s*\.\s*)?__timelines\s*\[[^\[\]]*\]\s*=\s*)gsap\s*\.\s*timeline\s*\(/g;
 
 /** Whether a call of the browser's Element.animate may leave an animation: it gets timing, its second argument. */
 function lastingAnimateCall(script: string): boolean {
@@ -103,9 +105,9 @@ function topLevelArgs(script: string, from: number): number {
 function sceneScriptSwapRefusal(script: string): string | null {
   const withoutFontWaits = script.replace(FONT_WAIT_RE, "");
   const awaitedFontsOnly = /\bawait\b/.test(script) && !/\bawait\b/.test(withoutFontWaits);
-  let checked = awaitedFontsOnly ? withoutFontWaits.replace(/\basync\b/g, "") : withoutFontWaits;
-  // The context hands its canvas back through .canvas, which could then reach the page.
-  if (!/\.\s*canvas\b/.test(checked)) checked = checked.replace(TEXT_MEASURE_CANVAS_RE, "");
+  const checked = (awaitedFontsOnly ? withoutFontWaits.replace(/\basync\b/g, "") : withoutFontWaits)
+    .replace(TWO_D_CONTEXT_RE, "")
+    .replace(REGISTERED_CHAIN_RE, "$1(");
   const match = SIDE_EFFECT_RE.exec(checked);
   if (match) return `its script uses ${match[0].trim()}`;
   return lastingAnimateCall(checked) ? "its script uses .animate(" : null;

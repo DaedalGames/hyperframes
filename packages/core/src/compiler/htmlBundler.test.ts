@@ -3548,7 +3548,7 @@ describe("bundleToSingleHtml sceneParts", () => {
     expect(rendered.match(/window\.Kit =/g)).toHaveLength(1);
   });
 
-  it("lets a scene measure text on an unattached canvas, call its own animate and wait on font loads, and nothing more", async () => {
+  it("lets a scene draw in 2D, chain a timeline into the registry, call its own animate and wait on font loads, and nothing more", async () => {
     const measure = `let ctx = null; window.measure = (s) => { if (!ctx) { ctx = document.createElement("canvas").getContext("2d"); } ctx.font = "800 46px Outfit"; return ctx.measureText(s).width; };`;
     const scenes: Record<string, string> = {
       measureCanvas: `<script>${measure}</script>`,
@@ -3558,7 +3558,18 @@ describe("bundleToSingleHtml sceneParts", () => {
       fontLoadAwait: `<script>(async () => { await document.fonts.load("700 30px Outfit"); window.fit("fontLoadAwait"); })();</script>`,
       namedCanvas: `<script>const c = document.createElement("canvas"); c.getContext("2d");</script>`,
       canvasBack: `<script>const x = document.createElement("canvas").getContext("2d"); window.keep = x.canvas;</script>`,
+      drawOnStage: `<script>const g = document.querySelector("canvas").getContext('2d'); g.fillRect(0, 0, 4, 4);</script>`,
+      registeredChain: `<script>const clock = { t: 0 }; window.__timelines["registeredChain"] = gsap.timeline({ paused: true, onUpdate: () => draw(clock.t) }).to(clock, { t: 2, duration: 2, ease: "none" });</script>`,
+      registeredChainByKey: `<script>const clock = { t: 0 }; __timelines[doc.scene_id] = gsap.timeline({ paused: true }).to(clock, { t: 2 });</script>`,
+      unregisteredChain: `<script>gsap.timeline().to(window.__sharedState, { x: 1 });</script>`,
+      chainKeptAside: `<script>const tl = gsap.timeline({ paused: true }).to({ t: 0 }, { t: 1 }); window.__timelines["chainKeptAside"] = tl;</script>`,
+      registeredChainAndTween: `<script>window.__timelines["registeredChainAndTween"] = gsap.timeline().to({}, { x: 1 }); gsap.to(window.__shared, { x: 1 });</script>`,
       webglCanvas: `<script>document.createElement("canvas").getContext("webgl");</script>`,
+      webgl2Canvas: `<script>document.querySelector("canvas").getContext("webgl2");</script>`,
+      experimentalWebgl: `<script>document.querySelector("canvas").getContext("experimental-webgl");</script>`,
+      webgpuCanvas: `<script>document.querySelector("canvas").getContext("webgpu");</script>`,
+      bitmapCanvas: `<script>document.querySelector("canvas").getContext("bitmaprenderer");</script>`,
+      dynamicContext: `<script>document.querySelector("canvas").getContext(window.kind);</script>`,
       browserAnimate: `<script>document.querySelector("p").animate([{ opacity: 0 }], { duration: 1000 });</script>`,
       spreadAnimate: `<script>document.querySelector("p").animate(...window.frames);</script>`,
       otherPromise: `<script>Promise.all([fetch("a.json")]).then(() => {});</script>`,
@@ -3573,7 +3584,7 @@ describe("bundleToSingleHtml sceneParts", () => {
       ...Object.fromEntries(
         names.map((n) => [
           `compositions/${n}.html`,
-          `<template id="${n}-template"><div data-composition-id="${n}"><p>${n}</p>${scenes[n]}</div></template>`,
+          `<template id="${n}-template"><div data-composition-id="${n}"><p>${n}</p><canvas></canvas>${scenes[n]}</div></template>`,
         ]),
       ),
     });
@@ -3591,9 +3602,20 @@ describe("bundleToSingleHtml sceneParts", () => {
       fontLoads: null,
       fontLoadThen: null,
       fontLoadAwait: null,
-      namedCanvas: "its script uses getContext",
-      canvasBack: "its script uses getContext",
+      namedCanvas: null,
+      canvasBack: null,
+      drawOnStage: null,
+      registeredChain: null,
+      registeredChainByKey: null,
+      unregisteredChain: "its script uses gsap.timeline().to(",
+      chainKeptAside: "its script uses gsap.timeline({ paused: true }).to(",
+      registeredChainAndTween: "its script uses gsap.to(",
       webglCanvas: "its script uses getContext",
+      webgl2Canvas: "its script uses getContext",
+      experimentalWebgl: "its script uses getContext",
+      webgpuCanvas: "its script uses getContext",
+      bitmapCanvas: "its script uses getContext",
+      dynamicContext: "its script uses getContext",
       browserAnimate: "its script uses .animate(",
       spreadAnimate: "its script uses .animate(",
       otherPromise: "its script uses Promise",
