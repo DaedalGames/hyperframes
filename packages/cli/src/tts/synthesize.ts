@@ -20,7 +20,7 @@ import { writeNewFileSync } from "../utils/writeNewFile.js";
 // Kokoro-onnx added the `lang=` kwarg to `Kokoro.create()` in a later release.
 // We pass it conditionally so older installs that only accept `voice=`/`speed=`
 // continue to work (falling back to Kokoro's default phonemization).
-const SYNTH_SCRIPT = `
+export const SYNTH_SCRIPT = `
 import sys, json, inspect, re
 
 model_path = sys.argv[1]
@@ -32,6 +32,7 @@ output_path = sys.argv[6]
 lang = sys.argv[7] if len(sys.argv) > 7 else ""
 
 import kokoro_onnx
+import numpy as np
 import soundfile as sf
 
 model = kokoro_onnx.Kokoro(model_path, voices_path)
@@ -73,7 +74,20 @@ def synthesize_text(value):
         samples.extend(right_samples)
         return samples, left_rate
 
+# Kokoro's final iSTFT leaves speech-modulated lines at 2, 3 and 4 times sample_rate / 10 (1x is too faint to cut).
+def remove_model_tones(samples, sample_rate, half_width=150.0):
+    x = np.asarray(samples, dtype=np.float64)
+    if len(x) == 0:
+        return x
+    freqs = np.fft.rfftfreq(len(x), 1.0 / sample_rate)
+    gain = np.ones_like(freqs)
+    for line in range(2, 5):
+        distance = np.abs(freqs - sample_rate / 10.0 * line)
+        gain *= 1.0 - np.clip(1.0 - distance / half_width, 0.0, 1.0)
+    return np.fft.irfft(np.fft.rfft(x) * gain, len(x)).astype(np.float32)
+
 samples, sample_rate = synthesize_text(text)
+samples = remove_model_tones(samples, sample_rate)
 sf.write(output_path, samples, sample_rate)
 
 duration = len(samples) / sample_rate
@@ -96,7 +110,7 @@ const ESPEAK_LANG_OVERRIDES: Partial<Record<SupportedLang, string>> = {
 // The filename carries a version suffix so older installs automatically
 // upgrade when the script body changes (e.g., adding the `lang` kwarg).
 const SCRIPT_DIR = join(homedir(), ".cache", "hyperframes", "tts");
-const SCRIPT_PATH = join(SCRIPT_DIR, "synth-v3.py");
+const SCRIPT_PATH = join(SCRIPT_DIR, "synth-v4.py");
 
 function ensureSynthScript(): string {
   if (!existsSync(SCRIPT_PATH)) {
