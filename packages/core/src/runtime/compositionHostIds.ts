@@ -21,11 +21,8 @@ function mountsComposition(element: Element, authoredId: string): boolean {
   );
 }
 
-/**
- * The one runtime-id policy for preview, render and mount. Each pending host, in order, keeps its
- * authored id unless another element uses it or another host mounts the same composition; then it
- * takes the lowest free `<id>__hfN`. Callers pass one discovery level at a time.
- */
+/** The one runtime-id policy for preview, render and mount: a host keeps its authored id unless
+ * another element uses it or mounts the same composition, then takes the lowest free `<id>__hfN`. */
 export function assignCompositionHostIds(
   pending: readonly Element[],
   identities: Map<Element, HostCompositionIdentity>,

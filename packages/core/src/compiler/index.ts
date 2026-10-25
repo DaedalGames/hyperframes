@@ -33,6 +33,7 @@ export {
   type BundledHostCompositionIdentity,
   bundleToSingleHtml,
   type BundleOptions,
+  type BundleScriptProvenance,
   prepareFlattenedInnerRoot,
   FLATTENED_INNER_ROOT_STRIP_ATTRS,
   emitRootCompositionVariableStyles,
@@ -100,6 +101,7 @@ export {
   type InlineSubCompositionsOptions,
   type InlineSubCompositionsResult,
 } from "./inlineSubCompositions";
+export { extractStandaloneEntryFromIndex, isTemplateEntry } from "./standaloneEntry";
 
 // Sub-composition usability check (shared between the inliner, lint, and the
 // render pre-flight abort) — single source of truth for "is this

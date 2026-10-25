@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import {
   PREVIEW_RASTER_ATTR,
+  RUNTIME_STAMPED_ATTR,
   STUDIO_PREVIEW_LAZY_ATTR,
 } from "@hyperframes/core/studio-preview-mark";
 import { liveMarkupWithoutPreviewMarks } from "./authoredSource";
@@ -32,5 +33,14 @@ describe("liveMarkupWithoutPreviewMarks", () => {
       '<div><section data-composition-id="inner"><p>Hello</p></section></div>',
     );
     expect(live.hasAttribute("data-hf-variable-host")).toBe(true);
+  });
+
+  it("drops the runtime's stamp so copied markup cannot carry it into a project file", () => {
+    const live = document.createElement("div");
+    live.innerHTML = `<div id="title" data-start="0" data-duration="10" ${RUNTIME_STAMPED_ATTR}="1"></div>`;
+    live.setAttribute(RUNTIME_STAMPED_ATTR, "1");
+    expect(liveMarkupWithoutPreviewMarks(live)).toBe(
+      '<div><div id="title" data-start="0" data-duration="10"></div></div>',
+    );
   });
 });
