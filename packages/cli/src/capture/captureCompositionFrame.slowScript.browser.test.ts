@@ -37,6 +37,22 @@ it("opens a composition whose parser-blocking script takes 15 s, as render does"
     renderReadyTimeoutMs: 500,
     renderReadyWarningSuffix: "test",
     browserGpuMode: "software",
+    beforeNavigate: async (page) => {
+      const t0 = Date.now();
+      const log = (what: string, data?: unknown) =>
+        process.stderr.write(`NAVDIAG +${Date.now() - t0}ms ${what} ${data === undefined ? "" : JSON.stringify(data)}\n`);
+      const cdp = await page.createCDPSession();
+      await cdp.send("Page.enable");
+      await cdp.send("Network.enable");
+      for (const event of ["Page.frameStartedLoading", "Page.frameNavigated", "Page.frameStoppedLoading", "Page.frameRequestedNavigation", "Page.frameStartedNavigating", "Page.navigatedWithinDocument", "Page.frameDetached"] as const) {
+        cdp.on(event as never, (params: never) => log(event, params));
+      }
+      cdp.on("Network.requestWillBeSent", (p) => log("requestWillBeSent", { type: p.type, url: p.request.url }));
+      cdp.on("Network.loadingFailed", (p) => log("loadingFailed", { type: p.type, error: p.errorText, canceled: p.canceled }));
+      page.browser().on("targetchanged", (t) => log("targetchanged", { url: t.url() }));
+      page.browser().on("disconnected", () => log("browser disconnected"));
+      log("beforeNavigate", { url: page.url() });
+    },
   });
   try {
     expect(await page.evaluate(() => Reflect.get(window, "slowScriptRan"))).toBe(true);
