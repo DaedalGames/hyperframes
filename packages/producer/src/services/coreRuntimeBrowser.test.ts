@@ -1517,94 +1517,113 @@ describe("core runtime browser contract", () => {
     30_000,
   );
 
-  it("lets go of each scene the preview unmounts while it plays, its captured audio included", async () => {
-    const dir = mkdtempSync(resolve(tmpdir(), "scene-window-memory-"));
-    // Its own browser: Web Audio only captures media where the context may start without a gesture.
-    const audioBrowser = await puppeteer.launch({
-      headless: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--autoplay-policy=no-user-gesture-required",
-      ],
-    });
-    try {
-      const scenes = [0, 1, 2, 3, 4, 5];
-      const hosts = scenes
-        .map(
-          (i) =>
-            `<div data-composition-id="s${i}" data-composition-src="s${i}.html" data-start="${2 * i}" data-duration="2" style="position:absolute;inset:0"></div>`,
-        )
-        .join("");
-      writeFileSync(
-        resolve(dir, "index.html"),
-        `<!doctype html><html><body><div data-composition-id="main" data-duration="12" data-width="320" data-height="180">${hosts}</div></body></html>`,
-      );
-      writeFileSync(resolve(dir, "tone.wav"), silentWav());
-      for (const i of scenes)
-        writeFileSync(
-          resolve(dir, `s${i}.html`),
-          `<template id="s${i}-template"><div data-composition-id="s${i}" data-duration="2">${"<b>x</b>".repeat(400)}<audio src="tone.wav" data-start="0" data-duration="1"></audio><script>const tl = gsap.timeline({ paused: true }); tl.to('[data-composition-id="s${i}"] b', { opacity: 0.5, duration: 1 }); window.__timelines["s${i}"] = tl;</script></div></template>`,
-        );
-      const html = addScenePartsManifest(
-        await bundleToSingleHtml(dir, { sceneParts: true, staticGuard: false }),
-      );
-      const page = await audioBrowser.newPage();
-      await page.evaluateOnNewDocument(
-        readFileSync(
-          resolve(import.meta.dirname, "../../../core/node_modules/gsap/dist/gsap.min.js"),
-          "utf8",
-        ),
-      );
-      await page.setRequestInterception(true);
-      page.on(
-        "request",
-        (request) => void request.respond({ contentType: "text/html", body: html }),
-      );
-      await page.goto("http://scenes.test/");
-      await page.waitForFunction(() => window.__playerReady && window.__renderReady);
-      const cdp = await page.createCDPSession();
-      await cdp.send("Performance.enable");
-      // DOM nodes alive but out of the page, after a full collection.
-      const kept = async () => {
-        await cdp.send("HeapProfiler.collectGarbage");
-        const { metrics } = await cdp.send("Performance.getMetrics");
-        const inPage = await page.evaluate(() => {
-          const walker = document.createTreeWalker(document, NodeFilter.SHOW_ALL);
-          let count = 1;
-          while (walker.nextNode()) count++;
-          return count;
-        });
-        return metrics.find((m) => m.name === "Nodes")!.value - inPage;
-      };
-      const before = await kept();
-      await page.evaluate(async () => {
-        const player = window.__player as unknown as {
-          play: () => void;
-          seek: (time: number, options: { keepPlaying: boolean }) => void;
-        };
-        player.play();
-        for (const time of [2.5, 4.5, 6.5, 8.5, 10.5]) {
-          player.seek(time, { keepPlaying: true });
-          await window.__hfWaitForSeekCompletion?.();
-          await new Promise((settle) => setTimeout(settle, 200));
-        }
+  const builtAsItRuns = (i: number) =>
+    `const tl = gsap.timeline({ paused: true }); tl.to('[data-composition-id="s${i}"] b', { opacity: 0.5, duration: 1 }); window.__timelines["s${i}"] = tl;`;
+  it.each([
+    ["its timeline built as the script runs", builtAsItRuns],
+    [
+      "its timeline driving one built after a font wait",
+      (i: number) =>
+        `const tl = gsap.timeline({ paused: true }); Promise.all([document.fonts.load("16px serif")]).then(() => { const inner = gsap.timeline({ paused: true }); inner.to('[data-composition-id="s${i}"] b', { opacity: 0.5, duration: 1 }); tl.add(inner.tweenFromTo(0, 1), 0); window.__timelines["s${i}"] = tl; });`,
+    ],
+    [
+      "a timeline built after a font wait to pose it once",
+      (i: number) =>
+        `const tl = gsap.timeline({ paused: true }); window.__timelines["s${i}"] = tl; Promise.all([document.fonts.load("16px serif")]).then(() => { const pose = gsap.timeline({ paused: true }); pose.to('[data-composition-id="s${i}"] b', { opacity: 0.5, duration: 1 }); pose.time(0.5); });`,
+    ],
+  ])(
+    "lets go of each scene the preview mounts and unmounts while it plays, its captured audio included (%s)",
+    async (_, sceneScript) => {
+      const dir = mkdtempSync(resolve(tmpdir(), "scene-window-memory-"));
+      // Its own browser: Web Audio only captures media where the context may start without a gesture.
+      const audioBrowser = await puppeteer.launch({
+        headless: true,
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--autoplay-policy=no-user-gesture-required",
+        ],
       });
-      // The window unmounts only once it has mounted what is ahead.
-      await page.waitForFunction(
-        () => document.querySelectorAll("[data-hf-parked-scene]").length >= 5,
-      );
-      // Five scenes went out of the window, each over 800 nodes. Chrome keeps a captured element alive while
-      // its audio context lives, so each scene's audio element stays, but nothing of the scene around it.
-      expect(
-        await page.evaluate(() => document.querySelectorAll("[data-hf-parked-scene]").length),
-      ).toBe(5);
-      expect((await kept()) - before).toBeLessThan(800);
-    } finally {
-      await audioBrowser.close();
-      rmSync(dir, { recursive: true, force: true });
-    }
-  }, 60_000);
+      try {
+        const scenes = [0, 1, 2, 3, 4, 5];
+        const hosts = scenes
+          .map(
+            (i) =>
+              `<div data-composition-id="s${i}" data-composition-src="s${i}.html" data-start="${2 * i}" data-duration="2" style="position:absolute;inset:0"></div>`,
+          )
+          .join("");
+        writeFileSync(
+          resolve(dir, "index.html"),
+          `<!doctype html><html><body><div data-composition-id="main" data-duration="12" data-width="320" data-height="180">${hosts}</div></body></html>`,
+        );
+        writeFileSync(resolve(dir, "tone.wav"), silentWav());
+        // s0 and s1 are mounted at open, their scripts run with the film's: a font wait's work there has no known scene.
+        for (const i of scenes)
+          writeFileSync(
+            resolve(dir, `s${i}.html`),
+            `<template id="s${i}-template"><div data-composition-id="s${i}" data-duration="2">${"<b>x</b>".repeat(400)}<audio src="tone.wav" data-start="0" data-duration="1"></audio><script>${i < 2 ? builtAsItRuns(i) : sceneScript(i)}</script></div></template>`,
+          );
+        const html = addScenePartsManifest(
+          await bundleToSingleHtml(dir, { sceneParts: true, staticGuard: false }),
+        );
+        const page = await audioBrowser.newPage();
+        await page.evaluateOnNewDocument(
+          readFileSync(
+            resolve(import.meta.dirname, "../../../core/node_modules/gsap/dist/gsap.min.js"),
+            "utf8",
+          ),
+        );
+        await page.setRequestInterception(true);
+        page.on(
+          "request",
+          (request) => void request.respond({ contentType: "text/html", body: html }),
+        );
+        await page.goto("http://scenes.test/");
+        await page.waitForFunction(() => window.__playerReady && window.__renderReady);
+        const cdp = await page.createCDPSession();
+        await cdp.send("Performance.enable");
+        // DOM nodes alive but out of the page, after a full collection.
+        const kept = async () => {
+          await cdp.send("HeapProfiler.collectGarbage");
+          const { metrics } = await cdp.send("Performance.getMetrics");
+          const inPage = await page.evaluate(() => {
+            const walker = document.createTreeWalker(document, NodeFilter.SHOW_ALL);
+            let count = 1;
+            while (walker.nextNode()) count++;
+            return count;
+          });
+          return metrics.find((m) => m.name === "Nodes")!.value - inPage;
+        };
+        const before = await kept();
+        await page.evaluate(async () => {
+          const player = window.__player as unknown as {
+            play: () => void;
+            seek: (time: number, options: { keepPlaying: boolean }) => void;
+          };
+          player.play();
+          for (const time of [2.5, 4.5, 6.5, 8.5, 10.5]) {
+            player.seek(time, { keepPlaying: true });
+            await window.__hfWaitForSeekCompletion?.();
+            await new Promise((settle) => setTimeout(settle, 200));
+          }
+        });
+        // The window unmounts only once it has mounted what is ahead.
+        await page.waitForFunction(
+          () => document.querySelectorAll("[data-hf-parked-scene]").length >= 5,
+        );
+        // Five scenes went out of the window, each over 800 nodes. Chrome keeps a captured element alive while
+        // its audio context lives, so each scene's audio element stays, but nothing of the scene around it.
+        expect(
+          await page.evaluate(() => document.querySelectorAll("[data-hf-parked-scene]").length),
+        ).toBe(5);
+        expect((await kept()) - before).toBeLessThan(800);
+      } finally {
+        await audioBrowser.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    60_000,
+  );
 
   it("keeps a scene that draws on a 2D canvas mounted, and mounts a chained-timeline scene again as it was", async () => {
     const dir = mkdtempSync(resolve(tmpdir(), "scene-window-canvas-"));

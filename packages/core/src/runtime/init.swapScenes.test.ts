@@ -1012,6 +1012,27 @@ describe("__hfSwapScenes", () => {
     expect(sceneHost("a").querySelector("p")?.textContent).toBe("A two");
   });
 
+  it("swaps a scene whose timeline drives one its script built later, and stops that one too", async () => {
+    const { root } = trackingRoot();
+    const globalTimeline = { getChildren: () => [innerTween] };
+    // Built after a font wait, so never recorded: only the registered timeline's tween of its time leads to it.
+    const inner = {
+      parent: globalTimeline,
+      totalTime: () => 0,
+      kill: () => {},
+      revert: vi.fn(),
+      getChildren: () => [innerTween],
+    };
+    const innerTween = { parent: inner, targets: () => [sceneHost("a")] };
+    Object.assign(made.a1!, { getChildren: () => [{ parent: made.a1, targets: () => [inner] }] });
+    (window as unknown as { gsap: unknown }).gsap = { set: () => {}, globalTimeline };
+    boot([A1, B], root);
+    await tick();
+    await window.__hfSwapScenes!(preview([A2, B]).html);
+    expect(sceneHost("a").querySelector("p")?.textContent).toBe("A two");
+    expect(inner.revert).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     ["a timeline it never registers", `gsap.timeline().to("p", { x: 100 });`],
     ["gsap under another name", `const g = gsap; g.to("p", { x: 100 });`],

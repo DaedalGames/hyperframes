@@ -123,7 +123,7 @@ import {
 import { createRuntimeStartTimeResolver } from "./startResolver";
 import { createClipTree } from "./clipTree";
 import { loadCompositions } from "./compositionLoader";
-import { runScriptsAfterFonts } from "./afterFonts";
+import { runScriptsAfterFonts, waitForFonts } from "./afterFonts";
 import {
   applyCaptionOverrides,
   applyFetchedCaptionOverrides,
@@ -3947,6 +3947,22 @@ export function initSandboxRuntimeModular(): void {
     [host, ...host.querySelectorAll("[data-composition-id]")].flatMap(
       (el) => el.getAttribute("data-composition-id") || [],
     );
+  // A timeline a scene's animation drives (a tween of its time, as tweenFromTo makes) is the scene's too, unless
+  // another owner registered it. A timeline the script built after it returned, after a font wait, is known only so.
+  const drivenBy = (animation: SceneAnimation, ids: string[]): SceneAnimation[] => {
+    const others = new Set<unknown>([state.capturedTimeline, window.gsap?.globalTimeline]);
+    for (const [id, timeline] of Object.entries(window.__timelines ?? {}))
+      if (!ids.includes(id)) others.add(timeline);
+    const tweens = animation.getChildren ? animation.getChildren(true, true, false) : [animation];
+    return tweens.flatMap((tween) =>
+      (tween.targets?.() ?? []).filter(
+        (target): target is SceneAnimation =>
+          typeof (target as SceneAnimation | null)?.totalTime === "function" &&
+          typeof (target as SceneAnimation).kill === "function" &&
+          !others.has(target),
+      ),
+    );
+  };
   // gsap binds a tween to elements, so one from outside the scene would go on moving the replaced copy.
   const refuseOutsideTweens = (
     name: string,
@@ -3954,9 +3970,13 @@ export function initSandboxRuntimeModular(): void {
     timelines: Record<string, RuntimeTimelineLike | undefined>,
     sceneAnimations: Record<string, SceneAnimation[]>,
   ) => {
+    const ids = compositionIdsIn(host);
     const own = new Set<unknown>(
-      compositionIdsIn(host).flatMap((id) => [timelines[id], ...(sceneAnimations[id] ?? [])]),
+      ids.flatMap((id) => [timelines[id], ...(sceneAnimations[id] ?? [])]),
     );
+    // A Set visits what is added while it is iterated, so this follows drives of drives.
+    for (const animation of own as Set<SceneAnimation | undefined>)
+      if (animation) for (const driven of drivenBy(animation, ids)) own.add(driven);
     const inScene = new Set<unknown>([host, ...host.querySelectorAll("*")]);
     for (const tween of window.gsap?.globalTimeline?.getChildren?.(true, true, false) ?? []) {
       if (!tween.targets?.().some((target) => inScene.has(target))) continue;
@@ -3983,6 +4003,24 @@ export function initSandboxRuntimeModular(): void {
       }
     }
   };
+  // Runs a scene's scripts, then records what they started after returning: a script resumed by a font
+  // wait builds there, past the recorder that wraps it. With several scenes, a late animation's scene is unknown.
+  const runSceneScripts = async (hosts: Element[], scripts: Element[]) => {
+    const globalTimeline = window.gsap?.globalTimeline;
+    const before = new Set<unknown>(globalTimeline?.getChildren?.(false, true, true));
+    await runScriptsAfterFonts(scripts);
+    const recorded = window.__hfSceneAnimations;
+    const id = hosts.length === 1 ? compositionIdsIn(hosts[0]!)[0] : undefined;
+    if (!recorded || !id || !globalTimeline?.getChildren) return;
+    // The gate lets a scene's script wait on fonts only, so their settling ends it.
+    await waitForFonts();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    const known = new Set<unknown>(Object.values(recorded).flat());
+    const late = globalTimeline
+      .getChildren(false, true, true)
+      .filter((animation) => !before.has(animation) && !known.has(animation));
+    (recorded[id] ??= []).push(...(late as SceneAnimation[]));
+  };
   // Stops every animation a scene's scripts started, newest first, and forgets them. `check` runs once they stop.
   const stopSceneAnimations = (hosts: Element[], check: () => void = () => {}) => {
     const timelines = () =>
@@ -3993,24 +4031,32 @@ export function initSandboxRuntimeModular(): void {
       | null;
     const oldIds = hosts.flatMap((host) => compositionIdsIn(host));
     const stopped = new Set<unknown>();
+    const stop = (previous: unknown) => {
+      if (!previous || stopped.has(previous)) return;
+      stopped.add(previous);
+      const old = previous as SceneAnimation;
+      if (old.revert) old.revert();
+      else old.totalTime?.(0, true);
+      root?.remove?.(previous);
+      // revert() has already killed it; a second kill() fires onInterrupt again.
+      if (!old.revert) old.kill?.();
+    };
     const stopOldAnimations = () => {
       const before = stopped.size;
-      for (const id of oldIds) {
-        // Newest first: each revert restores what the animation before it wrote.
-        for (const previous of [
-          ...(sceneAnimations()[id] ?? []).slice().reverse(),
-          timelines()[id],
-        ]) {
-          if (!previous || stopped.has(previous)) continue;
-          stopped.add(previous);
-          const old = previous as SceneAnimation;
-          if (old.revert) old.revert();
-          else old.totalTime?.(0, true);
-          root?.remove?.(previous);
-          // revert() has already killed it; a second kill() fires onInterrupt again.
-          if (!old.revert) old.kill?.();
-        }
-      }
+      // Newest first: each revert restores what the animation before it wrote.
+      const own = oldIds.flatMap((id) => [
+        ...(sceneAnimations()[id] ?? []).slice().reverse(),
+        timelines()[id],
+      ]);
+      // What they drive goes last: a driver's revert sets its time, which puts a stopped one back on GSAP's
+      // global timeline, keeping the scene alive. A Set visits what is added while it is iterated.
+      const driven = new Set<unknown>();
+      for (const animation of own)
+        if (animation) drivenBy(animation as SceneAnimation, oldIds).forEach((d) => driven.add(d));
+      for (const animation of driven)
+        drivenBy(animation as SceneAnimation, oldIds).forEach((d) => driven.add(d));
+      for (const previous of [...own.filter((animation) => !driven.has(animation)), ...driven])
+        stop(previous);
       return stopped.size > before;
     };
     // A revert fires the animation's onInterrupt, which can register more; stop those too, until none appear.
@@ -4276,7 +4322,7 @@ export function initSandboxRuntimeModular(): void {
         .filter((el) => el.tagName === "SCRIPT")
         .map((el) => document.body.appendChild(document.importNode(el, true))),
     );
-    await runScriptsAfterFonts(sceneScripts);
+    await runSceneScripts(swappedHosts, sceneScripts);
     if (state.tornDown) throw new Error("the preview was torn down during the swap");
     document
       .querySelector(`meta[name="${SCENE_PARTS_META}"]`)
@@ -4317,7 +4363,10 @@ export function initSandboxRuntimeModular(): void {
     const captionHosts = host.querySelector(".caption-group") ? [host] : [];
     const captionOverrides = captionHosts.length > 0 ? await fetchCaptionOverrides() : [];
     await nextTask();
-    await runScriptsAfterFonts(scripts.map((el) => document.body.appendChild(el)));
+    await runSceneScripts(
+      [host],
+      scripts.map((el) => document.body.appendChild(el)),
+    );
     await nextTask();
     parkedNames.delete(name);
     if (!state.tornDown) settleChangedScenes([host], captionHosts, captionOverrides, true);
