@@ -57,6 +57,9 @@ const SWAP_SAFE_LIBRARY_URL =
   /^https:\/\/(cdn\.jsdelivr\.net\/npm|unpkg\.com)\/(gsap|three|d3|d3-[a-z-]+|topojson-client|clipper-lib)(@[^/]+)?\//;
 const isSwapSafeLibrary = (src: string) =>
   URL.canParse(src) && SWAP_SAFE_LIBRARY_URL.test(new URL(src).href);
+// GSAP's published file copied into a project, known by its license banner: it only defines globals too.
+const GSAP_BANNER_RE = /^\s*\/\*!\s*\*\s*GSAP \d+\.\d+\.\d+\s*\*\s*https:\/\/gsap\.com\b/;
+export const isLibraryCopy = (script: string) => GSAP_BANNER_RE.test(script);
 
 // Waits on the page's fonts, ready or loading named faces: each settles once, leaving nothing behind.
 const STRING_ARG = String.raw`(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*')`;
@@ -114,7 +117,11 @@ function sceneScriptSwapRefusal(script: string): string | null {
 }
 
 const projectScriptRefusal = (text: string | null) =>
-  text === null ? "it runs a script that is not a known library" : sceneScriptSwapRefusal(text);
+  text === null
+    ? "it runs a script that is not a known library"
+    : isLibraryCopy(text)
+      ? null
+      : sceneScriptSwapRefusal(text);
 
 // A quoted string in a script, in any of the three quote styles.
 const STRING_LITERAL_RE = /(["'`])((?:\\.|(?!\1)[^\\\n])*?)\1/g;

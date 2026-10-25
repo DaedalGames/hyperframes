@@ -65,6 +65,7 @@ import { readDeclaredDefaults } from "../runtime/getVariables";
 import {
   ensureExternalLinkTag,
   inlineSubCompositions,
+  isLibraryCopy,
   refuseSwapsReachedByRootScripts,
 } from "./inlineSubCompositions";
 import { isSafePath, resolveWithinProject } from "../safePath.js";
@@ -1177,7 +1178,8 @@ async function bundleProject(projectDir: string, options?: BundleOptions): Promi
       ].map((el) => {
         const src = el.getAttribute("src");
         const path = src && isRelativeUrl(src) ? resolveEntryUrl(src) : null;
-        return src ? (path && safeReadFile(path)) || "" : el.textContent || "";
+        const text = src ? (path && safeReadFile(path)) || "" : el.textContent || "";
+        return isLibraryCopy(text) ? "" : text;
       })
     : [];
 

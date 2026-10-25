@@ -3548,6 +3548,35 @@ describe("bundleToSingleHtml sceneParts", () => {
     expect(rendered.match(/window\.Kit =/g)).toHaveLength(1);
   });
 
+  it("treats a GSAP file copied into the project as the library, at the root and in a scene, and no other file", async () => {
+    const gsapCopy = `/*!\n * GSAP 3.14.2\n * https://gsap.com\n */\nwindow.gsap = { all: "*" }; requestAnimationFrame(() => {});`;
+    const project = (file: string) =>
+      makeTempProject({
+        "index.html": `<!doctype html><html><head><script src="vendor/${file}"></script></head><body>
+  <div data-composition-id="main" data-width="1920" data-height="1080" data-duration="2">
+    <div data-composition-id="a" data-composition-src="compositions/a.html" data-start="0" data-duration="1"></div>
+    <div data-composition-id="b" data-composition-src="compositions/b.html" data-start="1" data-duration="1"></div>
+  </div></body></html>`,
+        [`vendor/${file}`]:
+          file === "gsap.min.js" ? gsapCopy : gsapCopy.replace("GSAP 3.14.2", "Helpers 1.0.0"),
+        "compositions/a.html": `<template id="a-template"><div data-composition-id="a"><p>A</p><script src="../vendor/${file}"></script></div></template>`,
+        "compositions/b.html": `<template id="b-template"><div data-composition-id="b"><p>B</p></div></template>`,
+      });
+    const marks = async (dir: string) => {
+      const doc = parseHTML(await bundleToSingleHtml(dir, { sceneParts: true })).document;
+      return ["a", "b"].map(
+        (id) =>
+          doc.querySelector(`div[data-hf-scene="${id}"]`)?.getAttribute("data-hf-scene-no-swap") ??
+          null,
+      );
+    };
+    expect(await marks(project("gsap.min.js"))).toEqual([null, null]);
+    expect(await marks(project("helpers.js"))).toEqual([
+      "its script uses requestAnimationFrame",
+      "a script outside the scene selects *",
+    ]);
+  });
+
   it("lets a scene draw in 2D, chain a timeline into the registry, call its own animate and wait on font loads, and nothing more", async () => {
     const measure = `let ctx = null; window.measure = (s) => { if (!ctx) { ctx = document.createElement("canvas").getContext("2d"); } ctx.font = "800 46px Outfit"; return ctx.measureText(s).width; };`;
     const scenes: Record<string, string> = {
