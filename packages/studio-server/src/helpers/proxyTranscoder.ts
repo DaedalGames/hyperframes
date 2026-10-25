@@ -19,7 +19,7 @@ import {
 } from "@hyperframes/core";
 import { findFfBinary } from "@hyperframes/parsers/ff-binaries";
 import { alphaDecoderFor } from "@hyperframes/parsers/media-alpha";
-import { probeFirstFrameColour, probeMediaMetadata } from "./mediaMetadata.js";
+import { probeFirstFrameColour, probeMediaMetadata, type MediaMetadata } from "./mediaMetadata.js";
 import { cleanupProxyCache } from "./proxyCache.js";
 import { PROXY_VARIANT_CONFIG, type ProxyVariant } from "./mediaCodecMap.js";
 import { mkdirWithinProject, realpath, realProjectRoot } from "./safePath.js";
@@ -574,6 +574,13 @@ const VP8_ARGS = [
   "libopus",
 ];
 
+/** The probed video plus its playable audio track; ffmpeg's own pick only when the probe failed. */
+function streamMaps(metadata: MediaMetadata): string[] {
+  if (metadata.probeError) return [];
+  const audio = metadata.audioTrack === undefined ? [] : ["-map", `0:a:${metadata.audioTrack}`];
+  return ["-map", "0:V:0?", ...audio];
+}
+
 async function buildVideoFilter(
   ffmpegPath: string,
   sourcePath: string,
@@ -629,6 +636,7 @@ async function runFfmpeg(
         "-i",
         sourcePath,
         ...(range ? ["-t", String(range.lengthSeconds)] : []),
+        ...streamMaps(metadata),
         "-vf",
         videoFilter,
         ...(variant === "vp8" ? VP8_ARGS : H264_ARGS),
