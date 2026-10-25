@@ -39,18 +39,40 @@ export function createFarSceneSkip(spanOf: (host: Element) => Span): (time: numb
       .map((host) => ({ host, span: spanOf(host) }))
       .filter((s): s is Timed => Number.isFinite(s.span?.start))
       .sort((a, b) => a.span.start - b.span.start);
-  // Measured before any is marked, so one layout serves them all; true when a size changed.
+  // Each host's box and position as of its last render, reported after layout: read at a cut, where the cut
+  // leaves the page's style dirty, they would force a full style and layout pass first.
+  const rendered = new WeakMap<Element, { size: string; outOfFlow: boolean }>();
+  const observer =
+    typeof ResizeObserver === "function"
+      ? new ResizeObserver((entries) => {
+          for (const { target, borderBoxSize } of entries) {
+            const box = borderBoxSize?.[0];
+            if (!box) continue;
+            rendered.set(target, {
+              size: `${Math.round(box.inlineSize)}px ${Math.round(box.blockSize)}px`,
+              outOfFlow: OUT_OF_FLOW.has(getComputedStyle(target).position),
+            });
+          }
+        })
+      : null;
+  // Read directly only for a host not reported yet; measured before any is marked, so one layout serves them all.
+  const lastRender = (host: HTMLElement) =>
+    rendered.get(host) ?? {
+      size: `${host.offsetWidth}px ${host.offsetHeight}px`,
+      outOfFlow: OUT_OF_FLOW.has(getComputedStyle(host).position),
+    };
+  // True when a size changed.
   const measureLeaving = (far: Set<HTMLElement>): boolean => {
     let resized = false;
     for (const host of far) {
       if (host.hasAttribute(FAR)) continue;
+      const { size, outOfFlow } = lastRender(host);
       // Containment makes a host a containing block and margin boundary; only an out-of-flow one already is.
-      if (!OUT_OF_FLOW.has(getComputedStyle(host).position)) {
+      if (!outOfFlow) {
         far.delete(host);
         continue;
       }
       const name = host.getAttribute(SCENE_PART_ATTR)!;
-      const size = `${host.offsetWidth}px ${host.offsetHeight}px`;
       resized ||= sizes.get(name) !== size;
       sizes.set(name, size);
     }
@@ -69,8 +91,12 @@ export function createFarSceneSkip(spanOf: (host: Element) => Span): (time: numb
     if (!sheet.isConnected) document.head.appendChild(sheet);
   };
   return (time) => {
-    if (!hosts || hosts.some((host) => !host.isConnected))
+    if (!hosts || hosts.some((host) => !host.isConnected)) {
+      // An observed element stays alive with its observer, so a host that left the page is let go.
+      for (const host of hosts ?? []) if (!host.isConnected) observer?.unobserve(host);
       hosts = Array.from(document.querySelectorAll<HTMLElement>(HOSTS));
+      for (const host of hosts) observer?.observe(host);
+    }
     if (hosts.length === 0) return;
     const far = farFrom(timedHosts(hosts), time);
     if (measureLeaving(far) || !sheet?.isConnected) writeSheet();

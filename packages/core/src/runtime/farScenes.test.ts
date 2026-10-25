@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createFarSceneSkip } from "./farScenes";
 import { resetRuntimeFixtureDom } from "./runtimeSeekFixture.test-helpers";
 
@@ -24,6 +24,8 @@ const spanOf = (host: Element) => {
 const farIds = () => Array.from(document.querySelectorAll(`[${FAR}]`), (el) => el.id);
 
 afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   document.head.innerHTML = "";
   document.body.innerHTML = "";
 });
@@ -73,5 +75,39 @@ describe("createFarSceneSkip", () => {
     const css = document.head.querySelector("style")?.textContent ?? "";
     expect(css).toContain(`[${FAR}] { content-visibility: hidden; }`);
     expect(css).toContain(`[data-hf-scene="s2"][${FAR}] { contain-intrinsic-size: 640px 360px; }`);
+  });
+  it("takes a leaving scene's size and position from its last render, reading nothing at the cut", () => {
+    const hosts = film();
+    let report: (entries: unknown[]) => void = () => {};
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: (entries: unknown[]) => void) {
+          report = callback;
+        }
+        observe() {}
+        unobserve() {}
+      },
+    );
+    const skip = createFarSceneSkip(spanOf);
+    skip(1);
+    // What the browser reports after the next layout.
+    report(
+      hosts.map((target) => ({ target, borderBoxSize: [{ inlineSize: 640, blockSize: 360 }] })),
+    );
+    // The cut's own changes leave style dirty: a read here would force a full style and layout pass.
+    const computed = vi.spyOn(window, "getComputedStyle");
+    for (const host of hosts)
+      Object.defineProperty(host, "offsetWidth", {
+        get: () => {
+          throw new Error("read at the cut");
+        },
+      });
+    skip(5);
+    expect(farIds()).toEqual(["s0", "s4", "s5"]);
+    expect(computed).not.toHaveBeenCalled();
+    expect(document.head.querySelector("style")?.textContent).toContain(
+      `[data-hf-scene="s0"][${FAR}] { contain-intrinsic-size: 640px 360px; }`,
+    );
   });
 });
