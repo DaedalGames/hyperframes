@@ -1,7 +1,7 @@
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
-export type ExtractedFrameFormat = "jpg" | "png";
+export type ExtractedFrameFormat = "jpg" | "png" | "svg";
 
 export const FRAME_FILENAME_PREFIX = "frame_";
 

@@ -13,6 +13,7 @@ import { type Fps, type RateSpec } from "@hyperframes/core";
 import {
   getFfmpegBinary,
   MIXED_AUDIO_FILENAME,
+  type ExtractedFrameFormat,
   type VideoElement,
   type VideoFrameFormat,
   type VideoMetadata,
@@ -106,7 +107,7 @@ export interface PlanDeferredFrameRange {
   sourcePath: string;
   startTime: number;
   durationSeconds: number;
-  format: "jpg" | "png";
+  format: ExtractedFrameFormat;
 }
 
 export const INVALID_VIDEO_METADATA = "INVALID_VIDEO_METADATA" as const;
@@ -190,8 +191,8 @@ function readDeferredFrameRange(value: unknown, field: string): PlanDeferredFram
   }
   const durationSeconds = readFiniteNumber(range.durationSeconds, `${field}.durationSeconds`);
   if (durationSeconds <= 0) metadataError(`${field}.durationSeconds`, "must be positive");
-  if (range.format !== "jpg" && range.format !== "png") {
-    metadataError(`${field}.format`, 'must be "jpg" or "png"');
+  if (range.format !== "jpg" && range.format !== "png" && range.format !== "svg") {
+    metadataError(`${field}.format`, 'must be "jpg", "png" or "svg"');
   }
   return {
     sourcePath,

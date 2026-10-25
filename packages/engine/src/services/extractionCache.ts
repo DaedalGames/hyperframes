@@ -47,7 +47,11 @@ import {
 import { renameWithRetry } from "../utils/renameWithRetry.js";
 import { join } from "node:path";
 import type { VideoMetadata } from "../utils/ffprobe.js";
-import { FRAME_FILENAME_PREFIX, framePathsFromDirectory } from "./extractedFrameIndex.js";
+import {
+  FRAME_FILENAME_PREFIX,
+  framePathsFromDirectory,
+  type ExtractedFrameFormat,
+} from "./extractedFrameIndex.js";
 
 /** Filename prefix for extracted frames. Shared with the extractor. */
 export { FRAME_FILENAME_PREFIX } from "./extractedFrameIndex.js";
@@ -67,7 +71,7 @@ export const SCHEMA_PREFIX = "hfcache-v8-";
 /** Truncated hex chars of SHA-256 used for the entry directory name. */
 const KEY_HEX_CHARS = 16;
 
-export type CacheFrameFormat = "jpg" | "png";
+export type CacheFrameFormat = ExtractedFrameFormat;
 
 export interface CacheKeyInput {
   /** Absolute path to the source video file. Part of the key so moved files

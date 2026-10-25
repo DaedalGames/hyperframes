@@ -689,9 +689,17 @@ describe("resolveFrameFormat", () => {
     expect(resolveFrameFormat(metadata(), "jpg")).toBe("jpg");
   });
 
-  it("forces png when alpha is present or the codec can carry alpha", () => {
+  it("forces png when alpha is present, and svg for a WebM whose alpha rides a sidecar plane", () => {
     expect(resolveFrameFormat(metadata({ hasAlpha: true }), "jpg")).toBe("png");
-    expect(resolveFrameFormat(metadata({ videoCodec: "vp9" }), "jpg")).toBe("png");
+    expect(resolveFrameFormat(metadata({ videoCodec: "vp9" }), "jpg")).toBe("svg");
+    expect(resolveFrameFormat(metadata({ videoCodec: "vp9" }), "png")).toBe("png");
+  });
+
+  it("keeps png for a sidecar WebM in an HDR colour space", () => {
+    const hdr = { colorTransfer: "smpte2084", colorPrimaries: "bt2020", colorSpace: "bt2020nc" };
+    expect(resolveFrameFormat(metadata({ videoCodec: "vp9", colorSpace: hdr }), "auto")).toBe(
+      "png",
+    );
   });
 
   it("keeps ProRes without an alpha plane on jpg and ProRes with one on png", () => {
@@ -718,11 +726,12 @@ describe("resolveFrameFormat", () => {
   );
   function expectedFormat({ videoCodec, hasAlpha, alphaPlaneDecoded, requested }: FormatCase) {
     const sidecar = videoCodec === "vp9" || videoCodec === "vp8";
-    const keepsPng = hasAlpha || (sidecar && alphaPlaneDecoded !== false);
-    return keepsPng || requested === "png" ? "png" : "jpg";
+    const carriesAlpha = hasAlpha || (sidecar && alphaPlaneDecoded !== false);
+    if (carriesAlpha) return sidecar && requested !== "png" ? "svg" : "png";
+    return requested === "png" ? "png" : "jpg";
   }
 
-  it("lets VP8/VP9 leave png only when a decode probe found no alpha plane", () => {
+  it("lets VP8/VP9 leave svg only when a decode probe found no alpha plane", () => {
     expect(formatCases).toHaveLength(72);
     for (const { requested, ...fields } of formatCases) {
       const actual = resolveFrameFormat(metadata(fields), requested);

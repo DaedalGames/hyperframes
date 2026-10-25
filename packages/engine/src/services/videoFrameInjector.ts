@@ -46,6 +46,12 @@ interface FrameSourceCache {
   stats: () => FrameSourceCacheStats;
 }
 
+const FRAME_MIME_TYPES: Record<string, string> = { png: "image/png", svg: "image/svg+xml" };
+
+function frameMimeType(framePath: string): string {
+  return FRAME_MIME_TYPES[framePath.slice(framePath.lastIndexOf(".") + 1)] ?? "image/jpeg";
+}
+
 /**
  * Two-bound LRU keyed by frame path. Either bound triggers eviction of the
  * oldest entry — entry count protects against pathological many-tiny-frames
@@ -131,7 +137,7 @@ function createFrameSourceCache(
     const pending = fs
       .readFile(framePath)
       .then((frameData) => {
-        const mimeType = framePath.endsWith(".png") ? "image/png" : "image/jpeg";
+        const mimeType = frameMimeType(framePath);
         const dataUri = `data:${mimeType};base64,${frameData.toString("base64")}`;
         return remember(framePath, dataUri);
       })

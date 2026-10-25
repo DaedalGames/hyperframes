@@ -83,7 +83,12 @@ import {
   type CacheEntry,
   type CacheFrameFormat,
 } from "./extractionCache.js";
-import { framePathsFromDirectory, frameSequencePath } from "./extractedFrameIndex.js";
+import {
+  framePathsFromDirectory,
+  frameSequencePath,
+  type ExtractedFrameFormat,
+} from "./extractedFrameIndex.js";
+import { prepareSvgParts, svgOutputArgs, wrapSvgFrames } from "./svgFrames.js";
 
 export { resolveProjectRelativeSrc };
 
@@ -252,7 +257,7 @@ export interface FrameRange {
 export interface DeferredFrameRange {
   startTime: number;
   durationSeconds: number;
-  format: "jpg" | "png";
+  format: ExtractedFrameFormat;
 }
 
 export interface ExtractionOptions {
@@ -260,7 +265,7 @@ export interface ExtractionOptions {
   fps: FpsInput;
   outputDir: string;
   quality?: number;
-  format?: VideoFrameFormat;
+  format?: VideoFrameFormat | ExtractedFrameFormat;
   sdrToHdrTransfer?: HdrTransfer;
   toneMapHdrToSdr?: boolean;
   /** Extract exactly one frame at `startTime`. Used only after ffprobe has
@@ -314,8 +319,8 @@ function halveToCoverScaleFilter(box: { width: number; height: number }): string
   return `scale=w=${side("iw")}:h=${side("ih")}:flags=area+accurate_rnd`;
 }
 
-const SDR_JPEG_AS_BT601_FULL_RANGE_FILTER =
-  "scale=flags=neighbor+accurate_rnd,format=gbrp,scale=out_color_matrix=bt601:out_range=pc:flags=neighbor,format=yuv420p";
+const sdrJpegAsBt601FullRange = (chroma: "yuv420p" | "yuv444p"): string =>
+  `scale=flags=neighbor+accurate_rnd,format=gbrp,scale=out_color_matrix=bt601:out_range=pc:flags=neighbor,format=${chroma}`;
 
 let warnedMissingZscale = false;
 
@@ -927,7 +932,7 @@ const inTailProbeSlot = createConcurrencyLimit(TAIL_PROBE_SLOTS);
 
 interface SegmentedExtraction {
   decodeArgs: string[];
-  filterAndEncodeArgs: (seek: number) => string[];
+  filterAndEncodeArgs: (seek: number, perOutput: string[]) => string[];
   videoPath: string;
   startTime: number;
   fps: number;
@@ -978,11 +983,12 @@ async function runSegmentedExtraction(job: SegmentedExtraction): Promise<RunFfmp
               // Read one frame past the segment and keep exactly its own frames.
               "-t",
               String((frames + 1) / fps),
-              "-frames:v",
-              String(frames),
-              "-start_number",
-              String(firstFrame + 1),
-              ...filterAndEncodeArgs(seek),
+              ...filterAndEncodeArgs(seek, [
+                "-frames:v",
+                String(frames),
+                "-start_number",
+                String(firstFrame + 1),
+              ]),
             ],
             { ...job.runOptions, signal },
           ),
@@ -1148,12 +1154,13 @@ async function extractVideoFramesRangeUnredacted(
       ...(isHdr ? [] : chromeGuessForUntaggedMatrix(metadata)),
       SDR_CANVAS_PASSTHROUGH_FILTER,
     );
-    if (format === "jpg") {
+    if (format !== "png") {
       if (options.shownBox) vfFilters.push(halveToCoverScaleFilter(options.shownBox));
-      vfFilters.push(SDR_JPEG_AS_BT601_FULL_RANGE_FILTER);
+      if (format === "jpg") vfFilters.push(sdrJpegAsBt601FullRange("yuv420p"));
     }
   }
-  const encodeArgs = ["-q:v", format === "jpg" ? String(Math.ceil((100 - quality) / 3)) : "0"];
+  const jpegQuality = String(Math.ceil((100 - quality) / 3));
+  const encodeArgs = ["-q:v", format === "jpg" ? jpegQuality : "0"];
   // Render-scoped temp frames are read once; level 1 measured 3-5x faster for ~14% larger files.
   if (format === "png") encodeArgs.push("-compression_level", "1");
   encodeArgs.push("-y", outputPattern);
@@ -1165,17 +1172,31 @@ async function extractVideoFramesRangeUnredacted(
     filters.splice(samplingAt, 0, ...samplingFilters(seek));
     return filters.length > 0 ? ["-vf", filters.join(",")] : [];
   };
+  let svgParts = "";
+  const filterAndEncodeFor = (seek: number, perOutput: string[]): string[] => {
+    if (format !== "svg") return [...filterArgsFor(seek), ...perOutput, ...encodeArgs];
+    const shared = [...vfFilters];
+    shared.splice(samplingAt, 0, ...samplingFilters(seek));
+    return svgOutputArgs({
+      parts: svgParts,
+      shared,
+      colourFilter: sdrJpegAsBt601FullRange("yuv444p"),
+      jpegQuality,
+      perOutput,
+    });
+  };
   const segmentFrames = Math.round(EXTRACTION_SEGMENT_SECONDS * fps);
   const totalFrames = extractionFrameCountForDuration(duration, normalizedFps, metadata.isVFR);
   // A VFR window rounds its frame count up, and only the segments' `-frames:v` bound
   // emits that last slot: the fps filter ends a `-t` window at the nearest slot. A
   // decimal rate counts zero frames here and keeps the `-t` window.
   const boundVfrFrameCount = metadata.isVFR && totalFrames > 0;
+  if (format === "svg") svgParts = await prepareSvgParts(videoOutputDir);
   const processResult =
     sampleAtOutputFps && (options.frameRanges || boundVfrFrameCount || totalFrames > segmentFrames)
       ? await runSegmentedExtraction({
           decodeArgs,
-          filterAndEncodeArgs: (seek) => [...filterArgsFor(seek), ...encodeArgs],
+          filterAndEncodeArgs: filterAndEncodeFor,
           videoPath,
           startTime,
           fps,
@@ -1187,7 +1208,7 @@ async function extractVideoFramesRangeUnredacted(
           runOptions,
         })
       : await inExtractionSlot(
-          () => runFfmpeg([...args, ...filterArgsFor(startTime), ...encodeArgs], runOptions),
+          () => runFfmpeg([...args, ...filterAndEncodeFor(startTime, [])], runOptions),
           signal,
         );
   if (processResult.failureReason === "external_interruption") {
@@ -1239,6 +1260,7 @@ async function extractVideoFramesRangeUnredacted(
     );
   }
 
+  if (format === "svg") await wrapSvgFrames(svgParts, videoOutputDir);
   const framePaths = framePathsFromDirectory(videoOutputDir, format, !!options.frameRanges);
   if (framePaths.size === 0 && duration > 0) {
     throw new VideoSourceExtractionError(
@@ -1621,10 +1643,14 @@ export function decoderForCodec(codec: string | undefined): string {
 
 export function resolveFrameFormat(
   metadata: VideoMetadata,
-  requested?: VideoFrameFormat,
+  requested?: VideoFrameFormat | ExtractedFrameFormat,
 ): CacheFrameFormat {
   const sidecar = SIDECAR_ALPHA_CODECS.has((metadata.videoCodec ?? "").toLowerCase());
-  if (metadata.hasAlpha || (sidecar && metadata.alphaPlaneDecoded !== false)) return "png";
+  if (metadata.hasAlpha || (sidecar && metadata.alphaPlaneDecoded !== false)) {
+    return sidecar && requested !== "png" && !isHdrColorSpaceUtil(metadata.colorSpace)
+      ? "svg"
+      : "png";
+  }
   if (requested === "png" || requested === "jpg") return requested;
   return "jpg";
 }
@@ -2516,12 +2542,14 @@ export async function extractAllVideoFrames(
         const extractionMediaStart = window.extractionMediaStart ?? window.mediaStart;
         if (keyInput) keyInput.mediaStart = extractionMediaStart;
 
-        const format = resolveFrameFormat(metadata, options.format);
         const sdrToHdrTransfer = sdrToHdrTransfers[index];
         const hdrToSdrTransform =
           options.toneMapHdrToSdr === true && isHdrColorSpaceUtil(metadata.colorSpace)
             ? await hdrToSdrTransformKey()
             : undefined;
+        const resolvedFormat = resolveFrameFormat(metadata, options.format);
+        const format =
+          resolvedFormat === "svg" && sdrToHdrTransfer !== undefined ? "png" : resolvedFormat;
         const finalFrameOnly = window.finalFrameOnly === true;
         const dedupeKey = `${videoPath}\0${extractionMediaStart}\0${videoDuration}\0${fpsKey}\0${format}\0${sdrToHdrTransfer ?? ""}\0${hdrToSdrTransform ?? ""}\0${finalFrameOnly ? "final" : "range"}`;
 
