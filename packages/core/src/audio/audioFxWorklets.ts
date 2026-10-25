@@ -192,6 +192,7 @@ class HfBitcrush extends AudioWorkletProcessor {
     this.p = o.processorOptions || {};
     this.holds = [];
     this.held = [];
+    this.start = Math.round((this.p.__hfElapsed ?? 0) * sampleRate);
     this.port.onmessage = (e) => {
       if (e.data && e.data.__hfDispose) { this.dead = true; return; }
       this.p = { ...this.p, ...e.data };
@@ -207,8 +208,10 @@ class HfBitcrush extends AudioWorkletProcessor {
     const mix = p.mix ?? 1;
     for (let ch = 0; ch < i.length; ch++) {
       const inp = i[ch], out = o[ch];
-      if (this.held[ch] === undefined) this.held[ch] = 0;
-      if (this.holds[ch] === undefined) this.holds[ch] = 0;
+      // Primed from the input: a counter seeded mid-hold would otherwise play 0 until it wraps.
+      if (this.held[ch] === undefined) this.held[ch] = Math.round(inp[0] * levels) / levels;
+      // The hold counter runs from the file's first sample, so a node built part-way in starts where it would be.
+      if (this.holds[ch] === undefined) this.holds[ch] = this.start % step;
       for (let n = 0; n < inp.length; n++) {
         // Per channel: advancing one shared counter only on the last channel
         // left every earlier channel either unheld or frozen for a whole
@@ -255,7 +258,11 @@ class HfPitchshift extends AudioWorkletProcessor {
     this.grain = Math.round(sampleRate * 0.1);
     this.buf = [];
     this.write = 0;
-    this.phase = 0;
+    // The taps sweep at a constant rate from the start of the file, so a node built
+    // part-way in joins the sweep where it would already be.
+    const ratio0 = Math.pow(2, Math.max(-12, Math.min(12, this.p.semitones ?? 0)) / 12);
+    const turns = (this.p.__hfElapsed ?? 0) * sampleRate * ((1 - ratio0) / this.grain);
+    this.phase = turns - Math.floor(turns);
     // Samples written so far, capped at one grain. The taps read up to a grain
     // behind the write head, so until this fills they would read the ring's
     // zeros, so the head of every clip came out attenuated or silent.

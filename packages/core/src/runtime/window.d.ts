@@ -99,6 +99,8 @@ declare global {
     __hfSceneAnimations?: Record<string, SceneAnimation[]> | null;
     /** Swap edited scenes from a rebuilt preview document; refuses before changing anything when it cannot. */
     __hfSwapScenes?: (html: string, signal?: AbortSignal) => Promise<void>;
+    __hfHoldScenes?: (names: string[]) => Promise<void>;
+    __hfParkedSceneMarkup?: (placeholder: Element) => Element | null;
     __HF_EXPORT_RENDER_SEEK_CONFIG?: {
       mode?: string;
       diagnostics?: boolean;
@@ -132,9 +134,9 @@ declare global {
     __hfReseekGpu?: (time: number) => void;
     /**
      * Await GPU work registered synchronously by `hf-seek` listeners through
-     * `event.detail.waitUntil(...)`.
+     * `event.detail.waitUntil(...)`; `videoFrames: false` skips the video-frame holds.
      */
-    __hfWaitForSeekCompletion?: () => Promise<void>;
+    __hfWaitForSeekCompletion?: (options?: { videoFrames?: boolean }) => Promise<void>;
     /**
      * Canonical root-timeline start for a media element. Snapshot capture uses
      * this runtime-owned resolver so reference expressions, authored timing

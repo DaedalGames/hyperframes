@@ -56,7 +56,7 @@ function knobMax(node: HfAudioFxNode, key: string, automation?: HfAutomation): n
  * Repeats until a feedback loop falls under the floor, times the gap between
  * them. `feedback` is capped below 1 by the registry, so this terminates.
  */
-function delayTail(time: number, feedback: number): number {
+export function delayTailSeconds(time: number, feedback: number): number {
   const gap = Math.min(5, time / 1000);
   if (gap <= 0) return 0;
   const fb = Math.max(0, Math.min(0.999, feedback));
@@ -66,15 +66,19 @@ function delayTail(time: number, feedback: number): number {
 
 // Exactly the generated impulse's length — see synthesizeReverbImpulse, which
 // is the same expression. A convolution is as long as its impulse.
+export function reverbRoomSeconds(size: number): number {
+  return 0.6 + Math.max(0, Math.min(1, size)) * 2.6;
+}
+
 function reverbTail(node: HfAudioFxNode, automation?: HfAutomation): number {
   return knobMax(node, "wet", automation) > 0
-    ? 0.6 + Math.max(0, Math.min(1, knobMax(node, "size", automation))) * 2.6
+    ? reverbRoomSeconds(knobMax(node, "size", automation))
     : 0;
 }
 
 function delayNodeTail(node: HfAudioFxNode, automation?: HfAutomation): number {
   return knobMax(node, "mix", automation) > 0
-    ? delayTail(knobMax(node, "time", automation), knobMax(node, "feedback", automation))
+    ? delayTailSeconds(knobMax(node, "time", automation), knobMax(node, "feedback", automation))
     : 0;
 }
 

@@ -1,5 +1,14 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  fstatSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { defineCommand, type ArgsDef } from "citty";
@@ -7,6 +16,7 @@ import {
   HISTORY_START,
   HistoryBusyError,
   HistoryIdError,
+  HistoryRefusedError,
   type HistoryEntry,
   type HistoryListItem,
   type HistoryResult,
@@ -77,6 +87,39 @@ function lastIndex<T>(items: readonly T[], match: (item: T) => boolean): number 
 }
 
 /** An entry id or a unique prefix of one. */
+async function latestWrite(owner: Owner, turn: Turn): Promise<number> {
+  const entries = await owner.list();
+  return entries.reduce((latest, entry) => {
+    const same =
+      entry.id === turn.id ||
+      turn.parts.includes(entry.id) ||
+      (entry.who.kind === turn.who.kind &&
+        entry.who.name === turn.who.name &&
+        entry.label === turn.label &&
+        entry.startedAt === turn.startedAt);
+    return same ? Math.max(latest, entry.endedAt) : latest;
+  }, turn.lastWriteAt);
+}
+
+async function releaseOpenTurn(
+  owner: Owner,
+  turn: Turn | null,
+  who: HistoryWho,
+  exclusive: boolean,
+  projectDir: string,
+): Promise<void> {
+  if (!turn) return;
+  if (owner.via !== "direct") {
+    if (!exclusive || turn.who.name === who.name) await endTurn(owner, turn, projectDir);
+    return;
+  }
+  const latest = await latestWrite(owner, turn);
+  const live = historyDeps.now() - latest <= historyDeps.turnIdleMs;
+  if (exclusive && live && turn.who.name !== who.name)
+    throw new Refusal(`${turn.who.name}'s turn is open; it has to end before yours begins`);
+  await endTurn(owner, turn, projectDir);
+}
+
 function entryOf(entries: readonly HistoryListItem[], ref: string): HistoryListItem {
   const found = entries.filter((entry) => entry.id.startsWith(ref));
   if (found.length === 1) return found[0]!;
@@ -121,6 +164,16 @@ function ago(at: number): string {
   if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
   if (seconds < 86_400) return `${Math.round(seconds / 3600)}h ago`;
   return `${Math.round(seconds / 86_400)}d ago`;
+}
+
+function endedTurnText(entry: HistoryEntry | null, parts: readonly string[]): string {
+  const earlier = parts.length - (entry ? 1 : 0);
+  const text = entry
+    ? line(entry)
+    : earlier
+      ? "Nothing changed since this turn's last command."
+      : "Nothing changed in this turn.";
+  return earlier ? `${text}\n(+${earlier} earlier part${earlier > 1 ? "s" : ""})` : text;
 }
 
 function line(entry: HistoryListItem | HistoryEntry): string {
@@ -168,12 +221,26 @@ async function textDiff(reader: Reader, entry: HistoryEntry): Promise<string> {
         writeFileSync(join(work, path), sides[index]!);
         return path;
       });
-      const diff = spawnSync("git", ["diff", "--no-index", "--no-color", "--no-prefix", a!, b!], {
-        cwd: work,
-        encoding: "utf-8",
-      });
-      if (diff.error) throw new Refusal("--diff needs git on PATH");
-      out.push(diff.stdout.trimEnd());
+      const outputPath = join(work, "diff");
+      const outputFd = openSync(outputPath, "w+", 0o600);
+      try {
+        const diff = spawnSync("git", ["diff", "--no-index", "--no-color", "--no-prefix", a!, b!], {
+          cwd: work,
+          encoding: "utf-8",
+          stdio: ["ignore", outputFd, "pipe"],
+        });
+        if (diff.error) throw new Refusal("--diff needs git on PATH");
+        const output = Buffer.alloc(fstatSync(outputFd).size);
+        let offset = 0;
+        while (offset < output.length) {
+          const count = readSync(outputFd, output, offset, output.length - offset, offset);
+          if (count === 0) break;
+          offset += count;
+        }
+        out.push(output.subarray(0, offset).toString("utf-8").trimEnd());
+      } finally {
+        closeSync(outputFd);
+      }
     }
     return out.join("\n");
   } finally {
@@ -292,7 +359,8 @@ function guarded<A>(run: (args: A) => Promise<void>) {
         error instanceof Refusal ||
         error instanceof AmbiguousPreviewServerError ||
         error instanceof HistoryBusyError ||
-        error instanceof HistoryIdError;
+        error instanceof HistoryIdError ||
+        error instanceof HistoryRefusedError;
       if (!refused) throw error;
       setCommandExitCode(2);
       const message =
@@ -443,15 +511,27 @@ export default defineCommand({
           }),
       ),
     begin: () =>
-      sub<{ who: string; label: string; dir?: string; json: boolean }>(
+      sub<{ who: string; label: string; exclusive: boolean; dir?: string; json: boolean }>(
         "begin",
         "Start a turn: your writes until `end` become one entry under your name",
-        { who: { type: "string", required: true }, label: { type: "string", required: true } },
+        {
+          who: { type: "string", required: true },
+          label: { type: "string", required: true },
+          exclusive: {
+            type: "boolean",
+            default: false,
+            description: "Refuse while another agent's turn is open, instead of ending it",
+          },
+        },
         (args) =>
           withOwner("begin", args.dir, async (owner, turn, projectDir) => {
-            if (turn) await endTurn(owner, turn, projectDir);
             const who = whoOf(args.who);
-            const { id, startedAt } = await owner.begin(who, args.label);
+            await releaseOpenTurn(owner, turn, who, args.exclusive, projectDir);
+            const { id, startedAt } = await owner.begin(
+              who,
+              args.label,
+              args.exclusive && owner.via === "preview",
+            );
             writeTurn(projectDir, {
               via: owner.via,
               id,
@@ -465,22 +545,31 @@ export default defineCommand({
           }),
       ),
     end: () =>
-      sub<{ dir?: string; json: boolean }>("end", "End your turn and print its entry", {}, (args) =>
-        withOwner("end", args.dir, async (owner, turn, projectDir) => {
-          if (!turn) throw new Refusal("No turn is open; start one with history begin");
-          const { entry, parts } = await endTurn(owner, turn, projectDir);
-          const earlier = parts.length - (entry ? 1 : 0);
-          const text = entry
-            ? line(entry)
-            : earlier
-              ? "Nothing changed since this turn's last command."
-              : "Nothing changed in this turn.";
-          print(
-            args.json,
-            { entry: entry && publicEntry(entry), parts },
-            earlier ? `${text}\n(+${earlier} earlier part${earlier > 1 ? "s" : ""})` : text,
-          );
-        }),
+      sub<{ who?: string; ifOpen: boolean; dir?: string; json: boolean }>(
+        "end",
+        "End your turn and print its entry",
+        {
+          who: { type: "string", description: "Refuse unless the open turn is this agent's" },
+          "if-open": {
+            type: "boolean",
+            default: false,
+            description: "Succeed with no entry when no turn is open",
+          },
+        },
+        (args) =>
+          withOwner("end", args.dir, async (owner, turn, projectDir) => {
+            if (!turn && args.ifOpen)
+              return print(args.json, { entry: null, parts: [] }, "No turn is open.");
+            if (!turn) throw new Refusal("No turn is open; start one with history begin");
+            if (args.who !== undefined && turn.who.name !== args.who)
+              throw new Refusal(`The open turn is ${turn.who.name}'s, not ${args.who}'s`);
+            const { entry, parts } = await endTurn(owner, turn, projectDir);
+            print(
+              args.json,
+              { entry: entry && publicEntry(entry), parts },
+              endedTurnText(entry, parts),
+            );
+          }),
       ),
   },
   run: ({ args }) => guarded(listEntries)(args),

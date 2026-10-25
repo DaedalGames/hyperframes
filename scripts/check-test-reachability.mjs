@@ -30,14 +30,19 @@ export function matches(path, glob) {
   return regex.test(path);
 }
 
+// A negated glob is a final exclusion only under paths-filter's `some-with-excludes`; elsewhere it fails closed.
 function readFilters(source) {
   return Object.fromEntries(
     [...source.matchAll(/^            ([\w-]+):\n((?:              - .*\n)+)/gm)].map(
-      ([, name, body]) => {
+      ({ 1: name, 2: body, index }) => {
         const globs = [...body.matchAll(/^              - (["'])(.*?)\1(?:\s+#.*)?$/gm)].map(
           (match) => match[2],
         );
-        if (globs.some((glob) => glob.startsWith("!")))
+        const step = source.slice(source.lastIndexOf("- uses: dorny/paths-filter", index), index);
+        if (
+          globs.some((glob) => glob.startsWith("!")) &&
+          !/^\s+predicate-quantifier: some-with-excludes$/m.test(step)
+        )
           throw new Error("Negated path filters need an explicit reachability model");
         return [name, globs];
       },
@@ -45,28 +50,37 @@ function readFilters(source) {
   );
 }
 
+const filterMatches = (globs, path) =>
+  globs.some((glob) => !glob.startsWith("!") && matches(path, glob)) &&
+  !globs.some((glob) => glob.startsWith("!") && matches(path, glob.slice(1)));
+
 function jobField(body, key) {
   return body.match(new RegExp(`^    ${key}: (.*)$`, "m"))?.[1] ?? "";
+}
+
+// `needs` as a one-line list, a multi-line list or a block list, whichever the formatter wrote.
+function jobNeeds(body) {
+  const value = body.match(/^    needs:(.*(?:\n(?:      .*| *))*)/m)?.[1] ?? "";
+  return value
+    .replace(/#.*$/gm, "")
+    .replace(/^\s*- /gm, "")
+    .split(/[\s,[\]]+/)
+    .filter(Boolean);
 }
 
 function readJob(block) {
   const name = block.match(/^  ([\w-]+):/)[1];
   const body = block.slice(block.indexOf("\n") + 1);
   const condition = jobField(body, "if");
-  const needs = jobField(body, "needs");
-  return {
-    name,
-    body,
-    condition,
-    needs: needs.replace(/[[\]]/g, "").split(/,\s*/).filter(Boolean),
-  };
+  const needs = jobNeeds(body);
+  return { name, body, condition, needs };
 }
 
 // Reject unsupported control syntax instead of treating it as an unconditional job.
 export function readWorkflow(source) {
   if (/^\s+(?:paths|paths-ignore|branches-ignore):/m.test(source.split("jobs:\n")[0]))
     throw new Error("Workflow trigger restrictions need an explicit reachability model");
-  if (/^    (?:needs|if):\s*$/m.test(source))
+  if (/^    if:\s*$/m.test(source) || /^    needs:\s*\n      (?![-[])/m.test(source))
     throw new Error("Block job conditions and dependencies need an explicit reachability model");
   if (/^\s+(?:- )?working-directory:/m.test(source))
     throw new Error("Working-directory overrides need an explicit reachability model");
@@ -82,7 +96,7 @@ function conditionEnabled(condition, path, filters) {
   const resolved = condition
     .replace(/needs\.changes\.outputs\.([\w-]+) == 'true'/g, (_, name) => {
       if (!filters[name]) throw new Error(`Unknown path filter: ${name}`);
-      return String(filters[name].some((glob) => matches(path, glob)));
+      return String(filterMatches(filters[name], path));
     })
     .replace(/always\(\)/g, "true")
     .replace(/github.event_name == 'pull_request'/g, "true")

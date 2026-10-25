@@ -81,6 +81,22 @@ describe("the worklet processors themselves", () => {
     }
   });
 
+  describe("HfBitcrush", () => {
+    it("does not open with silence when its hold counter starts part-way through a hold", async () => {
+      const HfBitcrush = (await loadProcessors()).get("hf-bitcrush");
+      if (!HfBitcrush) throw new Error("hf-bitcrush not registered");
+      // 251 frames in with a hold of 250: one frame into a hold, with 249 left before the next sample.
+      const p = new HfBitcrush({
+        processorOptions: { bits: 8, samples: 250, mix: 1, __hfElapsed: 251 / 48000 },
+      });
+      const input = new Float32Array(128).fill(0.5);
+      const output = new Float32Array(128);
+      p.process([[input]], [[output]]);
+      expect(Math.abs(output[0] ?? 0)).toBeGreaterThan(0.4);
+      expect(output.every((x) => Math.abs(x) > 0.4)).toBe(true);
+    });
+  });
+
   describe("HfPitchshift", () => {
     const SR = 48000;
     const BLOCK = 128;

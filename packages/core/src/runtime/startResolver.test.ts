@@ -275,6 +275,35 @@ describe("createRuntimeStartTimeResolver", () => {
       expect(resolver.resolveStartForElement(video)).toBe(26);
     });
 
+    it("resolves a reference inside the referencing clip's own composition", () => {
+      const mount = (hostId: string, start: string) => {
+        const host = document.createElement("div");
+        host.id = hostId;
+        host.setAttribute("data-composition-id", "card");
+        host.setAttribute("data-start", start);
+        host.setAttribute("data-duration", "2");
+        document.body.appendChild(host);
+
+        const first = document.createElement("div");
+        first.id = "first";
+        first.setAttribute("data-start", "0");
+        first.setAttribute("data-duration", "1");
+        host.appendChild(first);
+
+        const second = document.createElement("div");
+        second.setAttribute("data-start", "first");
+        second.setAttribute("data-duration", "1");
+        host.appendChild(second);
+        return second;
+      };
+      const secondInA = mount("card-a", "0");
+      const secondInB = mount("card-b", "2");
+
+      const resolver = createRuntimeStartTimeResolver({});
+      expect(resolver.resolveStartForElement(secondInA)).toBe(1);
+      expect(resolver.resolveStartForElement(secondInB)).toBe(3);
+    });
+
     it("returns fallback when reference target not found", () => {
       const el = document.createElement("div");
       el.setAttribute("data-start", "nonexistent");
@@ -436,6 +465,21 @@ describe("documentRef", () => {
     const resolver = createRuntimeStartTimeResolver({ documentRef: doc });
     // intro ends at 0 + 4; outro starts 2s after → 6.
     expect(resolver.resolveStartForElement(outro)).toBe(6);
+  });
+
+  it("resolves a composition reference without the browser CSS namespace", () => {
+    const doc = document.implementation.createHTMLDocument("t");
+    doc.body.innerHTML =
+      '<div data-composition-id="intro" data-start="1" data-duration="4"></div>' +
+      '<div id="outro" data-start="intro + 2"></div>';
+    const css = globalThis.CSS;
+    Reflect.deleteProperty(globalThis, "CSS");
+    try {
+      const resolver = createRuntimeStartTimeResolver({ documentRef: doc });
+      expect(resolver.resolveStartForElement(doc.getElementById("outro")!)).toBe(7);
+    } finally {
+      globalThis.CSS = css;
+    }
   });
 
   it("defaults to the global document when documentRef is omitted", () => {

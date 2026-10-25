@@ -253,8 +253,10 @@ function onePoleBuilder(kind: "highpass" | "lowpass"): Builder {
 }
 
 function workletBuilder(processor: string, resettable = false): Builder {
-  return (ctx, p) => {
-    const node = new AudioWorkletNode(ctx, processor, { processorOptions: { ...p } });
+  return (ctx, p, elapsed) => {
+    const node = new AudioWorkletNode(ctx, processor, {
+      processorOptions: { ...p, __hfElapsed: elapsed },
+    });
     return {
       input: node,
       output: node,

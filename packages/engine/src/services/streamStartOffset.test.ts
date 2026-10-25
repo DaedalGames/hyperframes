@@ -197,7 +197,7 @@ describe.skipIf(!HAS_FFMPEG)(
       writeFileSync(join(dir, "video-late-piped.webm"), piped.stdout);
     }, 60_000);
 
-    afterAll(() => rmSync(dir, { recursive: true, force: true }));
+    afterAll(() => rmSync(dir, { recursive: true, force: true }), 30_000);
 
     const flatLane = {
       target: "rate",
@@ -592,6 +592,37 @@ describe.skipIf(!HAS_FFMPEG)(
       const metadata = await extractMediaMetadata(join(dir, "aligned-null-slots.avi"));
       expect(metadata.videoStreamDurationSeconds).toBe(10);
       expect(resolvePlayableVideoDuration(metadata)).toBe(10);
+    });
+
+    it("does not keep a replaced file's measured timing for the file that replaced it", async () => {
+      const source = freshCopy("video-late.webm", "replaced-during-probe.webm");
+      const marker = join(dir, "replaced-during-probe.done");
+      const fake = join(dir, "fake-ffprobe-swap");
+      // The first ffprobe answer describes the late file; the file is replaced right after it is read.
+      writeFileSync(
+        fake,
+        `#!/bin/sh\n"${getFfprobeBinary()}" "$@" || exit $?\nif [ ! -f "${marker}" ]; then touch "${marker}"; cp "${join(dir, "video-late-20.nut")}" "${source}"; fi\n`,
+        { mode: 0o755 },
+      );
+      const previous = process.env[FFPROBE_PATH_ENV];
+      process.env[FFPROBE_PATH_ENV] = fake;
+      try {
+        await extractMediaMetadata(source);
+        const replaced = await extractMediaMetadata(source);
+        const fresh = await extractMediaMetadata(freshCopy("video-late-20.nut", "replacement.nut"));
+        expect(replaced).toEqual(fresh);
+      } finally {
+        if (previous === undefined) delete process.env[FFPROBE_PATH_ENV];
+        else process.env[FFPROBE_PATH_ENV] = previous;
+      }
+    });
+
+    it("leaves an AVI's declared timing alone without reading any packet", async () => {
+      const { packetProbes } = await withSpawnSpy(
+        (args) => args,
+        ({ extractMediaMetadata: video }) => video(join(dir, "aligned-null-slots.avi")),
+      );
+      expect(packetProbes).toHaveLength(0);
     });
 
     it("keeps a file's measured timing past 128 other probes, so a later audio read agrees", async () => {

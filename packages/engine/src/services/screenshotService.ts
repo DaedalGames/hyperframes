@@ -7,6 +7,7 @@
 
 // fallow-ignore-file code-duplication
 import { type Page } from "puppeteer-core";
+import { withVideoFrameSources, type VideoFrameUpdate } from "./videoFrameTransport.js";
 import { type CaptureOptions } from "../types.js";
 import { COLOR_GRADING_SOURCE_HIDDEN_ATTR } from "@hyperframes/core/color-grading";
 import {
@@ -643,15 +644,25 @@ export async function injectVideoFramesBatch(
   updates: Array<{ videoId: string; dataUri: string }>,
 ): Promise<string[]> {
   if (updates.length === 0) return [];
+  return withVideoFrameSources(page, updates, (resolved) =>
+    injectResolvedVideoFramesBatch(page, resolved),
+  );
+}
+
+async function injectResolvedVideoFramesBatch(
+  page: Page,
+  updates: VideoFrameUpdate[],
+): Promise<string[]> {
   return await page.evaluate(
     // fallow-ignore-next-line complexity
     async (
-      items: Array<{ videoId: string; dataUri: string; frameId: string }>,
+      items: Array<VideoFrameUpdate & { frameId: string }>,
       visualProperties: string[],
       colorGradingSourceHiddenAttr: string,
     ) => {
       const injectedIds: string[] = [];
       const pendingDecodes: Array<Promise<void>> = [];
+      const imagesToPublish: HTMLImageElement[] = [];
       const replacementLayoutProperties = new Set([
         "width",
         "height",
@@ -793,10 +804,15 @@ export async function injectVideoFramesBatch(
         img.style.objectPosition = computedStyle.objectPosition;
         img.style.zIndex = computedStyle.zIndex;
 
+        // Publish after full decode so raster cannot race it with a reduced JPEG decode.
+        img.style.setProperty("visibility", "hidden", "important");
         img.decoding = "sync";
         if (img.getAttribute("src") !== item.dataUri) {
+          if (item.crossOrigin) img.crossOrigin = item.crossOrigin;
+          else img.removeAttribute("crossorigin");
           img.src = item.dataUri;
-          const source = item.dataUri.startsWith("data:") ? "inline frame" : item.dataUri;
+          const source =
+            item.sourceLabel ?? (item.dataUri.startsWith("data:") ? "inline frame" : item.dataUri);
           pendingDecodes.push(
             img.decode().catch((error: unknown) => {
               throw new Error(
@@ -808,7 +824,7 @@ export async function injectVideoFramesBatch(
           );
         }
         img.style.opacity = String(computedOpacity);
-        img.style.visibility = "visible";
+        imagesToPublish.push(img);
         // Hide the native <video> with visibility only — never clobber inline
         // opacity, so subsequent reads (and queryElementStacking) see the real
         // GSAP-controlled value.
@@ -819,6 +835,7 @@ export async function injectVideoFramesBatch(
       if (pendingDecodes.length > 0) {
         await Promise.all(pendingDecodes);
       }
+      for (const img of imagesToPublish) img.style.visibility = "visible";
       if (injectedIds.length > 0) {
         const redraw = (window as Window & { __hf?: { colorGrading?: { redraw?: () => void } } })
           .__hf?.colorGrading?.redraw;
@@ -876,7 +893,7 @@ export async function syncVideoFrameVisibility(
         const img = video.nextElementSibling as HTMLElement | null;
         const hasImg = img && img.classList.contains("__render_frame__");
         const ancestorHidden = isVisualAncestorHidden(video);
-        const visible = active.has(video.id) && !ancestorHidden;
+        const visible = active.has(window.__hfMediaId?.(video) || video.id) && !ancestorHidden;
         if (visible) {
           // Active video: show injected <img>, hide native <video>.
           // Do NOT clobber inline opacity here — GSAP-controlled opacity must
