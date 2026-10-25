@@ -252,9 +252,12 @@ Source: `packages/lint/src/rules/core.ts`.
 
 ### `inline_style_attribute_selector`
 
-**Error.** A selector reads the inline `style` attribute (`[style]`, `[style*=...]`, `[style^=...]` and the other attribute forms). GSAP writes inline styles every frame, and with a rule like this in the page each write makes the browser restyle far more than the animated element: its whole subtree when the rule reaches descendants, and Safari also re-encodes the element's whole inline style. The preview slows to a crawl.
+**Error.** A selector reads the inline `style` attribute (`[style]`, `[style*=...]` and the other forms).
+GSAP writes inline styles every frame, and each write then restyles far more than the animated element.
+The preview slows to a crawl.
 
-**Fix:** Let the runtime hide hidden clips; it already hides their contents. To style a state of your own, toggle a class or data attribute from your script and select on that instead of the inline style text.
+**Fix:** Let the runtime hide hidden clips; it already hides their contents.
+For a state of your own, toggle a class or data attribute from your script and select on that.
 
 ### `invalid_inline_script_syntax`
 
@@ -302,7 +305,8 @@ Source: `packages/lint/src/rules/core.ts`.
 
 **Error.** A selector observes the runtime-owned hidden style (used to hide native video during frame copying) and forces `opacity` to zero, which breaks the video replacement pipeline.
 
-**Fix:** Remove the rule: the runtime already hides a hidden clip and its contents. To fade or hide something on your own schedule, animate it on the timeline, or toggle a class or data attribute from your script and select on that. Never derive opacity from the runtime's inline visibility.
+**Fix:** Remove the rule; the runtime already hides a hidden clip and its contents.
+To fade or hide something yourself, animate it on the timeline, or toggle a class or data attribute and select on that.
 
 ### `scoped_css_missing_wrapper`
 

@@ -766,10 +766,14 @@ export const coreRules: Array<(ctx: LintContext) => HyperframeLintFinding[]> = [
             findings.push({
               code: "inline_style_attribute_selector",
               severity: "error",
-              message: `Selector "${selector}" reads the inline \`style\` attribute. GSAP writes inline styles every frame, and with a rule like this in the page each of those writes makes the browser restyle far more than the animated element (its whole subtree when the rule reaches descendants; Safari also re-encodes the element's whole inline style). The preview slows to a crawl.`,
+              message:
+                `Selector "${selector}" reads the inline \`style\` attribute. GSAP writes inline styles every ` +
+                "frame, and each write then restyles far more than the animated element, " +
+                "so the preview slows to a crawl.",
               selector,
               fixHint:
-                "Let the runtime hide hidden clips; it already hides their contents. To style a state of your own, toggle a class or data attribute from your script and select on that instead of the inline style text.",
+                "Let the runtime hide hidden clips; it already hides their contents. For a state of your own, " +
+                "toggle a class or data attribute from your script and select on that.",
               snippet: truncateSnippet(rule.toString()),
             });
           }
@@ -788,7 +792,8 @@ export const coreRules: Array<(ctx: LintContext) => HyperframeLintFinding[]> = [
             message: `Selector "${selector}" observes HyperFrames' runtime-owned hidden style and forces opacity to zero. The renderer hides each native video before copying its computed opacity to the visible replacement frame, so this rule makes both transparent.`,
             selector,
             fixHint:
-              "Remove this rule: the runtime already hides a hidden clip and its contents. To fade or hide something on your own schedule, animate it on the timeline, or toggle a class or data attribute from your script and select on that. Never derive opacity from the runtime's inline visibility.",
+              "Remove this rule; the runtime already hides a hidden clip and its contents. To fade or hide something " +
+              "yourself, animate it on the timeline, or toggle a class or data attribute and select on that.",
             snippet: truncateSnippet(rule.toString()),
           });
         }
