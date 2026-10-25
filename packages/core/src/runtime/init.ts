@@ -3170,6 +3170,9 @@ export function initSandboxRuntimeModular(): void {
         if (nodeAffectsAudio(rawNode)) hiddenAudioDirty = true;
       }
 
+      const hasClipWindow = rawNode.hasAttribute("data-start");
+      if (!hasClipWindow) continue;
+
       if (unchanged?.(rawNode)) continue;
 
       // Descendants must not override a hidden ancestor clip. CSS visibility can
@@ -3230,7 +3233,7 @@ export function initSandboxRuntimeModular(): void {
   // authored length, and it never awaits, so no duration the cache read can change.
   const syncTimedElementVisibility = (
     currentTime: number,
-    visibilityNodes: Element[] = queryForTransport("[data-start]"),
+    visibilityNodes: Element[] = queryForTransport("[data-start], [data-hidden]"),
     timingRevision?: number,
     playedFromSeconds?: number,
   ) =>
