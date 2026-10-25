@@ -64,14 +64,12 @@ jobs:
       - name: Prepare browser
         shell: pwsh
         run: node --import tsx packages/cli/scripts/prepare-process-test-browser.mjs
-      - name: Loop under load
+      - name: Loop the browser tests with two workers
         shell: pwsh
-        timeout-minutes: 30
+        timeout-minutes: 32
         run: |
-          $burners = 1..8 | ForEach-Object { Start-Job { while ($true) { [math]::Sqrt(12345) | Out-Null } } }
           Set-Location packages/cli
-          for ($i = 1; $i -le 25; $i++) {
+          for ($i = 1; $i -le 8; $i++) {
             Write-Host "=== run $i"
-            bunx vitest run src/capture/captureCompositionFrame.slowScript.browser.test.ts --reporter=verbose 2>&1 | Tee-Object -FilePath "../../run-$i.log" | Select-String -Pattern "NAVDIAG|ERR_ABORTED|✓|×|Tests " | ForEach-Object { $_.Line }
+            bunx vitest run browser.test --maxWorkers=2 --reporter=verbose 2>&1 | Tee-Object -FilePath "../../run-$i.log" | Select-String -Pattern "NAVDIAG|ERR_ABORTED|slowScript|Test Files|Tests " | ForEach-Object { $_.Line }
           }
-          $burners | Stop-Job
