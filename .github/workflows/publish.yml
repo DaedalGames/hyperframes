@@ -323,16 +323,30 @@ jobs:
           REPO: ${{ github.repository }}
         run: gh release upload "v${VERSION}" dist/hyperframes-agent-plugin.zip dist/hyperframes-agent-plugin.sha256 dist/hyperframes-agent-plugin.json --repo "$REPO" --clobber
 
-      - name: Publish Claude Code plugin folders
-        if: github.event_name == 'pull_request'
+  # After npm and the release, so a failure here cannot block either.
+  claude-plugin:
+    name: Claude Code plugin branch
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    if: >-
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'release/v')
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Push the claude-plugin branch through the API so GitHub signs the commit
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ steps.version.outputs.version }}
           REPO: ${{ github.repository }}
+          VERSION: ${{ github.event.pull_request.head.ref }}
         run: |
           out="$(mktemp -d)"
           node scripts/build-claude-plugin.mjs "$out"
-          git -C "$out" init -q -b claude-plugin
-          git -C "$out" -c user.name=github-actions -c user.email=github-actions@github.com add -A
-          git -C "$out" -c user.name=github-actions -c user.email=github-actions@github.com commit -q -m "chore: claude plugin v${VERSION}"
-          git -C "$out" push -f "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" claude-plugin
+          node scripts/push-claude-plugin.mjs "$out" claude-plugin "chore: claude plugin ${VERSION#release/}"
