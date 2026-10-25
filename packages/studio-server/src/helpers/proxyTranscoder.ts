@@ -574,7 +574,6 @@ const VP8_ARGS = [
   "libopus",
 ];
 
-/** The probed video plus its playable audio track; ffmpeg's own pick only when the probe failed. */
 function streamMaps(metadata: MediaMetadata): string[] {
   if (metadata.probeError) return [];
   const audio = metadata.audioTrack === undefined ? [] : ["-map", `0:a:${metadata.audioTrack}`];
