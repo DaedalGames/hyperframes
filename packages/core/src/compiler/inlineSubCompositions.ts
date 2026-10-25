@@ -74,7 +74,7 @@ const FONT_WAIT_RE = new RegExp(
 const TWO_D_CONTEXT_RE = /\bgetContext\s*\(\s*(["'])2d\1\s*\)/g;
 // A timeline chained as it is registered: the registry holds it, so unmounting the scene stops it.
 const REGISTERED_CHAIN_RE =
-  /(\b(?:window\s*\.\s*)?__timelines\s*\[[^\[\]]*\]\s*=\s*)gsap\s*\.\s*timeline\s*\(/g;
+  /(\b(?:window\s*\.\s*)?__timelines\s*\[[^[\]]*\]\s*=\s*)gsap\s*\.\s*timeline\s*\(/g;
 
 /** Whether a call of the browser's Element.animate may leave an animation: it gets timing, its second argument. */
 function lastingAnimateCall(script: string): boolean {
