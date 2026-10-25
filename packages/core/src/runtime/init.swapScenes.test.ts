@@ -1839,6 +1839,25 @@ describe("the preview's scene window", () => {
     expect(sceneHost("s2").getAttribute("style")).not.toContain("display: none");
   });
 
+  it("keeps a scene mounted whose script published its timeline under another id as well", async () => {
+    bootWindowed([S0, S1, S2], trackingRoot().root);
+    await tick();
+    // What the recorder keeps of s0's script, which also published its timeline as "elsewhere".
+    window.__hfSceneAnimations = { s0: [made.a1] };
+    window.__timelines.elsewhere = made.a1;
+    try {
+      await seekAndSettle(5);
+      expect(parked()).toEqual(["s1"]);
+      expect(sceneHost("s0").getAttribute("data-hf-scene-no-swap")).toBe(
+        "its script registers a timeline as elsewhere",
+      );
+      expect(window.__timelines.elsewhere).toBe(made.a1);
+      expect(made.a1.kill).not.toHaveBeenCalled();
+    } finally {
+      delete window.__hfSceneAnimations;
+    }
+  });
+
   it("shows a scene mounted again after the visibility pass hid it by display and it unmounted", async () => {
     const leaf: Scene = { ...S2, body: "<p>two</p>", extraAttrs: ' style="position: static"' };
     bootWindowed([S0, S1, leaf], trackingRoot().root);

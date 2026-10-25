@@ -4286,9 +4286,22 @@ export function initSandboxRuntimeModular(): void {
     parkedNames.delete(name);
     if (!state.tornDown) settleChangedScenes([host], captionHosts, captionOverrides, true);
   };
+  // Unmounting stops a scene's timelines but would leave one it also published under another id registered there.
+  const timelinePublishedElsewhere = (host: Element) => {
+    const ids = compositionIdsIn(host);
+    const own = new Set<unknown>(ids.flatMap((id) => window.__hfSceneAnimations?.[id] ?? []));
+    return Object.entries(window.__timelines ?? {}).find(
+      ([id, timeline]) => own.has(timeline) && !ids.includes(id),
+    )?.[0];
+  };
   const retireScene = (name: string) => {
     const host = sceneHostOf(name);
-    if (!host || isParked(host)) return;
+    if (!host || isParked(host) || host.hasAttribute(SCENE_NO_SWAP_ATTR)) return;
+    const elsewhere = timelinePublishedElsewhere(host);
+    if (elsewhere !== undefined) {
+      host.setAttribute(SCENE_NO_SWAP_ATTR, `its script registers a timeline as ${elsewhere}`);
+      return;
+    }
     stopSceneAnimations([host]);
     const placeholder = parkScene(name);
     if (placeholder) moveDisplayHide(host, placeholder);
