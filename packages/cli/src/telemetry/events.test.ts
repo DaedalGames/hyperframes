@@ -118,6 +118,7 @@ describe("trackCheckReport", () => {
       motionWarnings: 8,
       contrastErrors: 9,
       contrastWarnings: 10,
+      craftWarnings: 16,
       launchSettleMs: 11,
       seekLoopMs: 12,
       contrastMs: 13,
@@ -144,6 +145,7 @@ describe("trackCheckReport", () => {
       motion_warnings: 8,
       contrast_errors: 9,
       contrast_warnings: 10,
+      craft_warnings: 16,
       launch_settle_ms: 11,
       seek_loop_ms: 12,
       contrast_ms: 13,
@@ -172,6 +174,7 @@ describe("trackCheckReport", () => {
       motionWarnings: 0,
       contrastErrors: 0,
       contrastWarnings: 0,
+      craftWarnings: 0,
       launchSettleMs: 0,
       seekLoopMs: 0,
       contrastMs: 0,
@@ -978,6 +981,22 @@ describe("render telemetry events", () => {
         de_fallback_frame_index: 649,
         de_fallback_threshold_db: 32,
       }),
+      undefined,
+    );
+  });
+
+  it("reports render_complete de_router_breaker_off when the install's breaker held the router off", () => {
+    trackRenderComplete({
+      durationMs: 1000,
+      fps: 30,
+      quality: "standard",
+      docker: false,
+      gpu: false,
+      deRouterBreakerOff: true,
+    });
+    expect(trackEvent).toHaveBeenCalledWith(
+      "render_complete",
+      expect.objectContaining({ de_router_breaker_off: true }),
       undefined,
     );
   });

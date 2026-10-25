@@ -7,7 +7,7 @@ import {
 } from "./init";
 import { installAuthoredOpacityCapture } from "./colorGrading";
 import { deferMediaUntilDue } from "./preloadMedia";
-import { hideTimedClipsUntilFirstPass } from "./timedClipHide";
+import { hideTimedClipsUntilFirstPass, keepInlineHideRulesForOlderShaders } from "./timedClipHide";
 import { fitTextFontSize } from "../text/fitTextFontSize";
 import { pretext } from "../text/pretext";
 import { assetUrl } from "./assetUrl";
@@ -18,6 +18,8 @@ import { runScriptsAfterFonts } from "./afterFonts";
 import { AFTER_FONTS_SCRIPTS } from "../compiler/scriptRuns";
 import { hasFrameSources, registerFrameSource } from "./frameSources";
 import { createFilmBridge } from "./filmBridge";
+import { trackAcceleratedCanvases } from "./captureMotionBlur";
+import { parkFarScenesAtBoot } from "./sceneWindow";
 
 type HyperframeWindow = Window & {
   __hyperframeRuntimeBootstrapped?: boolean;
@@ -45,6 +47,7 @@ installAuthoredOpacityCapture();
 installEarlyTextBindings();
 installAuthoredMediaCapture();
 installFlatGsapTransforms();
+trackAcceleratedCanvases();
 window.__hfHasFrameSources = hasFrameSources;
 
 hideTimedClipsUntilFirstPass();
@@ -71,12 +74,14 @@ function bootstrapHyperframeRuntime(): void {
     return;
   }
   win.__hyperframeRuntimeBootstrapped = true;
+  keepInlineHideRulesForOlderShaders();
   initSandboxRuntimeModular();
 }
 
 // Compiled composition scripts wait for web fonts, so what they measure matches every run.
 function startAfterCompositionScripts(): void {
   try {
+    parkFarScenesAtBoot();
     refreshSvgSelectorAliases();
     const deferred = Array.from(document.querySelectorAll(AFTER_FONTS_SCRIPTS));
     if (deferred.length === 0) bootstrapHyperframeRuntime();

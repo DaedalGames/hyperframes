@@ -22,6 +22,7 @@ import {
 } from "./readBoundedResponse.js";
 import { captureFontExtension, captureFontFilename } from "./captureFontValidation.js";
 import { captureImageExtension } from "./captureImageValidation.js";
+import { loadSharp } from "../utils/optionalPackages.js";
 
 interface DownloadBudgetOptions {
   byteBudget?: DownloadByteBudget;
@@ -323,6 +324,7 @@ export async function downloadAssets(
   faviconLinks?: IconCandidate[],
   options: DownloadBudgetOptions = {},
 ): Promise<{ assets: DownloadedAsset[]; drops: AssetDropCounts; icons: IconManifest }> {
+  await loadSharp("website capture");
   options = { ...options, byteBudget: options.byteBudget ?? createCaptureDownloadBudget() };
   const assetsDir = join(outputDir, "assets");
   ensureCaptureDirSync(outputDir, assetsDir);
@@ -594,7 +596,7 @@ export async function downloadAndRewriteFonts(
   });
 
   const usedFontNames = new Set<string>();
-  let rewritten = css;
+  const localFontPaths = new Map<string, string>();
   let count = 0;
 
   for (const [index, fontUrl] of sortedUrls.entries()) {
@@ -629,7 +631,7 @@ export async function downloadAndRewriteFonts(
         const localPath = join(assetsDir, filename);
         const relativePath = `assets/fonts/${filename}`;
         writeCaptureFileSync(localPath, buffer);
-        rewritten = rewritten.split(fontUrl).join(relativePath);
+        localFontPaths.set(fontUrl, relativePath);
       } else {
         drops.unavailable++;
       }
@@ -638,6 +640,10 @@ export async function downloadAndRewriteFonts(
     }
   }
 
+  const rewritten = css.replace(fontUrlRegex, (match: string, url: string) => {
+    const localPath = localFontPaths.get(url);
+    return localPath ? match.replace(url, localPath) : match;
+  });
   return { css: rewritten, drops };
 }
 

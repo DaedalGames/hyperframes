@@ -74,6 +74,14 @@
             "group": "Choose where to create",
             "pages": [
               "guides/choose-creation-path",
+              {
+                "group": "With your agent",
+                "pages": [
+                  "guides/with-claude-code",
+                  "guides/with-codex",
+                  "guides/with-cursor"
+                ]
+              },
               "guides/mcp",
               "guides/design-tools"
             ]
@@ -158,7 +166,7 @@
             ]
           },
           {
-            "group": "Workflows",
+            "group": "Make a video",
             "pages": [
               "workflows",
               "guides/product-launch-video",
@@ -253,23 +261,19 @@
         "icon": "laptop",
         "groups": [
           {
-            "group": "Get started",
+            "group": "Studio app",
             "pages": [
               "studio-app/index",
-              "studio-app/connect-your-agent"
-            ]
-          },
-          {
-            "group": "Make videos",
-            "pages": [
               "studio-app/first-video",
+              "studio-app/existing-project",
+              "studio-app/reference-video",
+              "studio-app/brand-kits",
+              "studio-app/video-clips",
               "studio-app/edit-with-the-agent",
-              "studio-app/export"
-            ]
-          },
-          {
-            "group": "Help",
-            "pages": [
+              "studio-app/workspace",
+              "studio-app/connect-your-agent",
+              "studio-app/export",
+              "studio-app/share",
               "studio-app/troubleshooting"
             ]
           }
@@ -717,7 +721,7 @@
               },
               {
                 "group": "Motion & effects",
-                "tag": "96",
+                "tag": "97",
                 "expanded": false,
                 "pages": [
                   {
@@ -758,7 +762,7 @@
                   },
                   {
                     "group": "Effects",
-                    "tag": "56",
+                    "tag": "57",
                     "expanded": false,
                     "pages": [
                       "catalog/components/avatar-cloud",
@@ -771,6 +775,7 @@
                       "catalog/components/cut-the-curve",
                       "catalog/components/device-frame-stage",
                       "catalog/components/directional-wipe",
+                      "catalog/components/echo-smear",
                       "catalog/components/fade-through",
                       "catalog/components/grid-pixelate-wipe",
                       "catalog/components/halftone-dissolve",
@@ -1000,6 +1005,7 @@
               "concepts/frame-adapters",
               "concepts/determinism",
               "guides/html-in-canvas",
+              "guides/motion-blur",
               "guides/vfx-chain",
               "guides/figma"
             ]
@@ -1131,8 +1137,8 @@
             "href": "/product-updates"
           },
           {
-            "label": "Playground",
-            "href": "https://www.hyperframes.dev/"
+            "label": "Download the Studio app",
+            "href": "https://hyperframes.dev/studio/download?src=docs-footer"
           },
           {
             "label": "GitHub",
@@ -1151,8 +1157,8 @@
     ],
     "primary": {
       "type": "button",
-      "label": "Playground",
-      "href": "https://www.hyperframes.dev/"
+      "label": "Download Studio",
+      "href": "https://hyperframes.dev/studio/download?src=docs-navbar"
     }
   },
   "redirects": [
@@ -1285,5 +1291,11 @@
       "destination": "/sdk/quickstart",
       "permanent": true
     }
-  ]
+  ],
+  "integrations": {
+    "posthog": {
+      "apiKey": "phc_zjjbX0PnWxERXrMHhkEJWj9A9BhGVLRReICgsfTMmpx",
+      "sessionRecording": false
+    }
+  }
 }

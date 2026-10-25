@@ -6,13 +6,21 @@
  * launch args, pooled browser acquisition/release.
  */
 
+import { withHyperframesBrowserMarker } from "@hyperframes/core/browser-marker";
 import { scanHtmlOpeningTags } from "@hyperframes/parsers/html-attribute-spans";
 import type { Browser, LaunchOptions, Page, PuppeteerNode } from "puppeteer-core";
 import { execSync } from "child_process";
 import { existsSync, readdirSync, statSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
-import { chromeMajorCeiling, exceedsChromeCeiling } from "./chromeHostCeiling.js";
+import {
+  browserPathFromEnv,
+  chromeMajorCeiling,
+  compareBrowserVersionsDescending,
+  exceedsChromeCeiling,
+  isManagedChromeDir,
+  pickSharedShell,
+} from "./chromeHostCeiling.js";
 import { DEFAULT_CONFIG, type EngineConfig } from "../config.js";
 import { getSystemTotalMb, LOW_MEMORY_TOTAL_MB_THRESHOLD } from "./systemMemory.js";
 import { describeWslGpuAccess, detectWsl, type WslHostFacts } from "./wslHost.js";
@@ -104,7 +112,7 @@ async function probeHardwareWebGlInfo(
     const launchOptions: LaunchOptions = {
       ...sigintLaunchOptions(),
       headless: true,
-      args: options.args,
+      args: withHyperframesBrowserMarker(options.args),
       defaultViewport: { width: 64, height: 64 },
       executablePath: options.executablePath,
       env: options.env,
@@ -159,27 +167,6 @@ async function readWebGlInfo(browser: Browser): Promise<WebGlProbeInfo> {
 
 export type AcquiredBrowser = BrowserLease;
 
-function compareBrowserVersionsDescending(left: string, right: string): number {
-  const parse = (value: string): number[] => {
-    const version = value.slice(value.indexOf("-") + 1);
-    const segments: number[] = [];
-    for (const segment of version.split(".")) {
-      const parsed = Number.parseInt(segment, 10);
-      if (!Number.isFinite(parsed)) break;
-      segments.push(parsed);
-    }
-    return segments;
-  };
-  const leftSegments = parse(left);
-  const rightSegments = parse(right);
-  const length = Math.max(leftSegments.length, rightSegments.length);
-  for (let index = 0; index < length; index += 1) {
-    const difference = (rightSegments[index] ?? 0) - (leftSegments[index] ?? 0);
-    if (difference !== 0) return difference;
-  }
-  return 0;
-}
-
 const CACHED_HEADLESS_SHELL_EXECUTABLES: Readonly<
   Record<string, readonly [directory: string, executable: string]>
 > = {
@@ -230,6 +217,31 @@ function findCachedHeadlessShell(baseDir: string): string | undefined {
   return undefined;
 }
 
+function findSharedHeadlessShell(baseDir: string): string | undefined {
+  const executable = cachedHeadlessShellExecutable();
+  if (!executable || !existsSync(baseDir)) return undefined;
+  try {
+    return pickSharedShell(readdirSync(baseDir), (version) => {
+      const binary = join(baseDir, version, ...executable);
+      return isNonEmptyFile(binary) ? binary : undefined;
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+function findManagedHeadlessShell(baseDir: string): string | undefined {
+  const executable = cachedHeadlessShellExecutable();
+  if (!executable || !existsSync(baseDir)) return undefined;
+  try {
+    const version = readdirSync(baseDir).find(isManagedChromeDir);
+    const binary = version && join(baseDir, version, ...executable);
+    return binary && isNonEmptyFile(binary) ? binary : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Resolve chrome-headless-shell binary for deterministic BeginFrame rendering.
  * Checks config.chromePath, then PRODUCER_HEADLESS_SHELL_PATH env var,
@@ -241,31 +253,22 @@ export function resolveHeadlessShellPath(
   if (config?.chromePath) {
     return config.chromePath;
   }
-  if (process.env.PRODUCER_HEADLESS_SHELL_PATH) {
-    const envPath = process.env.PRODUCER_HEADLESS_SHELL_PATH;
-    if (!existsSync(envPath)) {
+  const fromEnv = browserPathFromEnv();
+  if (fromEnv) {
+    if (!existsSync(fromEnv.path)) {
       throw new Error(
-        `[BrowserManager] Chrome binary not found at PRODUCER_HEADLESS_SHELL_PATH="${envPath}". ` +
+        `[BrowserManager] Chrome binary not found at ${fromEnv.name}="${fromEnv.path}". ` +
           "Run `hyperframes browser ensure` to re-download.",
       );
     }
-    return envPath;
+    return fromEnv.path;
   }
-  if (process.env.HYPERFRAMES_BROWSER_PATH) {
-    const envPath = process.env.HYPERFRAMES_BROWSER_PATH;
-    if (!existsSync(envPath)) {
-      throw new Error(
-        `[BrowserManager] Chrome binary not found at HYPERFRAMES_BROWSER_PATH="${envPath}". ` +
-          "Run `hyperframes browser ensure` to re-download.",
-      );
-    }
-    return envPath;
-  }
-  const home = homedir();
+  const ours = join(homedir(), ".cache", "hyperframes", "chrome", "chrome-headless-shell");
+  const shared = join(homedir(), ".cache", "puppeteer", "chrome-headless-shell");
   return (
-    findCachedHeadlessShell(
-      join(home, ".cache", "hyperframes", "chrome", "chrome-headless-shell"),
-    ) ?? findCachedHeadlessShell(join(home, ".cache", "puppeteer", "chrome-headless-shell"))
+    findManagedHeadlessShell(ours) ??
+    findSharedHeadlessShell(shared) ??
+    findCachedHeadlessShell(ours)
   );
 }
 
@@ -345,7 +348,6 @@ interface BeginFrameProbeResult {
   durationMs: number;
 }
 
-const BEGINFRAME_SCREENSHOT_PROBE_ATTEMPTS = 10;
 const BEGINFRAME_PROBE_TIMEOUT_MS = 2000;
 const BEGINFRAME_PROBE_CLEANUP_TIMEOUT_MS = 250;
 
@@ -461,7 +463,8 @@ async function probeBeginFrameSupport(
     let bytes = Buffer.alloc(0);
     let isPng = false;
     let attempts = 0;
-    for (attempts = 1; attempts <= BEGINFRAME_SCREENSHOT_PROBE_ATTEMPTS; attempts += 1) {
+    while (!isPng && Date.now() < deadline) {
+      attempts += 1;
       const response = await awaitBeforeDeadline(
         client.send("HeadlessExperimental.beginFrame", {
           frameTimeTicks: 1000 + (attempts - 1) * 33,
@@ -479,7 +482,7 @@ async function probeBeginFrameSupport(
         bytes[1] === 0x50 &&
         bytes[2] === 0x4e &&
         bytes[3] === 0x47;
-      if (isPng) break;
+      if (isPng || Date.now() + 10 >= deadline) break;
       await awaitBeforeDeadline(
         new Promise((resolveDelay) => setTimeout(resolveDelay, 10)),
         deadline,
@@ -489,7 +492,7 @@ async function probeBeginFrameSupport(
     if (!isPng) {
       throw new Error(
         `beginFrame screenshot returned ${bytes.length} bytes after ` +
-          `${BEGINFRAME_SCREENSHOT_PROBE_ATTEMPTS} attempts with signature ` +
+          `${attempts} attempts in ${Date.now() - started}ms with signature ` +
           `${bytes.length >= 4 ? bytes.subarray(0, 4).toString("hex") : "<empty>"}`,
       );
     }
@@ -509,11 +512,7 @@ async function probeBeginFrameSupport(
     };
   }
   if (page && !(await settleWithin(page.close(), BEGINFRAME_PROBE_CLEANUP_TIMEOUT_MS))) {
-    return {
-      supported: false,
-      detail: `${result.detail}; probe page cleanup timed out`,
-      durationMs: Date.now() - started,
-    };
+    return { ...result, detail: `${result.detail}; probe page cleanup timed out` };
   }
   return result;
 }
@@ -642,6 +641,26 @@ async function probeWebGlMode(
 
 function envWithoutWaylandDisplay(): NodeJS.ProcessEnv {
   const { WAYLAND_DISPLAY: _wslg, ...env } = process.env;
+  return env;
+}
+
+// ANGLE and Dawn load SwiftShader via VK_ICD_FILENAMES, which these override or filter:
+// https://github.com/KhronosGroup/Vulkan-Loader/blob/main/docs/LoaderDriverInterface.md
+const VULKAN_VARS_THAT_OVERRIDE_SWIFTSHADER = [
+  "VK_DRIVER_FILES",
+  "VK_LOADER_DRIVERS_SELECT",
+  "VK_LOADER_DRIVERS_DISABLE",
+];
+
+function launchEnv(fingerprint: Readonly<BrowserLaunchFingerprint>): NodeJS.ProcessEnv | undefined {
+  if (fingerprint.withoutWaylandDisplay) return envWithoutWaylandDisplay();
+  const swiftShader = fingerprint.args.some(
+    (arg) => arg === "--use-angle=swiftshader" || arg === "--use-vulkan=swiftshader",
+  );
+  const overriding = VULKAN_VARS_THAT_OVERRIDE_SWIFTSHADER.filter((name) => name in process.env);
+  if (!swiftShader || overriding.length === 0) return undefined;
+  const env = { ...process.env };
+  for (const name of overriding) delete env[name];
   return env;
 }
 
@@ -849,14 +868,14 @@ async function launchBrowser(
   fingerprint: Readonly<BrowserLaunchFingerprint>,
 ): Promise<{ browser: Browser; captureMode: CaptureMode }> {
   const ppt = await getPuppeteer();
-  const env = fingerprint.withoutWaylandDisplay ? envWithoutWaylandDisplay() : undefined;
+  const env = launchEnv(fingerprint);
   let captureMode = fingerprint.requestedCaptureMode;
   let browser: Browser | undefined;
   try {
     browser = await ppt.launch({
       ...sigintLaunchOptions(),
       headless: true,
-      args: [...fingerprint.args],
+      args: withHyperframesBrowserMarker(fingerprint.args),
       defaultViewport: null,
       executablePath: fingerprint.executablePath,
       env,
@@ -889,7 +908,7 @@ async function launchBrowser(
         browser = await ppt.launch({
           ...sigintLaunchOptions(),
           headless: true,
-          args: stripBeginFrameFlags([...fingerprint.args]),
+          args: withHyperframesBrowserMarker(stripBeginFrameFlags([...fingerprint.args])),
           defaultViewport: null,
           executablePath: fingerprint.executablePath,
           env,
@@ -1018,6 +1037,7 @@ export interface BuildChromeArgsOptions {
 
 const CANVAS_DRAW_ELEMENT_FEATURE_FLAG = "--enable-features=CanvasDrawElement";
 const WEBGPU_FLAG = "--enable-unsafe-webgpu";
+const DISABLE_DXC_FLAG = "--disable-dawn-features=use_dxc";
 
 type GpuConfig = Partial<
   Pick<EngineConfig, "browserGpuMode" | "disableGpu" | "chromePath" | "allowSoftwareWebGpu">
@@ -1100,6 +1120,9 @@ export function buildChromeArgs(options: BuildChromeArgsOptions, config?: GpuCon
 
   if (browserGpuMode !== "software" || options.requiresWebGpu) {
     chromeArgs.push(WEBGPU_FLAG);
+    if (platform === "win32") {
+      chromeArgs.push(DISABLE_DXC_FLAG);
+    }
   }
   if (softwareWebGpu) chromeArgs.push("--use-vulkan=swiftshader");
 
@@ -1159,12 +1182,12 @@ export function compositionRequiresWebGpu(html: string): boolean {
   return false;
 }
 
-/** No hardware WebGPU adapter on this host; distinct from a browser or navigation failure. */
+/** No usable WebGPU device on this launch; distinct from a browser or navigation failure. */
 export class WebGpuUnavailableError extends Error {
   constructor() {
     super(
-      "This composition declares data-requires-webgpu, but no hardware WebGPU adapter could be " +
-        "obtained on this browser launch. Run on a host with a GPU, set " +
+      "This composition declares data-requires-webgpu, but a usable WebGPU device could not be " +
+        "created on this browser launch. Run on a host with a GPU, set " +
         "PRODUCER_ALLOW_SOFTWARE_WEBGPU=true to render it on SwiftShader (slow), or remove " +
         "data-requires-webgpu.",
     );
@@ -1172,11 +1195,11 @@ export class WebGpuUnavailableError extends Error {
   }
 }
 
-const WEBGPU_ADAPTER_PROBE_TIMEOUT_MS = 10_000;
+const WEBGPU_DEVICE_PROBE_TIMEOUT_MS = 10_000;
 
 /**
- * Confirms the already-navigated page can obtain a hardware WebGPU adapter, or any adapter when the launch runs
- * software WebGPU ({@link usesSoftwareWebGpu}); no-op otherwise.
+ * Confirms the already-navigated page can create a device on a hardware WebGPU adapter, or any adapter when
+ * the launch runs software WebGPU ({@link usesSoftwareWebGpu}); no-op otherwise.
  * `page` must be on a secure-context origin, or navigator.gpu always reads absent.
  */
 export async function assertWebGpuAdapterAvailable(
@@ -1185,26 +1208,44 @@ export async function assertWebGpuAdapterAvailable(
   softwareWebGpu = false,
 ): Promise<void> {
   if (!requiresWebGpu) return;
-  // requestAdapter() has no native timeout; a broken driver can hang it
-  // indefinitely. Race it in-page so a stuck adapter reads as "unavailable"
-  // instead of hanging the caller.
-  const hasUsableAdapter = await page.evaluate(
+  // An adapter can exist even when missing driver libraries make device creation fail.
+  // Both requests can hang; share one deadline and release late devices as well.
+  const hasUsableDevice = await page.evaluate(
     async (timeoutMs, acceptFallback) => {
       if (typeof navigator === "undefined" || !navigator.gpu) return false;
+      let expired = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
       try {
-        const adapter = await Promise.race([
-          navigator.gpu.requestAdapter(),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+        const probe = async () => {
+          const adapter = await navigator.gpu.requestAdapter();
+          if (!adapter || expired || (!acceptFallback && adapter.info.isFallbackAdapter))
+            return false;
+          const device = await adapter.requestDevice();
+          try {
+            return !expired;
+          } finally {
+            device.destroy();
+          }
+        };
+        return await Promise.race([
+          probe(),
+          new Promise<false>((resolve) => {
+            timer = setTimeout(() => {
+              expired = true;
+              resolve(false);
+            }, timeoutMs);
+          }),
         ]);
-        return !!adapter && (acceptFallback || !adapter.info.isFallbackAdapter);
       } catch {
         return false;
+      } finally {
+        clearTimeout(timer);
       }
     },
-    WEBGPU_ADAPTER_PROBE_TIMEOUT_MS,
+    WEBGPU_DEVICE_PROBE_TIMEOUT_MS,
     softwareWebGpu,
   );
-  if (!hasUsableAdapter) throw new WebGpuUnavailableError();
+  if (!hasUsableDevice) throw new WebGpuUnavailableError();
 }
 
 function getBrowserGpuArgs(

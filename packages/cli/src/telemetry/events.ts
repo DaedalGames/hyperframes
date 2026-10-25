@@ -336,7 +336,7 @@ export function trackRenderComplete(
     durationMs: number;
     fps: number;
     quality: string;
-    /** Authoring workflow skill that drove this render (e.g. "product-launch-video"). */
+    /** Authoring skill that drove this render (e.g. "hyperframes"). */
     authoringSkill?: string;
     /** Which step resolved authoringSkill: an explicit --skill flag, or the project's own config. */
     authoringSkillSource?: string;
@@ -426,6 +426,7 @@ export function trackRenderComplete(
     deBlankDeterministicAccepts?: number;
     deBlankRecaptures?: number;
     deBoundaryFrames?: number;
+    deRiskFrames?: number;
     deNcprFallbacks?: number;
     deFrameTimeouts?: number;
     // "cli" when triggered by `hyperframes render` (default), "studio" when
@@ -446,6 +447,7 @@ export function trackRenderComplete(
     capturePeakMs?: number;
     // Resource usage
     peakMemoryMb?: number;
+    deRouterBreakerOff?: boolean;
     // Aggregate Chrome memory (RenderPerfSummary.chromeMemory); overrides the
     // live observability values when both are present, because the live ones
     // are only the last session's and the aggregate covers every worker.
@@ -595,10 +597,12 @@ export function trackRenderComplete(
         props.deFallbackThresholdDb,
         props.captureDeFallbackThresholdDb,
       ),
+      de_router_breaker_off: props.deRouterBreakerOff,
       de_blank_suspects: props.deBlankSuspects,
       de_blank_deterministic_accepts: props.deBlankDeterministicAccepts,
       de_blank_recaptures: props.deBlankRecaptures,
       de_boundary_frames: props.deBoundaryFrames,
+      de_risk_frames: props.deRiskFrames,
       de_ncpr_fallbacks: props.deNcprFallbacks,
       de_frame_timeouts: props.deFrameTimeouts,
       ...powerStateFields(),
@@ -653,7 +657,7 @@ export function trackRenderError(
   props: {
     fps: number;
     quality: string;
-    /** Authoring workflow skill that drove this render (e.g. "product-launch-video"). */
+    /** Authoring skill that drove this render (e.g. "hyperframes"). */
     authoringSkill?: string;
     /** Which step resolved authoringSkill: an explicit --skill flag, or the project's own config. */
     authoringSkillSource?: string;
@@ -1107,6 +1111,7 @@ export function trackCheckReport(props: {
   motionWarnings: number;
   contrastErrors: number;
   contrastWarnings: number;
+  craftWarnings: number;
   launchSettleMs: number;
   seekLoopMs: number;
   contrastMs: number;
@@ -1132,6 +1137,7 @@ export function trackCheckReport(props: {
     motion_warnings: props.motionWarnings,
     contrast_errors: props.contrastErrors,
     contrast_warnings: props.contrastWarnings,
+    craft_warnings: props.craftWarnings,
     launch_settle_ms: props.launchSettleMs,
     seek_loop_ms: props.seekLoopMs,
     contrast_ms: props.contrastMs,
