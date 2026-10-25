@@ -3631,6 +3631,100 @@ describe("initSandboxRuntimeModular", () => {
     expect(video.style.visibility).toBe("hidden");
   });
 
+  it("keeps a hidden clip's in-flow reading when another timed clip is added", async () => {
+    const root = document.createElement("div");
+    root.setAttribute("data-composition-id", "main");
+    root.setAttribute("data-root", "true");
+    root.setAttribute("data-start", "0");
+    root.setAttribute("data-duration", "10");
+    root.setAttribute("data-width", "1920");
+    root.setAttribute("data-height", "1080");
+    document.body.appendChild(root);
+    const clips = [0, 1, 2].map((i) => {
+      const clip = document.createElement("div");
+      clip.id = `clip-${i}`;
+      clip.style.position = "absolute";
+      clip.setAttribute("data-start", "5");
+      clip.setAttribute("data-duration", "2");
+      root.appendChild(clip);
+      return clip;
+    });
+    window.__timelines = { main: createMockTimeline(10) };
+    initSandboxRuntimeModular();
+    const player = window.__player;
+    player?.seek(0);
+    const added = document.createElement("div");
+    added.id = "added";
+    added.setAttribute("data-start", "8");
+    added.setAttribute("data-duration", "1");
+    root.appendChild(added);
+    await vi.waitFor(() => expect(JSON.stringify(window.__clipManifest)).toContain('"added"'));
+    const reads = vi.spyOn(window, "getComputedStyle");
+    player?.seek(1);
+    player?.seek(9);
+    const clipReads = reads.mock.calls.filter(([el]) => clips.includes(el as HTMLDivElement));
+    reads.mockRestore();
+    expect(clipReads).toHaveLength(0);
+  });
+
+  it("re-reads a clip's flow when its own inline position changes", () => {
+    const root = document.createElement("div");
+    root.setAttribute("data-composition-id", "main");
+    root.setAttribute("data-root", "true");
+    root.setAttribute("data-start", "0");
+    root.setAttribute("data-duration", "10");
+    root.setAttribute("data-width", "1920");
+    root.setAttribute("data-height", "1080");
+    document.body.appendChild(root);
+    const holder = document.createElement("div");
+    holder.style.position = "absolute";
+    root.appendChild(holder);
+    const clip = document.createElement("div");
+    clip.style.position = "absolute";
+    clip.setAttribute("data-start", "5");
+    clip.setAttribute("data-duration", "2");
+    holder.appendChild(clip);
+    window.__timelines = { main: createMockTimeline(10) };
+    initSandboxRuntimeModular();
+    const player = window.__player;
+    player?.seek(0);
+    expect(clip.style.display).not.toBe("none");
+    clip.style.position = "static";
+    player?.seek(1);
+    expect(clip.style.display).toBe("none");
+  });
+
+  it("re-reads a clip's flow when its classes change", () => {
+    const sheet = document.createElement("style");
+    sheet.textContent = ".placed { position: absolute }";
+    document.head.appendChild(sheet);
+    const root = document.createElement("div");
+    root.setAttribute("data-composition-id", "main");
+    root.setAttribute("data-root", "true");
+    root.setAttribute("data-start", "0");
+    root.setAttribute("data-duration", "10");
+    root.setAttribute("data-width", "1920");
+    root.setAttribute("data-height", "1080");
+    document.body.appendChild(root);
+    const holder = document.createElement("div");
+    holder.style.position = "absolute";
+    root.appendChild(holder);
+    const clip = document.createElement("div");
+    clip.className = "placed";
+    clip.setAttribute("data-start", "5");
+    clip.setAttribute("data-duration", "2");
+    holder.appendChild(clip);
+    window.__timelines = { main: createMockTimeline(10) };
+    initSandboxRuntimeModular();
+    const player = window.__player;
+    player?.seek(0);
+    expect(clip.style.display).not.toBe("none");
+    clip.className = "";
+    player?.seek(1);
+    expect(clip.style.display).toBe("none");
+    sheet.remove();
+  });
+
   it("un-hides a later root-level video once active, even though it starts inactive and unstyled", () => {
     // Root-level `[data-start]` children with no authored `position` start out
     // `position: static` until `applyClipLayout` force-absolutizes them, so a

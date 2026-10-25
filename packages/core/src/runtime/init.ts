@@ -2700,14 +2700,16 @@ export function initSandboxRuntimeModular(): void {
   // In-flow clips must leave the flow when hidden — `visibility:hidden` reserves
   // their layout box, so a split sibling would stack below the active half
   // instead of overlapping it. Positioned clips keep `visibility:hidden` (cheaper,
-  // and avoids disturbing absolute media playback). Computed once per element.
-  let timedClipInFlow = new WeakMap<Element, boolean>();
+  // and avoids disturbing absolute media playback). Re-read only when the clip's
+  // own inline position or classes change: the read forces a style recalc.
+  const timedClipInFlow = new WeakMap<Element, { inputs: string; inFlow: boolean }>();
   const isTimedClipInFlow = (el: Element): boolean => {
+    const inputs = `${(el as HTMLElement).style?.position ?? ""}|${el.getAttribute("class") ?? ""}`;
     const cached = timedClipInFlow.get(el);
-    if (cached !== undefined) return cached;
+    if (cached?.inputs === inputs) return cached.inFlow;
     const pos = window.getComputedStyle(el).position;
     const inFlow = pos === "static" || pos === "relative" || pos === "sticky";
-    timedClipInFlow.set(el, inFlow);
+    timedClipInFlow.set(el, { inputs, inFlow });
     return inFlow;
   };
 
@@ -2726,13 +2728,10 @@ export function initSandboxRuntimeModular(): void {
     return leaf;
   };
 
-  // Both caches key on live DOM facts that change when the timed-element set
-  // changes: leaf status flips when a clip gains/loses a nested `[data-start]`
-  // descendant (sub-composition load/unload, studio insert/delete), and a swapped
-  // element can reuse an identity whose in-flow status differs. WeakMap has no
-  // `clear()`, so drop both maps wholesale — re-derived lazily on next access.
+  // Leaf status flips when a clip gains/loses a nested `[data-start]` descendant
+  // (sub-composition load/unload, studio insert/delete), so it is dropped
+  // wholesale when the timed-element set changes; WeakMap has no `clear()`.
   const invalidateTimedClipCaches = () => {
-    timedClipInFlow = new WeakMap<Element, boolean>();
     timedClipIsLeaf = new WeakMap<Element, boolean>();
   };
 
