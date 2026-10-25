@@ -5096,9 +5096,11 @@ export function initSandboxRuntimeModular(): void {
     // Only clips holding a tween that renders for the first time on this seek need their authored style read.
     const firstRendered =
       firstRenders && tl ? clipsFirstRenderedIn(tl, tweensRenderedThrough.time, t) : null;
-    const hideClipsAgain = firstRenders
-      ? showHiddenClips(firstRendered ? (el) => firstRendered.has(el) : undefined)
-      : null;
+    // An empty set means no tween draws for the first time: nothing to show, so no page-wide query.
+    const hideClipsAgain =
+      firstRenders && firstRendered?.size !== 0
+        ? showHiddenClips(firstRendered ? (el) => firstRendered.has(el) : undefined)
+        : null;
     if (tl) {
       // #10: when data-duration exceeds the timeline's intrinsic length the
       // engine requests frames past the last tween. Seeking a paused GSAP

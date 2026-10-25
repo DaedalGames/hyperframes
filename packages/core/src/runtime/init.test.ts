@@ -585,6 +585,30 @@ describe("initSandboxRuntimeModular", () => {
       expect(seen).toEqual(["visible", "hidden"]);
     });
 
+    it("looks for hidden clips only on a jump where some tween draws for the first time", () => {
+      document.body.innerHTML =
+        `<div data-composition-id="main" data-root="true" data-start="0" data-duration="10" data-width="1920" data-height="1080">` +
+        `<div id="line" style="position: absolute" data-start="2" data-duration="2"><p id="said"></p></div>` +
+        `</div>`;
+      const tl = gsap.timeline({ paused: true });
+      tl.to("#said", { x: 1, duration: 0.1 }, 3);
+      window.__timelines = { main: tl as unknown as RuntimeTimelineLike };
+      initSandboxRuntimeModular();
+      const query = vi.spyOn(document, "querySelectorAll");
+      const looked = () =>
+        query.mock.calls.filter(([selector]) => selector === "[data-hf-clip-hidden]").length;
+      try {
+        window.__player?.seek(1);
+        window.__player?.seek(1.5);
+        const beforeTheTween = looked();
+        // Past the line's span: its tween at 3 s draws for the first time while the line is hidden.
+        window.__player?.seek(6);
+        expect([beforeTheTween, looked()]).toEqual([0, 1]);
+      } finally {
+        query.mockRestore();
+      }
+    });
+
     it("keeps a hidden scene's contents hidden when a rewound GSAP set marks one visible inline", () => {
       hideTimedClipsUntilFirstPass();
       try {
