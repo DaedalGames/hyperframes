@@ -33,6 +33,7 @@
  */
 
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 
 /** Discriminator for the two supported Chrome sources. */
 export type ChromeSource = "sparticuz" | "chrome-headless-shell";
@@ -77,6 +78,21 @@ export function resolveChromeSource(): ChromeSource {
 }
 
 /**
+ * The arm64 image ships Chrome already unpacked under `<task root>/chrome`, laid out as
+ * `@sparticuz/chromium` lays it out in /tmp. Using it skips the per-cold-chunk unpack.
+ */
+function usePreparedChrome(): string | null {
+  const dir = join(process.env.LAMBDA_TASK_ROOT ?? "/var/task", "chrome");
+  const binary = join(dir, "chromium");
+  if (!existsSync(binary)) return null;
+  process.env.FONTCONFIG_PATH = join(dir, "fonts");
+  const libs = join(dir, "al2023", "lib");
+  const rest = process.env.LD_LIBRARY_PATH;
+  if (!rest?.startsWith(libs)) process.env.LD_LIBRARY_PATH = rest ? `${libs}:${rest}` : libs;
+  return binary;
+}
+
+/**
  * Resolve the absolute path to a Chrome binary suitable for BeginFrame.
  *
  * For `"sparticuz"`: dynamically import `@sparticuz/chromium` and call
@@ -92,6 +108,8 @@ export function resolveChromeSource(): ChromeSource {
 export async function resolveChromeExecutablePath(): Promise<string> {
   const source = resolveChromeSource();
   if (source === "sparticuz") {
+    const prepared = usePreparedChrome();
+    if (prepared) return prepared;
     const mod = await loadSparticuzChromium();
     const path = await mod.executablePath();
     // Guard against the wedge described in ChromeBinaryUnavailableError.

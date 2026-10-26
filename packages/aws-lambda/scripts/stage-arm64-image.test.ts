@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { brotliCompressSync } from "node:zlib";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { CHROMIUM_ARM64_PACK_SHA256, stageArm64Image } from "./stage-arm64-image.js";
@@ -32,6 +33,15 @@ function tree(files: Record<string, string | Buffer>): string {
   return dir;
 }
 
+const PACK_FILES = ["chromium.br", "fonts.tar.br", "swiftshader.tar.br", "al2023.tar.br"];
+
+function tarBrotli(files: Record<string, string>): Buffer {
+  const dir = tree(files);
+  const tar = spawnSync("tar", ["-cf", "-", "."], { cwd: dir, maxBuffer: 1 << 20 });
+  expect(tar.status).toBe(0);
+  return brotliCompressSync(tar.stdout);
+}
+
 function pack(cmd: string, args: string[], cwd: string): void {
   expect(spawnSync(cmd, args, { cwd }).status).toBe(0);
 }
@@ -53,8 +63,13 @@ function fixture(opts: { ffmpegMachine?: number; zipExtra?: Record<string, strin
     "hf-media/lib/libgnutls.so.30": "gnutls",
   });
   pack("tar", ["-czf", "hf-media.tar.gz", "hf-media"], mediaDir);
-  const packDir = tree({ "chromium.br": "arm64 chrome", "al2023.tar.br": "arm64 libs" });
-  pack("tar", ["-cf", "pack.tar", "chromium.br", "al2023.tar.br"], packDir);
+  const packDir = tree({
+    "chromium.br": brotliCompressSync(elf(AARCH64)),
+    "fonts.tar.br": tarBrotli({ "fonts.conf": "conf", "fonts/a.ttf": "font" }),
+    "swiftshader.tar.br": tarBrotli({ "libGLESv2.so": "gles" }),
+    "al2023.tar.br": tarBrotli({ "lib/libnss3.so": "nss" }),
+  });
+  pack("tar", ["-cf", "pack.tar", ...PACK_FILES], packDir);
   const packBytes = readFileSync(join(packDir, "pack.tar"));
   return {
     handlerZip: join(zipDir, "handler.zip"),
@@ -72,9 +87,19 @@ describe("stageArm64Image", () => {
     expect(readFileSync(join(task, "bin/ffprobe")).readUInt16LE(18)).toBe(AARCH64);
     expect(readFileSync(join(task, "lib/libgnutls.so.30"), "utf-8")).toBe("gnutls");
     const chromeBin = join(task, "node_modules/@sparticuz/chromium/bin");
-    expect(readFileSync(join(chromeBin, "chromium.br"), "utf-8")).toBe("arm64 chrome");
-    expect(readFileSync(join(chromeBin, "al2023.tar.br"), "utf-8")).toBe("arm64 libs");
+    expect(readFileSync(join(chromeBin, "chromium.br")).length).toBeGreaterThan(0);
     expect(readFileSync(join(task, "handler.mjs"), "utf-8")).toContain("handler");
+  });
+
+  it("unpacks Chrome into the layout chromium.ts reads, so no chunk unpacks it", async () => {
+    const task = await stageArm64Image(fixture());
+    const chromium = join(task, "chrome/chromium");
+    expect(readFileSync(chromium).readUInt16LE(18)).toBe(AARCH64);
+    expect(statSync(chromium).mode & 0o111).not.toBe(0);
+    expect(readFileSync(join(task, "chrome/fonts/fonts.conf"), "utf-8")).toBe("conf");
+    expect(readFileSync(join(task, "fonts/a.ttf"), "utf-8")).toBe("font");
+    expect(readFileSync(join(task, "chrome/libGLESv2.so"), "utf-8")).toBe("gles");
+    expect(readFileSync(join(task, "chrome/al2023/lib/libnss3.so"), "utf-8")).toBe("nss");
   });
 
   it("refuses an ffmpeg tarball that is not arm64", async () => {

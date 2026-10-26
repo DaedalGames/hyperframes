@@ -5,16 +5,20 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  chmodSync,
   closeSync,
+  cpSync,
   existsSync,
   mkdirSync,
   openSync,
   readFileSync,
   readSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { brotliDecompressSync } from "node:zlib";
 
 // The npm package ships x64 Chrome only. Bumping @sparticuz/chromium fails here until its arm64 pack is pinned.
 export const CHROMIUM_ARM64_PACK_SHA256: Record<string, string> = {
@@ -82,6 +86,26 @@ async function stageChromiumArm64(chromiumDir: string, opts: StageOptions) {
   run("tar", ["-xf", "-", "-C", join(chromiumDir, "bin")], pack);
 }
 
+// Unpacks what @sparticuz/chromium would inflate into /tmp on every cold chunk, in its /tmp layout, so
+// chromium.ts can point Chrome at it. fonts.conf lists /var/task/fonts, where the font files go.
+function inflateChromium(chromiumDir: string, taskDir: string) {
+  const bin = join(chromiumDir, "bin");
+  const out = join(taskDir, "chrome");
+  const read = (name: string) => brotliDecompressSync(readFileSync(join(bin, name)));
+  const untar = (name: string, dir: string) => {
+    mkdirSync(dir, { recursive: true });
+    run("tar", ["-xf", "-", "-C", dir], read(name));
+  };
+  mkdirSync(out, { recursive: true });
+  writeFileSync(join(out, "chromium"), read("chromium.br"));
+  chmodSync(join(out, "chromium"), 0o755);
+  assertArm64Elf(join(out, "chromium"));
+  untar("fonts.tar.br", join(out, "fonts"));
+  cpSync(join(out, "fonts", "fonts"), join(taskDir, "fonts"), { recursive: true });
+  untar("swiftshader.tar.br", out);
+  untar("al2023.tar.br", join(out, "al2023"));
+}
+
 export async function stageArm64Image(opts: StageOptions): Promise<string> {
   const task = join(opts.outDir, "task");
   rmSync(opts.outDir, { recursive: true, force: true });
@@ -94,7 +118,9 @@ export async function stageArm64Image(opts: StageOptions): Promise<string> {
   rmSync(join(task, "bin", "ffprobe"));
   run("tar", ["-xzf", opts.ffmpegTarball, "-C", task, "--strip-components=1"]);
   for (const bin of ["ffmpeg", "ffprobe"]) assertArm64Elf(join(task, "bin", bin));
-  await stageChromiumArm64(join(task, "node_modules", "@sparticuz", "chromium"), opts);
+  const chromiumDir = join(task, "node_modules", "@sparticuz", "chromium");
+  await stageChromiumArm64(chromiumDir, opts);
+  inflateChromium(chromiumDir, task);
   return task;
 }
 

@@ -8,7 +8,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -74,6 +74,45 @@ describe("resolveChromeExecutablePath", () => {
       expect(await resolveChromeArgs()).toEqual(["--fake-arg"]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses the Chrome the image already unpacked, without calling sparticuz", async () => {
+    process.env.HYPERFRAMES_LAMBDA_CHROME_SOURCE = "sparticuz";
+    const root = mkdtempSync(join(tmpdir(), "hf-task-root-"));
+    mkdirSync(join(root, "chrome"));
+    writeFileSync(join(root, "chrome", "chromium"), "fake binary");
+    const saved = {
+      root: process.env.LAMBDA_TASK_ROOT,
+      libs: process.env.LD_LIBRARY_PATH,
+      fonts: process.env.FONTCONFIG_PATH,
+    };
+    process.env.LAMBDA_TASK_ROOT = root;
+    process.env.LD_LIBRARY_PATH = "/var/lang/lib";
+    try {
+      _setSparticuzChromiumForTests({
+        args: [],
+        executablePath: async () => {
+          throw new Error("sparticuz must not unpack");
+        },
+      });
+      expect(await resolveChromeExecutablePath()).toBe(join(root, "chrome", "chromium"));
+      expect(process.env.FONTCONFIG_PATH).toBe(join(root, "chrome", "fonts"));
+      expect(process.env.LD_LIBRARY_PATH).toBe(
+        `${join(root, "chrome", "al2023", "lib")}:/var/lang/lib`,
+      );
+      await resolveChromeExecutablePath();
+      expect(process.env.LD_LIBRARY_PATH?.split(":").length).toBe(2);
+    } finally {
+      for (const [key, value] of Object.entries({
+        LAMBDA_TASK_ROOT: saved.root,
+        LD_LIBRARY_PATH: saved.libs,
+        FONTCONFIG_PATH: saved.fonts,
+      })) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      rmSync(root, { recursive: true, force: true });
     }
   });
 
