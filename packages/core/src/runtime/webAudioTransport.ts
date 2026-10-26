@@ -17,7 +17,8 @@ import { swallow } from "./diagnostics";
 import { createLevelTap, type LevelTap, type StereoLevel } from "./levelTap.js";
 import { clampAudioGain } from "../audioGain.js";
 import { getDebugSurface } from "./globals.js";
-import { readElementPlaybackRate } from "./media.js";
+import { readElementPlaybackRate, readElementRateSpec } from "./media.js";
+import { rateAt, timeAtSourceTime } from "../speedRamp.js";
 import { classifyWebAudioMediaRoute, reportWebAudioMediaRoute } from "./webAudioRoute.js";
 import { assetUrl } from "./assetUrl.js";
 import { clampFadesToDuration, fadeGain, readElementFades } from "../audioFade.js";
@@ -177,6 +178,8 @@ type ScheduledSourceBase = {
   fx?: ElementFxHandle | null;
   /** The clip's fades booked on the audio clock, between the source and its clip gain; absent without a fade. */
   fades?: BookedFades | null;
+  /** Stops re-aiming the lane and fades at a routed element's own position. */
+  unfollow?: () => void;
   compositionStart: number;
   mediaStart: number;
   scheduledAt: number;
@@ -210,6 +213,9 @@ const decodeKey = (el: HTMLMediaElement): string | null => {
     return src;
   }
 };
+
+/** Where a routed element starts sounding or jumps; a pause needs nothing, no audio flows until `playing`. */
+const FOLLOWED_EVENTS = ["playing", "seeked", "ratechange"] as const;
 
 // A pause to scrub or a reschedule mid-play keeps the output awake; a real idle lets it sleep.
 const IDLE_SUSPEND_MS = 10000;
@@ -479,7 +485,7 @@ export class WebAudioTransport {
   async scheduleMediaElementPlayback(
     el: HTMLMediaElement,
     compositionStart: number,
-    _mediaStart: number,
+    mediaStart: number,
     compositionTime: number,
     volume: number,
     generation: number,
@@ -534,12 +540,14 @@ export class WebAudioTransport {
         laneNode,
         clipGainNode,
         compositionStart,
-        mediaStart: _mediaStart,
+        mediaStart,
         scheduledAt,
         priorMuted: el.muted,
         priorVolume: el.volume,
         mediaPlaybackRate: readElementPlaybackRate(el),
         bounded: false,
+        // ponytail: a looping element's position wraps, so its lane stays on the context clock.
+        unfollow: el.loop ? undefined : this.followElement(el, mediaStart, fx, fades),
       };
       // Chrome applies HTMLMediaElement.volume before MediaElementAudioSource.
       // Keep that upstream stage at unity so the existing downstream gain is
@@ -552,6 +560,32 @@ export class WebAudioTransport {
       swallow("webAudioTransport.mediaElementSource", err);
       return null;
     }
+  }
+
+  /**
+   * A routed element keeps its own time: it starts late, is seeked and is steered by rate. Its lane and fades were
+   * booked against the context clock, so each time it starts or moves they are re-aimed at where it actually is.
+   */
+  private followElement(
+    el: HTMLMediaElement,
+    mediaStart: number,
+    fx: ElementFxHandle | null,
+    fades: BookedFades | null,
+  ): () => void {
+    const retime = () => {
+      if (el.paused || !this._ctx) return;
+      const spec = readElementRateSpec(el);
+      const elapsed = timeAtSourceTime(spec, el.currentTime - mediaStart);
+      const rate = el.playbackRate / rateAt(spec, elapsed);
+      if (!(rate > 0) || !Number.isFinite(elapsed)) return;
+      const timing: AutomationTiming = { scheduledAt: this._ctx.currentTime, elapsed, rate };
+      fx?.retime(timing);
+      fades?.rebook(timing);
+    };
+    for (const type of FOLLOWED_EVENTS) el.addEventListener(type, retime);
+    return () => {
+      for (const type of FOLLOWED_EVENTS) el.removeEventListener(type, retime);
+    };
   }
 
   /**
@@ -998,6 +1032,7 @@ export class WebAudioTransport {
   }
 
   private dispose(source: ScheduledSource, keepsSounding = true): void {
+    source.unfollow?.();
     try {
       if (isBufferSource(source)) source.sourceNode.stop();
       source.sourceNode.disconnect();
