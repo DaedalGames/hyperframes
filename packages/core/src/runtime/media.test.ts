@@ -1249,7 +1249,7 @@ describe("syncRuntimeMedia", () => {
       playbackRate: 1,
       getCompositionDuration: () => 5,
     });
-    expect(clip.el.currentTime).toBeCloseTo(sourceTimeAt(lane, 5), 5);
+    expect(clip.el.currentTime).toBeCloseTo(mediaElementTime(sourceTimeAt(lane, 5)), 5);
     expect(clip.el.currentTime).toBeLessThan(sourceTimeAt(lane, 6));
     expect(clip.el.play).not.toHaveBeenCalled();
   });
@@ -2175,7 +2175,7 @@ describe("syncRuntimeMedia", () => {
       playbackRate: 1,
       forceSync: true,
     });
-    expect(clip.el.currentTime).toBeCloseTo(0.55, 5);
+    expect(clip.el.currentTime).toBeCloseTo(mediaElementTime(0.55), 5);
     expect(clip.el.pause).toHaveBeenCalled();
   });
 
