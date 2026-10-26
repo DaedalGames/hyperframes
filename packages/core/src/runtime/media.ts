@@ -13,6 +13,13 @@ import { findInjectedRenderFrame } from "./renderFrameSibling.js";
 import { isRenderFrameVideo } from "./preloadMedia.js";
 import { registerSeekCompletion } from "./adapters/seek-dispatch.js";
 import { cutToHostSlots, type HostSlot } from "../mediaTiming.js";
+import {
+  forgetSteering,
+  isSteering,
+  MEDIA_SYNC_TOLERANCE_SECONDS,
+  steerMedia,
+} from "./mediaSteer.js";
+export { MEDIA_SYNC_TOLERANCE_SECONDS } from "./mediaSteer.js";
 export {
   readElementPlaybackRate,
   readElementRateSpec,
@@ -250,7 +257,7 @@ export function evictMediaSyncState(el: HTMLMediaElement): void {
   strictDriftSamples.delete(el);
   seekLoadRetried.delete(el);
   lastRuntimeAppliedVolume.delete(el);
-  mediaSteering.delete(el);
+  forgetSteering(el);
 }
 
 /** Test-only seam: whether any per-source sync state is still tracked for `el`. */
@@ -261,7 +268,7 @@ export function hasMediaSyncStateForTest(el: HTMLMediaElement): boolean {
     strictDriftSamples.has(el) ||
     seekLoadRetried.has(el) ||
     lastRuntimeAppliedVolume.has(el) ||
-    mediaSteering.has(el)
+    isSteering(el)
   );
 }
 
@@ -310,44 +317,8 @@ function prepareUpcomingMedia(
   }
 }
 
-/** Drift a playing audio element may carry before sync pulls it back onto the playhead. */
-export const MEDIA_SYNC_TOLERANCE_SECONDS = 0.04;
-
 // Chromium refuses a slower playbackRate (NotSupportedError).
 const MIN_NATIVE_PLAYBACK_RATE = 1 / 16;
-
-// Playing media is steered back by rate, not seeked: a seek resets a video's decoder and clicks in sounding audio.
-// Its rate is written only when steering starts or stops: every write costs a frame.
-const MEDIA_STEER = 0.03;
-// Media that starts a cut late closes its lag over one clip at 3%; a bigger lag steers harder,
-// in steps so the rate is written rarely.
-const MEDIA_STEER_STEPS: readonly (readonly [lag: number, steer: number])[] = [
-  [0.3, 0.25],
-  [0.1, 0.1],
-];
-const MEDIA_STEER_RELEASE_SECONDS = 0.01;
-// Sounding audio is never nudged past 10%, where speech audibly changes tempo. A lag that rate cannot close in about
-// a second is seeked instead, under a gain dip so the jump does not click.
-const AUDIO_MAX_STEER = 0.1;
-const AUDIO_STEER_LIMIT_SECONDS = 0.1;
-
-/** Direction (+1 fast, -1 slow) an element is being steered in; absent when it plays at its authored rate. */
-const mediaSteering = new WeakMap<HTMLMediaElement, number>();
-
-/** Rate for playing media `offset` seconds behind (+) or ahead (-) of the playhead. */
-function steeredMediaRate(el: HTMLMediaElement, offset: number, baseRate: number): number {
-  const direction = Math.sign(offset);
-  const steering = mediaSteering.get(el);
-  if (Math.abs(offset) > MEDIA_SYNC_TOLERANCE_SECONDS) mediaSteering.set(el, direction);
-  else if (steering !== direction || Math.abs(offset) <= MEDIA_STEER_RELEASE_SECONDS) {
-    mediaSteering.delete(el);
-    return baseRate;
-  }
-  const lag = Math.abs(offset);
-  const step = MEDIA_STEER_STEPS.find(([from]) => lag > from)?.[1] ?? MEDIA_STEER;
-  const steer = el.tagName === "AUDIO" ? Math.min(step, AUDIO_MAX_STEER) : step;
-  return baseRate * (1 + direction * steer);
-}
 
 // fallow-ignore-next-line complexity
 export function syncRuntimeMedia(params: {
@@ -626,30 +597,21 @@ export function syncRuntimeMedia(params: {
         strictDriftSamples.set(el, 0);
       }
       const forceSync = !isPlayingMedia && params.forceSync && drift > 0.02;
-      // Not while the lag still grows: an element stalled on data is not chased with seeks.
-      const audioPastSteer =
-        isPlayingMedia &&
-        el.tagName === "AUDIO" &&
-        !hardSync &&
-        offsetStabilized &&
-        Math.abs(offset) > AUDIO_STEER_LIMIT_SECONDS;
-      const dipped = audioPastSteer && params.seekUnderDip?.(el, relTime) === true;
+      const steered =
+        isPlayingMedia && !hardSync ? steerMedia(el, offset, baseRate, offsetStabilized) : null;
+      const steerSeeks = steered?.seek === true;
+      const dipped = steerSeeks && params.seekUnderDip?.(el, relTime) === true;
       try {
         // A hard sync lands the element on the playhead, so its pre-seek offset says nothing.
-        if (!isPlayingMedia || hardSync || audioPastSteer) mediaSteering.delete(el);
-        const rate = Math.max(
-          MIN_NATIVE_PLAYBACK_RATE,
-          isPlayingMedia && !hardSync && !audioPastSteer
-            ? steeredMediaRate(el, offset, baseRate)
-            : baseRate,
-        );
+        if (!steered) forgetSteering(el);
+        const rate = Math.max(MIN_NATIVE_PLAYBACK_RATE, steered?.rate ?? baseRate);
         // Some engines read a rate back at lower precision; an equal-enough rate is not rewritten.
         if (Math.abs(el.playbackRate - rate) > 1e-6) el.playbackRate = rate;
       } catch (err) {
         // ignore unsupported playbackRate
         swallow("runtime.media.site1", err);
       }
-      if (hardSync || strictSync || forceSync || (audioPastSteer && !dipped)) {
+      if (hardSync || strictSync || forceSync || (steerSeeks && !dipped)) {
         // Skip the per-tick seek (and the `el.load()` drift-recovery retry
         // below) for `<video>` elements that have a sibling
         // `<img id="__render_frame_<id>__">`. The sibling is created only
