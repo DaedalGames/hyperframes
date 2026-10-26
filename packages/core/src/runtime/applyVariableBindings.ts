@@ -202,10 +202,11 @@ function bindText(el: Element, cache: ScopeValuesCache): void {
   if (!isScalar(value)) return;
   const text = String(value);
   const prior = boundText.get(el);
+  // The parser extends the node it wrote into as more text arrives; only a node that no longer starts with it was taken over.
   const scriptOwnsText =
     prior?.text === text &&
     prior.node !== null &&
-    !(prior.node.parentNode === el && prior.node.nodeValue === text);
+    !(prior.node.parentNode === el && prior.node.nodeValue?.startsWith(text));
   // A composition script split the text it was given into word spans; writing it again would show it twice.
   if (scriptOwnsText) return;
   boundText.set(el, { text, node: setOwnTextPreservingChildren(el, text) });

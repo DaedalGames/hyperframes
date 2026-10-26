@@ -72,6 +72,18 @@ describe("applyVariableBindings", () => {
     expect(h1.textContent!.trim()).toBe("Launch day is here");
   });
 
+  it("writes a bound text again when the parser extended its node after a script removed itself", () => {
+    setDeclared([{ id: "title", type: "string", label: "Title", default: "Bound" }]);
+    document.body.innerHTML = `<div data-hf-root><h1 data-var-text="title">Bound</h1></div>`;
+    applyVariableBindings(document);
+    const h1 = document.querySelector("h1")!;
+    (h1.firstChild as Text).appendData(" suffix");
+
+    applyVariableBindings(document);
+
+    expect(h1.textContent).toBe("Bound");
+  });
+
   it("sets text content from a scalar via data-var-text", () => {
     setDeclared([{ id: "title", type: "string", label: "Title", default: "Hello" }]);
     win.__hfVariables = { title: "Overridden" };
