@@ -168,6 +168,8 @@ interface PlayerControlsProps {
   shortcutSections?: readonly ShortcutSection[];
 }
 
+const compositionFps = () => useLinkedClipPreferences.getState().compositionFps;
+
 export const PlayerControls = memo(function PlayerControls({
   onTogglePlay,
   onSeek,
@@ -197,17 +199,14 @@ export const PlayerControls = memo(function PlayerControls({
 
   const durationRef = useRef(duration);
   durationRef.current = duration;
-  const compositionFps = useLinkedClipPreferences((s) => s.compositionFps);
-  const compositionFpsRef = useRef(compositionFps);
-  compositionFpsRef.current = compositionFps;
   const controlsDisabled = disabled || !timelineReady;
 
   useEffect(() => {
     if (!timeDisplayRef.current) return;
     const t = currentTimeRef.current;
     timeDisplayRef.current.textContent =
-      timeDisplayMode === "frame" ? formatFrameTime(t, duration, compositionFps) : formatTime(t);
-  }, [compositionFps, duration, timeDisplayMode]);
+      timeDisplayMode === "frame" ? formatFrameTime(t, duration, compositionFps()) : formatTime(t);
+  }, [duration, timeDisplayMode]);
 
   useMountEffect(() => {
     const updateTime = (time: number) => {
@@ -216,7 +215,7 @@ export const PlayerControls = memo(function PlayerControls({
       const currentDuration = durationRef.current;
       const text =
         timeDisplayModeRef.current === "frame"
-          ? formatFrameTime(time, currentDuration, compositionFpsRef.current)
+          ? formatFrameTime(time, currentDuration, compositionFps())
           : formatTime(time);
       if (timeDisplayRef.current.textContent !== text) timeDisplayRef.current.textContent = text;
     };

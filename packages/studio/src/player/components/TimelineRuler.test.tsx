@@ -81,7 +81,7 @@ describe("TimelineRuler", () => {
             totalH={100}
             effectiveDuration={30}
             majorTickInterval={10}
-            theme={{} as TimelineTheme}
+              theme={{} as TimelineTheme}
             contentOrigin={80}
             scrollRef={{ current: el }}
           />,

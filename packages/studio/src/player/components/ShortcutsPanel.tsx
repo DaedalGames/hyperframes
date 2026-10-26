@@ -3,7 +3,7 @@ import { formatTime, frameToSeconds } from "../lib/time";
 import { Popover, Tooltip } from "../../components/ui";
 import { flatActive, flatIdle } from "../../components/timelineToolbarStyles";
 import { usePlayerStore } from "../store/playerStore";
-import { useLinkedClipPreferences } from "../../utils/linkedClipPreferences";
+import { useCompositionFps } from "../../utils/linkedClipPreferences";
 import { DEFAULT_SHORTCUT_SECTIONS, type ShortcutSection } from "./studioShortcuts";
 
 interface ShortcutsPanelProps {
@@ -32,7 +32,7 @@ export const ShortcutsPanel = memo(function ShortcutsPanel({
 }: ShortcutsPanelProps) {
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [jumpFrame, setJumpFrame] = useState("");
-  const compositionFps = useLinkedClipPreferences((s) => s.compositionFps);
+  const compositionFps = useCompositionFps();
   // Focus lands on the scrolling body, not the frame input, so keyboard users can scroll and read it.
   const panelBodyRef = useRef<HTMLDivElement>(null);
 

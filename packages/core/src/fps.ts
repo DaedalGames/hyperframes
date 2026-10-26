@@ -34,44 +34,40 @@ export type FpsParseResult =
         | "ambiguous-decimal";
     };
 
+type FpsFailure = Extract<FpsParseResult, { ok: false }>["reason"];
+const fail = (reason: FpsFailure): FpsParseResult => ({ ok: false, reason });
+
+function rangedFps(num: number, den: number): FpsParseResult {
+  if (num <= 0) return fail("non-positive");
+  const decimal = num / den;
+  if (decimal < 1 || decimal > 240) return fail("out-of-range");
+  return { ok: true, value: { num, den } };
+}
+
+function numericFps(input: number): FpsParseResult {
+  if (!Number.isFinite(input)) return fail("not-a-number");
+  if (!Number.isInteger(input)) return fail("ambiguous-decimal");
+  return rangedFps(input, 1);
+}
+
+function fractionFps(raw: string): FpsParseResult {
+  const parts = raw.split("/");
+  if (parts.length !== 2) return fail("invalid-fraction");
+  const num = Number(parts[0]);
+  const den = Number(parts[1]);
+  if (!Number.isFinite(num) || !Number.isFinite(den)) return fail("not-a-number");
+  if (!Number.isInteger(num) || !Number.isInteger(den) || den <= 0) return fail("invalid-fraction");
+  return rangedFps(num, den);
+}
+
 // Decimals like "29.97" are rejected: FFmpeg reads them as a different rate than 30000/1001.
 export function parseFps(input: string | number): FpsParseResult {
-  if (typeof input === "number") {
-    if (!Number.isFinite(input)) return { ok: false, reason: "not-a-number" };
-    if (!Number.isInteger(input)) return { ok: false, reason: "ambiguous-decimal" };
-    if (input <= 0) return { ok: false, reason: "non-positive" };
-    if (input > 240) return { ok: false, reason: "out-of-range" };
-    return { ok: true, value: { num: input, den: 1 } };
-  }
+  if (typeof input === "number") return numericFps(input);
   const raw = input.trim();
-  if (raw === "") return { ok: false, reason: "empty" };
-
-  if (raw.includes("/")) {
-    const parts = raw.split("/");
-    if (parts.length !== 2) return { ok: false, reason: "invalid-fraction" };
-    const num = Number(parts[0]);
-    const den = Number(parts[1]);
-    if (!Number.isFinite(num) || !Number.isFinite(den)) {
-      return { ok: false, reason: "not-a-number" };
-    }
-    if (!Number.isInteger(num) || !Number.isInteger(den)) {
-      return { ok: false, reason: "invalid-fraction" };
-    }
-    if (den <= 0) return { ok: false, reason: "invalid-fraction" };
-    if (num <= 0) return { ok: false, reason: "non-positive" };
-    const decimal = num / den;
-    if (decimal < 1 || decimal > 240) return { ok: false, reason: "out-of-range" };
-    return { ok: true, value: { num, den } };
-  }
-
-  if (!/^-?\d+$/.test(raw)) {
-    if (/^-?\d*\.\d+$/.test(raw)) return { ok: false, reason: "ambiguous-decimal" };
-    return { ok: false, reason: "not-a-number" };
-  }
-  const n = Number(raw);
-  if (n <= 0) return { ok: false, reason: "non-positive" };
-  if (n > 240) return { ok: false, reason: "out-of-range" };
-  return { ok: true, value: { num: n, den: 1 } };
+  if (raw === "") return fail("empty");
+  if (raw.includes("/")) return fractionFps(raw);
+  if (/^-?\d+$/.test(raw)) return rangedFps(Number(raw), 1);
+  return fail(/^-?\d*\.\d+$/.test(raw) ? "ambiguous-decimal" : "not-a-number");
 }
 
 export function parseFpsWithDefault(input: string | number | undefined): FpsParseResult {
