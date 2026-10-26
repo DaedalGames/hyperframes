@@ -645,6 +645,7 @@ async function handleRenderChunk(
         : `chunk-${pad(event.ChunkIndex)}${formatExtension(event.Format)}`,
     );
 
+    const primitiveStarted = Date.now();
     const result: ChunkResult = await primitive(planDir, event.ChunkIndex, chunkOutputBase, {
       maxCaptureWorkers: lambdaMaxCaptureWorkers(),
     });
@@ -653,6 +654,7 @@ async function handleRenderChunk(
       chunkIndex: event.ChunkIndex,
       workers: result.workers,
       captureMode: result.captureMode,
+      ...chunkStageTimings(result, primitiveStarted - started),
     });
 
     const chunkUri = await uploadChunkOutput(
@@ -701,6 +703,7 @@ async function handleRenderChunkV2(
         ? `chunk-${pad(event.ChunkIndex)}`
         : `chunk-${pad(event.ChunkIndex)}${formatExtension(event.Format)}`,
     );
+    const primitiveStarted = Date.now();
     const result = await primitive(planDir, event.ChunkIndex, chunkOutputBase, {
       maxCaptureWorkers: lambdaMaxCaptureWorkers(),
     });
@@ -709,6 +712,7 @@ async function handleRenderChunkV2(
       chunkIndex: event.ChunkIndex,
       workers: result.workers,
       captureMode: result.captureMode,
+      ...chunkStageTimings(result, primitiveStarted - started),
     });
     const chunkUri = await uploadChunkOutput(
       s3,
@@ -728,6 +732,11 @@ async function handleRenderChunkV2(
   } finally {
     cleanupDir(work);
   }
+}
+
+function chunkStageTimings(result: ChunkResult, setupMs: number) {
+  const { planHashMs, sessionBootMs, captureStageMs, encodeStageMs, durationMs } = result;
+  return { setupMs, planHashMs, sessionBootMs, captureStageMs, encodeStageMs, durationMs };
 }
 
 async function uploadChunkOutput(
