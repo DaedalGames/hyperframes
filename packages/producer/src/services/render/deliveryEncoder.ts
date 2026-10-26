@@ -45,6 +45,11 @@ export function validateDeliveryEncoderConfig(config: DeliveryEncoderConfig): vo
   appendRateCapArgs([], { maxBitrate, bufferSize });
 }
 
+/** A chunk starts on a keyframe, so its GOP is the chunk, or the interval when that is shorter. */
+export function chunkGopFrames(framesInChunk: number, intervalFrames?: number): number {
+  return Math.min(framesInChunk, intervalFrames ?? framesInChunk);
+}
+
 export function resolveDeliveryEncoderOptions(
   config: DeliveryEncoderConfig,
 ): DeliveryEncoderOptions {

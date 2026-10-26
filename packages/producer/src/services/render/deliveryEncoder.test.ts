@@ -1,5 +1,9 @@
 import { describe, expect, it } from "bun:test";
-import { resolveDeliveryEncoderOptions, validateDeliveryEncoderConfig } from "./deliveryEncoder.js";
+import {
+  chunkGopFrames,
+  resolveDeliveryEncoderOptions,
+  validateDeliveryEncoderConfig,
+} from "./deliveryEncoder.js";
 import { computeSegmentPlanHash } from "./segmentManifest.js";
 
 const fps = { num: 30, den: 1 };
@@ -42,6 +46,17 @@ describe("validateDeliveryEncoderConfig", () => {
     expect(() => validateDeliveryEncoderConfig({ fps, bufferSize: "2M" })).toThrow(
       /requires maxBitrate/,
     );
+  });
+});
+
+describe("chunkGopFrames", () => {
+  it("uses the chunk when no interval is set or the interval is longer", () => {
+    expect(chunkGopFrames(120)).toBe(120);
+    expect(chunkGopFrames(120, 300)).toBe(120);
+  });
+
+  it("uses the interval when it is shorter than the chunk", () => {
+    expect(chunkGopFrames(120, 60)).toBe(60);
   });
 });
 
