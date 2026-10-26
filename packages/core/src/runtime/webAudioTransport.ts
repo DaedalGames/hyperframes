@@ -21,6 +21,7 @@ import { readElementPlaybackRate, readElementRateSpec } from "./media.js";
 import { rateAt, sourceTimeAt, timeAtSourceTime } from "../speedRamp.js";
 import { classifyWebAudioMediaRoute, reportWebAudioMediaRoute } from "./webAudioRoute.js";
 import { assetUrl } from "./assetUrl.js";
+import { mediaElementTime } from "./mediaClock.js";
 import { clampFadesToDuration, fadeGain, readElementFades } from "../audioFade.js";
 
 const MASTER_FX_ATTRS: FxAttributes = { automation: null };
@@ -635,7 +636,7 @@ export class WebAudioTransport {
       for (const type of DIP_END_EVENTS) el.addEventListener(type, rise);
       try {
         // Where the element would be by now had it been on time.
-        el.currentTime = target + DIP_SECONDS * el.playbackRate;
+        el.currentTime = mediaElementTime(target + DIP_SECONDS * el.playbackRate);
       } catch (err) {
         swallow("webAudioTransport.seekUnderDip", err);
         rise();

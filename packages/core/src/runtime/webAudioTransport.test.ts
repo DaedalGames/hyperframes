@@ -1,6 +1,7 @@
 // fallow-ignore-file code-duplication complexity
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { MAX_AUDIO_GAIN } from "../audioGain.js";
+import { mediaElementTime } from "./mediaClock";
 import { WebAudioTransport } from "./webAudioTransport";
 
 function createMockAudioContext(currentTime = 100) {
@@ -1267,7 +1268,7 @@ describe("WebAudioTransport", () => {
             vi.advanceTimersByTime(14);
             expect(seek).not.toHaveBeenCalled();
             vi.advanceTimersByTime(1);
-            expect(seek).toHaveBeenCalledExactlyOnceWith(expect.closeTo(8.515, 9));
+            expect(seek).toHaveBeenCalledExactlyOnceWith(mediaElementTime(8.5 + 0.015));
 
             mock.ctx.currentTime = 100.54;
             el.dispatchEvent(new Event("seeked"));
