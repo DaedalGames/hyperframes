@@ -502,7 +502,9 @@ async function probeBeginFrameSupport(
       );
     }
     if (!isPng) {
-      throw new BeginFrameProbeTimeout(
+      // Empty frames until the deadline is a renderer that never got going; bytes that are not a PNG are an answer.
+      const Failure = bytes.length === 0 ? BeginFrameProbeTimeout : Error;
+      throw new Failure(
         `beginFrame screenshot returned ${bytes.length} bytes after ` +
           `${attempts} attempts in ${Date.now() - started}ms with signature ` +
           `${bytes.length >= 4 ? bytes.subarray(0, 4).toString("hex") : "<empty>"}`,

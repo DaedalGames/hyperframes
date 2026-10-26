@@ -84,6 +84,27 @@ describe("BeginFrame capability probe", () => {
 
     expect(result.supported).toBe(false);
     expect(result.detail).toMatch(/returned 0 bytes after \d+ attempts in \d+ms/);
+    expect(result.timedOut).toBe(true);
+  });
+
+  it("reports frames that are not a PNG as unsupported, not as a slow start", async () => {
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0]);
+    const send = vi.fn().mockResolvedValue({ screenshotData: jpeg.toString("base64") });
+    const browser = {
+      newPage: vi.fn().mockResolvedValue({
+        goto: vi.fn().mockResolvedValue(null),
+        createCDPSession: vi.fn().mockResolvedValue({
+          send,
+          detach: vi.fn().mockResolvedValue(undefined),
+        }),
+        close: vi.fn().mockResolvedValue(undefined),
+      }),
+    } as unknown as Browser;
+
+    const result = await _probeBeginFrameSupportForTests(browser, 120);
+
+    expect(result.supported).toBe(false);
+    expect(result.timedOut).toBe(false);
   });
 
   it("keeps trying a renderer that has not drawn its first surface yet, up to the probe deadline", async () => {
