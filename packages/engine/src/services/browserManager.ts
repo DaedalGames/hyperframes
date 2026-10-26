@@ -886,7 +886,7 @@ async function launchBrowser(
   const env = launchEnv(fingerprint);
   let captureMode = fingerprint.requestedCaptureMode;
   let browser: Browser | undefined;
-  const launch = (args: string[]) =>
+  const launch = (args: readonly string[]) =>
     ppt.launch({
       ...sigintLaunchOptions(),
       headless: true,
