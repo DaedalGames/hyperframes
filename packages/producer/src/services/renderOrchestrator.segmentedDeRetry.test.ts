@@ -190,6 +190,14 @@ function render(resumeSegments = false): Promise<void> {
   return executeRenderJob(job, root, join(root, "output.mp4"));
 }
 
+function sequentialStall(): Error {
+  const err = new Error(
+    "[Render] Sequential drawElement capture stalled: no frame progress for 1000ms (stuck at frame 640/1200).",
+  );
+  err.name = "SequentialCaptureStallError";
+  return err;
+}
+
 function stalledRenderer(): Error {
   const err = new Error("drawElement frame exceeded 5000ms (renderer stopped scheduling)");
   err.name = "DeFrameTimeoutError";
@@ -200,6 +208,7 @@ it.each([
   ["a suspect small frame", () => new DrawElementCaptureError(640, "suspect small frame")],
   ["no cached paint record", () => new DrawElementCaptureError(640, "No cached paint record")],
   ["a stalled renderer", stalledRenderer],
+  ["a sequential capture stall", sequentialStall],
   [
     "a failed self-verification",
     () => new DrawElementVerificationError("drawElement PSNR too low", { kind: "psnr" }),
