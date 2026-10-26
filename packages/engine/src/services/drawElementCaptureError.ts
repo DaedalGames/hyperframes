@@ -14,10 +14,10 @@ export class DrawElementCaptureError extends Error {
   }
 }
 
-/**
- * A frame whose worker encode fails after it was produced (timeout, worker error, empty frame) is the same
- * untrusted-page failure as a failed produce, so it takes the same fresh-session recovery.
- */
+function markRejectionHandled(promise: Promise<unknown>): void {
+  promise.catch(() => {});
+}
+
 export function asDrawElementCaptureFailure(
   frameIndex: number,
   encodeResult: Promise<Buffer>,
@@ -27,8 +27,7 @@ export function asDrawElementCaptureFailure(
     const reason = cause instanceof Error ? cause.message : String(cause);
     throw new DrawElementCaptureError(frameIndex, reason, cause);
   });
-  // The pipeline can orphan a produced frame when an earlier one fails; its rejection is then expected.
-  void wrapped.catch(() => {});
+  markRejectionHandled(wrapped);
   return wrapped;
 }
 
