@@ -505,10 +505,10 @@ body { margin: 0; }
     };
     const wrapped = wrapScopedCompositionScript(
       `gsap.timeline({ paused: true }).to('[data-composition-id="step"] .sc', { x: 1 });`,
-      "step__hf2",
-      undefined,
-      undefined,
       "step",
+      undefined,
+      '[data-composition-id="step__hf2"]',
+      "step__hf2",
     );
 
     new Function("window", "gsap", wrapped)(fakeWindow, fakeWindow.gsap);
