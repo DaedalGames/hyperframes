@@ -87,29 +87,27 @@ describe.skipIf(!HAS_FFMPEG)("delivery options on a real encode", () => {
   function encode(name: string, extra: Partial<EncoderOptions>): string {
     const out = join(dir, name);
     const args = buildEncoderArgs({ ...base, quality: 18, ...extra }, input, out);
-    const run = spawnSync(getFfmpegBinary(), ["-v", "error", ...args], {
+    const run = spawnSync(getFfmpegBinary(), ["-v", "error"].concat(args), {
       encoding: "utf-8",
     });
     expect(run.status, run.stderr).toBe(0);
     return out;
   }
 
+  const probe = (inputPath: string, args: readonly string[]): string => {
+    const argv = ["-v", "error", ...args, "--", inputPath];
+    return spawnSync(getFfprobeBinary(), argv, { encoding: "utf-8" }).stdout;
+  };
+
   function packets(file: string): { time: number; bytes: number; key: boolean }[] {
-    const out = spawnSync(
-      getFfprobeBinary(),
-      [
-        "-v",
-        "error",
-        "-select_streams",
-        "v:0",
-        "-show_entries",
-        "packet=pts_time,size,flags",
-        "-of",
-        "csv=p=0",
-        file,
-      ],
-      { encoding: "utf-8" },
-    ).stdout;
+    const out = probe(file, [
+      "-select_streams",
+      "v:0",
+      "-show_entries",
+      "packet=pts_time,size,flags",
+      "-of",
+      "csv=p=0",
+    ]);
     return out
       .trim()
       .split("\n")
