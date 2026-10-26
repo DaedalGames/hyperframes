@@ -1,4 +1,5 @@
+export const MEDIA_ELEMENT_LEAD_SECONDS = 1e-5;
+
 export function mediaElementTime(sourceSeconds: number): number {
-  const leadPastChromesMicrosecondRounding = 1e-5;
-  return sourceSeconds + leadPastChromesMicrosecondRounding;
+  return sourceSeconds + MEDIA_ELEMENT_LEAD_SECONDS;
 }

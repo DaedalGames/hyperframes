@@ -33,11 +33,6 @@ describe("mediaElementTime", () => {
     );
   });
 
-  it("runs from its own source, as the generator's inline script embeds it", () => {
-    const embedded = new Function(`${mediaElementTime}; return mediaElementTime(2 / 30);`);
-    expect(embedded()).toBe(mediaElementTime(2 / 30));
-  });
-
   it("is what a raw seek to an exact frame instant is not", () => {
     // 2/30 s is stored as 66666 us; the frame starts at 66667 us.
     expect(storedMicroseconds(2 / 30)).toBe(66666);
@@ -61,6 +56,7 @@ describe("media currentTime writers", () => {
       join(packages, "core/src/runtime"),
       join(packages, "core/src/generators"),
       join(packages, "player/src"),
+      join(packages, "parsers/src"),
     ]
       .flatMap(sources)
       .flatMap((file) =>
@@ -71,7 +67,13 @@ describe("media currentTime writers", () => {
       // Runtime state and Web Animations (milliseconds) also have a currentTime; a seek to 0 cannot land early.
       .filter(({ line }) => /\.currentTime\s*=(?!=)/.test(line))
       .filter(({ line }) => !/^(state|animation)\.currentTime\b/.test(line))
-      .filter(({ line }) => !/\.currentTime\s*=\s*(0;|mediaElementTime\()/.test(line))
+      // Generated inline scripts add the lead as text: core's constant, or the one core hands the parsers serializer.
+      .filter(
+        ({ line }) =>
+          !/\.currentTime\s*=\s*(0;|mediaElementTime\(|mediaTime \+ \$\{(MEDIA_ELEMENT_LEAD_SECONDS|Number\(options\.mediaElementLeadSeconds \?\? 0\))\})/.test(
+            line,
+          ),
+      )
       .map(({ at, line }) => `${at} ${line}`);
     expect(raw).toEqual([]);
   });

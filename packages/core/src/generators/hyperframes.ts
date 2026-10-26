@@ -11,7 +11,7 @@ import type { GsapAnimation } from "@hyperframes/parsers";
 import { serializeGsapAnimations, keyframesToGsapAnimations } from "@hyperframes/parsers";
 import { GSAP_CDN, BASE_STYLES, ZOOM_CONTAINER_STYLES } from "../templates/constants";
 import { COMPOSITION_ATTRIBUTES } from "../compositionContract.js";
-import { mediaElementTime } from "../runtime/mediaClock";
+import { MEDIA_ELEMENT_LEAD_SECONDS } from "../runtime/mediaClock";
 
 function escapeHtmlAttributeValue(value: string): string {
   return value
@@ -282,6 +282,7 @@ export function generateGsapTimelineScript(
     const allAnimations = [...animations, ...keyframeAnimations];
     gsapScript = serializeGsapAnimations(allAnimations, "tl", {
       includeMediaSync: hasMedia,
+      mediaElementLeadSeconds: MEDIA_ELEMENT_LEAD_SECONDS,
     });
     // Prepend initial positions and visibility for elements without keyframes, append zoom animations
     const prependAnimations = [initialPositionSets, visibilityAnimations]
@@ -300,6 +301,7 @@ export function generateGsapTimelineScript(
     // Use only keyframe animations
     gsapScript = serializeGsapAnimations(keyframeAnimations, "tl", {
       includeMediaSync: hasMedia,
+      mediaElementLeadSeconds: MEDIA_ELEMENT_LEAD_SECONDS,
     });
     // Prepend initial positions and visibility for elements without keyframes, append zoom animations
     const prependAnimations = [initialPositionSets, visibilityAnimations]
@@ -833,7 +835,6 @@ function generateDefaultGsapAnimations(
     mediaElements.length > 0
       ? `
     // Sync media playback
-    ${mediaElementTime}
     tl.eventCallback("onUpdate", function() {
       const time = tl.time();
       document.querySelectorAll("video[data-start], audio[data-start]").forEach(function(media) {
@@ -842,7 +843,7 @@ function generateDefaultGsapAnimations(
         const mediaTime = time - start;
         if (time >= start && time < end) {
           if (Math.abs(media.currentTime - mediaTime) > 0.1) {
-            media.currentTime = mediaElementTime(mediaTime);
+            media.currentTime = mediaTime + ${MEDIA_ELEMENT_LEAD_SECONDS};
           }
           if (media.paused && !tl.paused()) {
             media.play().catch(function() {});
