@@ -1,5 +1,5 @@
 // fallow-ignore-file code-duplication complexity
-import { beforeEach, describe, it, expect, vi } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { MAX_AUDIO_GAIN } from "../audioGain.js";
 import { WebAudioTransport } from "./webAudioTransport";
 
@@ -993,6 +993,7 @@ describe("WebAudioTransport", () => {
       const settle = () => new Promise((r) => setTimeout(r, 0));
 
       // An unbounded media-element clip: the runtime does not stopAll and reschedule it on a rate change.
+      // Its gains in creation order: element gain, seek dip, lane, clip gain (then fades, when it has them).
       async function playBed(automation?: string, volume?: string) {
         const setup = setupGroupTransport();
         const el = groupedAudioEl("bed");
@@ -1000,7 +1001,7 @@ describe("WebAudioTransport", () => {
         if (volume) el.setAttribute("data-volume", volume);
         await setup.transport.scheduleMediaElementPlayback(el, 0, 0, 0, 1, setup.gen);
         expect(setup.transport.hasBoundedActiveSources()).toBe(false);
-        return { ...setup, el, laneGain: setup.mock.gainNodes[1]! };
+        return { ...setup, el, laneGain: setup.mock.gainNodes[2]! };
       }
 
       // Gain 2 times a 0 -> 3 ramp crosses the ceiling at 6.635 s; the product holds there after.
@@ -1015,7 +1016,7 @@ describe("WebAudioTransport", () => {
         transport.setElementVolume(el, 1, 2);
         const booked = (laneGain.gain as unknown as { setValueAtTime: ReturnType<typeof vi.fn> })
           .setValueAtTime.mock.calls;
-        expect(mock.gainNodes[2]!.gain.value * booked[0]![0]).toBeCloseTo(MAX_AUDIO_GAIN, 9);
+        expect(mock.gainNodes[3]!.gain.value * booked[0]![0]).toBeCloseTo(MAX_AUDIO_GAIN, 9);
       });
 
       it("holds a clip's gain times its lane under the ceiling, with data-volume played ahead", async () => {
@@ -1050,7 +1051,7 @@ describe("WebAudioTransport", () => {
         const booked = (laneGain.gain as unknown as { setValueAtTime: ReturnType<typeof vi.fn> })
           .setValueAtTime.mock.calls;
         expect(booked.at(-1)).toEqual([1, 100]);
-        expect(mock.gainNodes[2]!.gain.value * booked.at(-1)![0]).toBe(2);
+        expect(mock.gainNodes[3]!.gain.value * booked.at(-1)![0]).toBe(2);
       });
 
       it("restores the static group gain after its playing volume lane is removed", async () => {
@@ -1161,7 +1162,7 @@ describe("WebAudioTransport", () => {
           el.setAttribute("data-automation", FADE);
           for (const [name, value] of Object.entries(extra)) el.setAttribute(name, value);
           await setup.transport.scheduleMediaElementPlayback(el, 4, 8, 3.9, 1, setup.gen, 1, 2);
-          const [laneGain, fadeGain] = [setup.mock.gainNodes[1]!, setup.mock.gainNodes[3]];
+          const [laneGain, fadeGain] = [setup.mock.gainNodes[2]!, setup.mock.gainNodes[4]];
           const at = (ctxTime: number, currentTime: number, playbackRate = 1, paused = false) => {
             setup.mock.ctx.currentTime = ctxTime;
             Object.defineProperties(el, {
@@ -1226,6 +1227,60 @@ describe("WebAudioTransport", () => {
           el.dispatchEvent(new Event("playing"));
 
           expect(booked()).toEqual(before);
+        });
+
+        describe("a seek while it sounds", () => {
+          beforeEach(() => vi.useFakeTimers());
+          afterEach(() => vi.useRealTimers());
+          type Dip = Record<"linearRampToValueAtTime", ReturnType<typeof vi.fn>>;
+          const dipRamps = (node: { gain: unknown }) =>
+            (node.gain as Dip).linearRampToValueAtTime.mock.calls;
+
+          it("dips, seeks once the dip is down, and comes back up when the element lands", async () => {
+            const { transport, el, mock, at } = await routeTake();
+            const dip = mock.gainNodes[1]!;
+            at(100.5, 8.35);
+            const seek = vi.fn();
+            Object.defineProperty(el, "currentTime", {
+              get: () => 8.35,
+              set: seek,
+              configurable: true,
+            });
+
+            expect(transport.seekUnderDip(el, 8.5)).toBe(true);
+            expect(dipRamps(dip)).toEqual([[0, expect.closeTo(100.515, 9)]]);
+            expect(transport.seekUnderDip(el, 8.51)).toBe(true);
+            vi.advanceTimersByTime(14);
+            expect(seek).not.toHaveBeenCalled();
+            vi.advanceTimersByTime(1);
+            expect(seek).toHaveBeenCalledExactlyOnceWith(expect.closeTo(8.515, 9));
+
+            mock.ctx.currentTime = 100.54;
+            el.dispatchEvent(new Event("seeked"));
+            expect(dipRamps(dip).at(-1)).toEqual([1, expect.closeTo(100.555, 9)]);
+            el.dispatchEvent(new Event("seeked"));
+            expect(dipRamps(dip)).toHaveLength(2);
+          });
+
+          it("leaves the element alone when the clip is stopped during the dip", async () => {
+            const { transport, el, at } = await routeTake();
+            at(100.5, 8.35);
+            const seek = vi.fn();
+            Object.defineProperty(el, "currentTime", {
+              get: () => 8.35,
+              set: seek,
+              configurable: true,
+            });
+            transport.seekUnderDip(el, 8.5);
+            transport.stopAll();
+            vi.advanceTimersByTime(15);
+            expect(seek).not.toHaveBeenCalled();
+          });
+
+          it("has no dip for an element it does not route", () => {
+            const { transport } = setupGroupTransport();
+            expect(transport.seekUnderDip(groupedAudioEl("loose"), 1)).toBe(false);
+          });
         });
       });
     });
@@ -1296,7 +1351,7 @@ describe("WebAudioTransport", () => {
 
       transport.setElementVolume(el, 0.8, 0.5);
 
-      const [gain, , clipGain] = mock.gainNodes;
+      const [gain, , , clipGain] = mock.gainNodes;
       expect(clipGain!.gain.value).toBe(0.5);
       expect(gain!.gain.value).toBe(0.8);
     });
@@ -1307,10 +1362,14 @@ describe("WebAudioTransport", () => {
 
       await transport.scheduleMediaElementPlayback(el, 0, 0, 0, 1, gen, 1);
 
-      expect(mock.gainNodes).toHaveLength(3);
-      expect(mock.gainNodes[0]!.connect).toHaveBeenCalledWith(mock.masterGain);
-      expect(mock.gainNodes[1]!.connect).toHaveBeenCalledWith(mock.gainNodes[0]);
-      expect(mock.gainNodes[2]!.connect).toHaveBeenCalledWith(mock.gainNodes[1]);
+      // Element gain to master, seek dip, lane into the element gain, clip gain into the lane.
+      const [gain, dip, lane, clipGain] = mock.gainNodes;
+      expect(mock.gainNodes).toHaveLength(4);
+      expect(gain!.connect).toHaveBeenCalledWith(mock.masterGain);
+      expect(lane!.connect).toHaveBeenCalledWith(gain);
+      expect(clipGain!.connect).toHaveBeenCalledWith(lane);
+      expect(mock.mediaElementSource.connect).toHaveBeenCalledWith(dip);
+      expect(dip!.connect).toHaveBeenCalledWith(clipGain);
     });
 
     it("two members of the same group land on ONE shared group gain, not master directly", async () => {
