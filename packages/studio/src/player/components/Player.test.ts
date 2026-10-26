@@ -24,7 +24,7 @@ class TestHyperframesPlayer extends HTMLElement {
 
   constructor() {
     super();
-    this.attachShadow({ mode: "open" }).appendChild(this.iframeElement);
+    this.attachShadow({ mode: "open" });
 
     const addIframeListener = this.iframeElement.addEventListener.bind(this.iframeElement);
     this.iframeElement.addEventListener = ((type, listener, options) => {

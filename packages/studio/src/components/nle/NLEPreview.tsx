@@ -506,14 +506,13 @@ export const NLEPreview = memo(function NLEPreview({
         >
           <div
             ref={stageRef}
-            className="relative shrink-0 pointer-events-auto"
+            className="relative shrink-0 pointer-events-auto shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_4px_32px_rgba(0,0,0,0.7)]"
             style={{
               width: `${stageSize.width}px`,
               height: `${stageSize.height}px`,
               transform: `translate3d(${toDomPrecision(initial.panX)}px, ${toDomPrecision(initial.panY)}px, 0) scale(${toDomPrecision(initial.zoomPercent / 100)})`,
               // resolvePreviewWheelZoom cursor math assumes center-center pivot
               transformOrigin: "center center",
-              boxShadow: "0 0 0 1px rgba(255,255,255,0.08), 0 4px 32px rgba(0,0,0,0.7)",
             }}
             data-testid="preview-zoom-stage"
           >
