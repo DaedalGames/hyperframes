@@ -79,7 +79,6 @@ export function computeSegmentPlanHash(input: SegmentPlanHashInput): string {
     input.pageMotionBlur ?? "",
     input.captureQuality === undefined ? "" : String(input.captureQuality),
   ];
-  // Appended only when set, so renders that use none keep their existing segment cache.
   const delivery = [input.maxBitrate, input.bufferSize, input.gopSize].map((v) => v ?? "");
   if (delivery.some((v) => v !== "")) ordered.push(...delivery.map(String));
   return createHash("sha256").update(ordered.join(" ")).digest("hex").slice(0, 16);
