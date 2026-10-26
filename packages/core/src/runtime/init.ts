@@ -3653,6 +3653,7 @@ export function initSandboxRuntimeModular(): void {
           webAudio.setElementVolume(el, authorVolume, clipGain, unfadedVolume),
         isWebAudioOwned: (el) => webAudio.ownsElement(el),
         isWebAudioRouted: (el) => webAudio.routesElement(el),
+        seekUnderDip: (el, target) => webAudio.seekUnderDip(el, target),
         onAutoplayBlocked: () => {
           if (state.mediaAutoplayBlockedPosted) return;
           state.mediaAutoplayBlockedPosted = true;

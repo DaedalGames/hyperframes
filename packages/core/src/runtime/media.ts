@@ -325,6 +325,10 @@ const MEDIA_STEER_STEPS: readonly (readonly [lag: number, steer: number])[] = [
   [0.1, 0.1],
 ];
 const MEDIA_STEER_RELEASE_SECONDS = 0.01;
+// Sounding audio is never nudged past 10%, where speech audibly changes tempo. A lag that rate cannot close in about
+// a second is seeked instead, under a gain dip so the jump does not click.
+const AUDIO_MAX_STEER = 0.1;
+const AUDIO_STEER_LIMIT_SECONDS = 0.1;
 
 /** Direction (+1 fast, -1 slow) an element is being steered in; absent when it plays at its authored rate. */
 const mediaSteering = new WeakMap<HTMLMediaElement, number>();
@@ -339,7 +343,8 @@ function steeredMediaRate(el: HTMLMediaElement, offset: number, baseRate: number
     return baseRate;
   }
   const lag = Math.abs(offset);
-  const steer = MEDIA_STEER_STEPS.find(([from]) => lag > from)?.[1] ?? MEDIA_STEER;
+  const step = MEDIA_STEER_STEPS.find(([from]) => lag > from)?.[1] ?? MEDIA_STEER;
+  const steer = el.tagName === "AUDIO" ? Math.min(step, AUDIO_MAX_STEER) : step;
   return baseRate * (1 + direction * steer);
 }
 
@@ -388,6 +393,8 @@ export function syncRuntimeMedia(params: {
   forceSync?: boolean;
   /** How far the next tick will move the playhead: an audio clip due within it starts now. */
   cueAheadSeconds?: number;
+  /** Seeks a sounding element under a gain dip; false when it has no dip stage and the sync seeks it plainly. */
+  seekUnderDip?: (el: HTMLMediaElement, target: number) => boolean;
   /** Lets a video clip that runs to the composition end hold its last frame at the terminal time.
    *  A thunk, because deriving the duration is only worth it for a clip past its own end. */
   getCompositionDuration: () => number;
@@ -590,8 +597,8 @@ export function syncRuntimeMedia(params: {
         (drift > MEDIA_HARD_SYNC_SECONDS && (firstTickOfClip || offsetJumped || catastrophicDrift));
       // Seeking playing media resets a video's decoder (a ~150ms freeze that loops into a
       // seek→freeze→drift→seek stutter) and jumps sounding audio (a click). So playing media skips
-      // strict and force sync and is steered by rate; only hard sync (>0.5s) warrants a seek. A
-      // paused transport pauses it below, so a seek that pauses mid-playback still lands it.
+      // strict and force sync and is steered by rate; hard sync (>0.5s) and audio past its steer
+      // limit seek. A paused transport pauses it below, so a seek that pauses mid-playback lands it.
       const isPlayingMedia = !el.paused && playing;
       // Only apply strict sync when offset has stabilized (not growing).
       // During initial buffering, offset grows ~16ms/tick as the timeline
@@ -618,12 +625,22 @@ export function syncRuntimeMedia(params: {
         strictDriftSamples.set(el, 0);
       }
       const forceSync = !isPlayingMedia && params.forceSync && drift > 0.02;
+      // Not while the lag still grows: an element stalled on data is not chased with seeks.
+      const audioPastSteer =
+        isPlayingMedia &&
+        el.tagName === "AUDIO" &&
+        !hardSync &&
+        offsetStabilized &&
+        Math.abs(offset) > AUDIO_STEER_LIMIT_SECONDS;
+      const dipped = audioPastSteer && params.seekUnderDip?.(el, relTime) === true;
       try {
         // A hard sync lands the element on the playhead, so its pre-seek offset says nothing.
-        if (!isPlayingMedia || hardSync) mediaSteering.delete(el);
+        if (!isPlayingMedia || hardSync || audioPastSteer) mediaSteering.delete(el);
         const rate = Math.max(
           MIN_NATIVE_PLAYBACK_RATE,
-          isPlayingMedia && !hardSync ? steeredMediaRate(el, offset, baseRate) : baseRate,
+          isPlayingMedia && !hardSync && !audioPastSteer
+            ? steeredMediaRate(el, offset, baseRate)
+            : baseRate,
         );
         // Some engines read a rate back at lower precision; an equal-enough rate is not rewritten.
         if (Math.abs(el.playbackRate - rate) > 1e-6) el.playbackRate = rate;
@@ -631,7 +648,7 @@ export function syncRuntimeMedia(params: {
         // ignore unsupported playbackRate
         swallow("runtime.media.site1", err);
       }
-      if (hardSync || strictSync || forceSync) {
+      if (hardSync || strictSync || forceSync || (audioPastSteer && !dipped)) {
         // Skip the per-tick seek (and the `el.load()` drift-recovery retry
         // below) for `<video>` elements that have a sibling
         // `<img id="__render_frame_<id>__">`. The sibling is created only
