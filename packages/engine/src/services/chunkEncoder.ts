@@ -239,12 +239,7 @@ function bitrateToBitsPerSecond(value: string): number {
   return Number(match[1]) * (unit === "m" ? 1_000_000 : unit === "k" ? 1_000 : 1);
 }
 
-/**
- * `-maxrate` / `-bufsize` for the VBV cap, shared by every encoder entry point
- * so the two arg builders cannot disagree. The cap rides alongside CRF or a
- * target bitrate. `bufferSize` defaults to twice `maxBitrate`. Throws for codecs
- * with no cap here: a silently uncapped file would only surface at delivery.
- */
+/** `-maxrate` / `-bufsize` for the VBV cap, written once for both arg builders. Buffer defaults to 2x. */
 export function appendRateCapArgs(
   args: string[],
   options: { codec?: string; maxBitrate?: string; bufferSize?: string },
