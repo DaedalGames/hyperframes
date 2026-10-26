@@ -1,7 +1,7 @@
 import { lstatSync, chmodSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { mkdirWithinProject, realpath } from "@hyperframes/core";
-import { createStagingDir } from "../utils/stagingDir.js";
+import { createStagingDir } from "@hyperframes/core/atomic-file";
 
 export { realProjectRoot as registryRoot } from "@hyperframes/core";
 

@@ -5,7 +5,6 @@ import {
   existsSync,
   fsyncSync,
   linkSync,
-  mkdtempSync,
   mkdirSync,
   lstatSync,
   openSync,
@@ -21,6 +20,7 @@ import { BlockList, isIP } from "node:net";
 import { dirname, extname, join } from "path";
 import { Readable, Transform } from "stream";
 import { pipeline } from "stream/promises";
+import { createStagingDir } from "@hyperframes/core/atomic-file";
 
 const inFlightDownloads = new Map<string, Promise<string>>();
 const signalScopes = new WeakMap<AbortSignal, number>();
@@ -1017,7 +1017,7 @@ async function runDownloadAttempt(
 ): Promise<string> {
   // A private, unguessable directory prevents symlink planting and keeps the
   // partial on the destination filesystem so the final rename stays atomic.
-  const attemptDir = mkdtempSync(join(dirname(localPath), ".hf-download-"));
+  const attemptDir = createStagingDir(dirname(localPath), ".hf-download-");
   const partialPath = join(attemptDir, "payload");
   const controller = new AbortController();
   let timedOut = false;

@@ -18,7 +18,7 @@ import { open } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { resolveWritePath } from "@hyperframes/core/atomic-file";
-import { createStagingDir } from "../utils/stagingDir.js";
+import { createStagingDir } from "@hyperframes/core/atomic-file";
 
 // The first request asks for PART_BYTES; a larger file is split into up to
 // CONNECTIONS ranged GETs. A server that ignores Range answers 200 and is streamed.

@@ -1,7 +1,7 @@
 import { mkdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { CaptureDirRefusedError } from "./captureErrors.js";
-import { createStagingDir } from "../utils/stagingDir.js";
+import { createStagingDir } from "@hyperframes/core/atomic-file";
 
 type WriteOptions = Parameters<typeof writeFileSync>[2];
 

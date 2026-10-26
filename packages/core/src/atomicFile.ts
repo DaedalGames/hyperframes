@@ -14,6 +14,7 @@ const BUSY_RENAME = new Set(["EPERM", "EBUSY", "EACCES"]);
 const RENAME_RETRY_DELAYS_MS = [10, 20, 30, 40];
 const MAX_LINK_HOPS = 40;
 const TEMP_NAME_TRIES = 3;
+const STAGING_NAME_TRIES = 5;
 const TEMP_SUFFIX = /\.hf[0-9a-f]{6}\.tmp$/;
 
 /** A fresh temp sibling for a write that publishes `filePath`. 13 bytes, so a 242-byte name still fits. */
@@ -175,4 +176,21 @@ function renameWithRetry(
 
 function errorCode(error: unknown): string {
   return String((error as NodeJS.ErrnoException)?.code);
+}
+
+/** A fresh private directory in `parent`; mkdtemp fails past 260 characters on Windows. */
+export function createStagingDir(
+  parent: string,
+  prefix: string,
+  suffix = () => randomBytes(4).toString("hex"),
+): string {
+  for (let attempt = 1; ; attempt++) {
+    const dir = join(parent, `${prefix}${suffix()}`);
+    try {
+      fs.mkdirSync(dir, { mode: 0o700 });
+      return dir;
+    } catch (error) {
+      if (errorCode(error) !== "EEXIST" || attempt >= STAGING_NAME_TRIES) throw error;
+    }
+  }
 }

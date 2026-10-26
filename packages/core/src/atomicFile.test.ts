@@ -6,6 +6,7 @@ import { lstatSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  createStagingDir,
   atomicTempPath,
   createFileAtomically,
   isAtomicTempPath,
@@ -508,5 +509,36 @@ describe.skipIf(process.platform === "win32")("resolveWritePath", () => {
     expect(() => resolveWritePath(join(base, "root/a.html"))).toThrow(
       expect.objectContaining({ code: "ELOOP" }),
     );
+  });
+});
+
+describe("createStagingDir", () => {
+  const dirs: string[] = [];
+  const root = () => {
+    const dir = mkdtempSync(join(tmpdir(), "hf-staging-"));
+    dirs.push(dir);
+    return dir;
+  };
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("makes a fresh private directory with a random suffix", () => {
+    const parent = root();
+    const first = createStagingDir(parent, ".stage-");
+    const second = createStagingDir(parent, ".stage-");
+    expect(first).not.toBe(second);
+    expect(first).toMatch(/\.stage-[0-9a-f]{8}$/);
+    if (process.platform !== "win32") expect(fs.statSync(first).mode & 0o777).toBe(0o700);
+  });
+
+  it("tries another name when one is taken, and gives up after five", () => {
+    const parent = root();
+    expect(createStagingDir(parent, ".s-", () => "same")).toBe(join(parent, ".s-same"));
+    const names = ["same", "same", "next"];
+    expect(createStagingDir(parent, ".s-", () => names.shift() ?? "x")).toBe(
+      join(parent, ".s-next"),
+    );
+    expect(() => createStagingDir(parent, ".s-", () => "same")).toThrow(/EEXIST/);
   });
 });

@@ -64,6 +64,7 @@ import {
   PlanVideosMetadataError,
   type PlanVideosJson,
 } from "./shared.js";
+import { createStagingDir } from "@hyperframes/core/atomic-file";
 
 const PLAN_V2_HASH_PREFIX = "hyperframes-plan-manifest-hash-v2\x00";
 // The engine's content-addressed extraction cache keeps this ownership marker
@@ -503,7 +504,7 @@ function computeManifestHash(manifest: Omit<PlanV2Manifest, "planHash">): string
 function writeBlob(sourcePath: string, destinationPath: string): void {
   if (existsSync(destinationPath)) return;
   mkdirSync(dirname(destinationPath), { recursive: true });
-  const temporaryDir = mkdtempSync(join(dirname(destinationPath), ".plan-v2-blob-"));
+  const temporaryDir = createStagingDir(dirname(destinationPath), ".plan-v2-blob-");
   const temporaryPath = join(temporaryDir, "blob");
   try {
     copyFileSync(sourcePath, temporaryPath);
@@ -668,7 +669,7 @@ export function createPlanV2FromExecutionPlan(
     throw new PlanV2IntegrityError("a local plan v2 directory cannot reference remote files");
   }
   mkdirSync(dirname(planV2Dir), { recursive: true });
-  const tempDir = mkdtempSync(join(dirname(planV2Dir), ".plan-v2-build-"));
+  const tempDir = createStagingDir(dirname(planV2Dir), ".plan-v2-build-");
   try {
     for (const blob of publication.blobs) {
       writeBlob(blob.sourcePath, planV2BlobPath(tempDir, blob.sha256));
@@ -1054,7 +1055,7 @@ export function materializePlanV2Target(
       sourcePath: verifyBlob(planV2Dir, artifact),
     }));
   mkdirSync(dirname(destinationDir), { recursive: true });
-  const tempDir = mkdtempSync(join(dirname(destinationDir), ".plan-v2-materialize-"));
+  const tempDir = createStagingDir(dirname(destinationDir), ".plan-v2-materialize-");
   try {
     for (const { artifact, sourcePath } of verified) {
       const destinationPath = join(tempDir, ...artifact.path.split("/"));
