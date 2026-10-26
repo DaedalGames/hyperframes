@@ -168,5 +168,7 @@ export function rulerTickText(
   duration: number,
   majorInterval: number,
 ): string | number {
-  return frameRate ? secondsToFrame(time, frameRate) : formatTimelineTickLabel(time, duration, majorInterval);
+  return frameRate
+    ? secondsToFrame(time, frameRate)
+    : formatTimelineTickLabel(time, duration, majorInterval);
 }
