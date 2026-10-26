@@ -10,6 +10,10 @@ export interface EncoderOptions {
   preset?: string;
   quality?: number;
   bitrate?: string;
+  /** VBV ceiling, e.g. "8M" or "5000k". Rides alongside CRF; libx264 / libx265 / GPU h264 and h265 only. */
+  maxBitrate?: string;
+  /** VBV buffer paired with `maxBitrate`. Defaults to twice `maxBitrate`. */
+  bufferSize?: string;
   pixelFormat?: string;
   /** libvpx-vp9 -cpu-used value. Defaults to the engine VP9 setting. */
   vp9CpuUsed?: number;

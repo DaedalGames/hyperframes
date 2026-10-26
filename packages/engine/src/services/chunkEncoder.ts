@@ -225,6 +225,47 @@ export function lockedGopCodecParams(codec: "h264" | "h265", gopSize: number): s
   return codec === "h264" ? shared : `keyint=${gopSize}:min-keyint=${gopSize}:${shared}`;
 }
 
+/** Frames per keyframe interval: the nearest whole frame, never below one. */
+export function keyframeIntervalToGopSize(fps: Fps, seconds: number): number {
+  return Math.max(1, Math.round(fpsToNumber(fps) * seconds));
+}
+
+const BITRATE_PATTERN = /^(\d+(?:\.\d+)?)([kKmM]?)$/;
+
+function bitrateToBitsPerSecond(value: string): number {
+  const match = BITRATE_PATTERN.exec(value);
+  if (!match) throw new Error(`[chunkEncoder] invalid bitrate ${JSON.stringify(value)}`);
+  const unit = match[2]!.toLowerCase();
+  return Number(match[1]) * (unit === "m" ? 1_000_000 : unit === "k" ? 1_000 : 1);
+}
+
+/**
+ * `-maxrate` / `-bufsize` for the VBV cap, shared by every encoder entry point
+ * so the two arg builders cannot disagree. The cap rides alongside CRF or a
+ * target bitrate. `bufferSize` defaults to twice `maxBitrate`. Throws for codecs
+ * with no cap here: a silently uncapped file would only surface at delivery.
+ */
+export function appendRateCapArgs(
+  args: string[],
+  options: { codec?: string; maxBitrate?: string; bufferSize?: string },
+): void {
+  const { maxBitrate, bufferSize } = options;
+  if (maxBitrate === undefined) {
+    if (bufferSize !== undefined) throw new Error("[chunkEncoder] bufferSize requires maxBitrate");
+    return;
+  }
+  const codec = options.codec ?? "h264";
+  if (codec !== "h264" && codec !== "h265") {
+    throw new Error(`[chunkEncoder] maxBitrate is not supported for codec ${codec}`);
+  }
+  const cap = bitrateToBitsPerSecond(maxBitrate);
+  const buffer = bufferSize !== undefined ? bitrateToBitsPerSecond(bufferSize) : cap * 2;
+  if (cap <= 0 || buffer <= 0) {
+    throw new Error("[chunkEncoder] maxBitrate and bufferSize must be positive");
+  }
+  args.push("-maxrate", String(Math.round(cap)), "-bufsize", String(Math.round(buffer)));
+}
+
 export function buildEncoderArgs(
   options: EncoderOptions,
   inputArgs: string[],
@@ -257,6 +298,7 @@ export function buildEncoderArgs(
   // Without -xerror, ffmpeg ends the video at the first frame file it cannot read and still exits 0.
   const args: string[] = ["-xerror", ...inputArgs, "-r", fpsToFfmpegArg(fps)];
   const shouldUseGpu = useGpu && gpuEncoder !== null;
+  appendRateCapArgs(args, options);
 
   if (codec === "h264" || codec === "h265") {
     if (shouldUseGpu) {

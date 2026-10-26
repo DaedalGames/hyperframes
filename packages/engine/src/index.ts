@@ -191,6 +191,7 @@ export {
   detectGpuEncoder,
   ENCODER_PRESETS,
   getEncoderPreset,
+  keyframeIntervalToGopSize,
   HLS_MASTER_PLAYLIST,
   HLS_VIDEO_PLAYLIST,
   HLS_AUDIO_PLAYLIST,
