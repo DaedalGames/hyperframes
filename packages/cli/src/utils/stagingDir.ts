@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 const TRIES = 5;
 
-/** A fresh private directory in `parent`. Not mkdtemp: on Windows that call fails once its path passes 260 characters. */
+/** A fresh private directory in `parent`; mkdtemp fails past 260 characters on Windows. */
 export function createStagingDir(
   parent: string,
   prefix: string,
