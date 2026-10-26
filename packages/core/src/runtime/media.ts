@@ -319,7 +319,8 @@ const MIN_NATIVE_PLAYBACK_RATE = 1 / 16;
 // Playing media is steered back by rate, not seeked: a seek resets a video's decoder and clicks in sounding audio.
 // Its rate is written only when steering starts or stops: every write costs a frame.
 const MEDIA_STEER = 0.03;
-// Media that starts a cut late closes its lag over one clip at 3%; a bigger lag steers harder, in steps so the rate is written rarely.
+// Media that starts a cut late closes its lag over one clip at 3%; a bigger lag steers harder,
+// in steps so the rate is written rarely.
 const MEDIA_STEER_STEPS: readonly (readonly [lag: number, steer: number])[] = [
   [0.3, 0.25],
   [0.1, 0.1],
