@@ -202,7 +202,7 @@ function bindText(el: Element, cache: ScopeValuesCache): void {
   if (!isScalar(value)) return;
   const text = String(value);
   const prior = boundText.get(el);
-  // The parser extends the node it wrote into as more text arrives; only a node that no longer starts with it was taken over.
+  // The parser extends the node it wrote into; only a node that no longer starts with the text was taken over.
   const scriptOwnsText =
     prior?.text === text &&
     prior.node !== null &&
