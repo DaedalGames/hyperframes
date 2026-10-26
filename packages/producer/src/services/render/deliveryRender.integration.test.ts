@@ -1,10 +1,4 @@
-/**
- * Two real mp4 renders of a noisy video clip: one plain, one with a 2 s keyframe interval and a
- * peak bitrate cap. ffprobe reads the published file, so this proves the options travel from the
- * render config through the orchestrator to the final encode, which the engine test cannot see.
- *
- * Needs Chrome + ffmpeg, so it lives in the integration lane (`scripts/test-classification.mjs`).
- */
+/** Two real mp4 renders, plain and with a keyframe interval and peak cap, probed with ffprobe. Needs Chrome + ffmpeg. */
 
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";

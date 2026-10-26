@@ -1,8 +1,4 @@
-/**
- * Delivery encoder options (`keyframeIntervalSeconds`, `maxBitrate`, `bufferSize`): their
- * fail-fast gate and the one resolved value every encoder path spreads, so the paths cannot
- * disagree about the cap or the keyframe cadence.
- */
+/** Delivery encoder options: their fail-fast gate and the one resolved value every encoder path spreads. */
 
 import { appendRateCapArgs, keyframeIntervalToGopSize } from "@hyperframes/engine";
 import type { Fps } from "@hyperframes/core";
