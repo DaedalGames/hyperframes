@@ -4,6 +4,7 @@ import { STUDIO_PREVIEW_FAR_SCENE_ATTR as FAR } from "../studioPreviewMark";
 type Span = { start: number; end: number } | null;
 
 const HOSTS = `[${SCENE_PART_ATTR}]:not(style, script)`;
+const FLAT_HOSTS = "[data-composition-id] > [data-start]:not(video, audio, img)";
 const OUT_OF_FLOW = new Set(["absolute", "fixed"]);
 
 type Timed = { host: HTMLElement; span: { start: number; end: number } };
@@ -64,11 +65,21 @@ function createLastRender() {
   };
 }
 
+const findHosts = (flat: boolean): HTMLElement[] => {
+  const tagged = Array.from(document.querySelectorAll<HTMLElement>(HOSTS));
+  return tagged.length > 0 || !flat
+    ? tagged
+    : Array.from(document.querySelectorAll<HTMLElement>(FLAT_HOSTS));
+};
+
 /**
  * Preview scenes beyond the playing scene's neighbours stay mounted but skip style, layout and paint,
- * keeping their last rendered size. Only preview bundles tag scene hosts, so renders never skip.
+ * keeping their last rendered size. Only preview bundles tag scene hosts (or ask `skipsFlatClips`), so renders never skip.
  */
-export function createFarSceneSkip(spanOf: (host: Element) => Span): (time: number) => void {
+export function createFarSceneSkip(
+  spanOf: (host: Element) => Span,
+  skipsFlatClips = false,
+): (time: number) => void {
   let hosts: HTMLElement[] | null = null;
   let sheet: HTMLStyleElement | null = null;
   const sizes = new Map<string, string>();
@@ -89,7 +100,8 @@ export function createFarSceneSkip(spanOf: (host: Element) => Span): (time: numb
         far.delete(host);
         continue;
       }
-      const name = host.getAttribute(SCENE_PART_ATTR)!;
+      const name = host.getAttribute(SCENE_PART_ATTR);
+      if (name === null) continue;
       resized ||= sizes.get(name) !== size;
       sizes.set(name, size);
     }
@@ -109,7 +121,7 @@ export function createFarSceneSkip(spanOf: (host: Element) => Span): (time: numb
   };
   return (time) => {
     if (!hosts || hosts.some((host) => !host.isConnected))
-      lastRender.watch((hosts = Array.from(document.querySelectorAll<HTMLElement>(HOSTS))));
+      lastRender.watch((hosts = findHosts(skipsFlatClips)));
     if (hosts.length === 0) return;
     const far = farFrom(timedHosts(hosts), time);
     if (measureLeaving(far) || !sheet?.isConnected) writeSheet();

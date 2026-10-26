@@ -67,6 +67,23 @@ describe("createFarSceneSkip", () => {
     expect(document.head.querySelector("style")).toBeNull();
   });
 
+  it("skips the clips of a film with no scene hosts only when the preview asks", () => {
+    document.body.innerHTML =
+      `<div data-composition-id="main">` +
+      Array.from(
+        { length: 6 },
+        (_, i) => `<div id="c${i}" data-start="${2 * i}" style="position:absolute"></div>`,
+      ).join("") +
+      `<div id="m" data-start="0" style="position:absolute"><b data-start="0"></b></div></div>`;
+    createFarSceneSkip(spanOf)(1);
+    expect(farIds()).toEqual([]);
+    createFarSceneSkip(spanOf, true)(1);
+    expect(farIds()).toEqual(["c2", "c3", "c4", "c5"]);
+    expect(document.head.querySelector("style")?.textContent).toBe(
+      `[${FAR}] { content-visibility: hidden; }`,
+    );
+  });
+
   it("holds a skipped scene at the size it rendered at", () => {
     const [, , s2] = film();
     Object.defineProperty(s2, "offsetWidth", { value: 640 });

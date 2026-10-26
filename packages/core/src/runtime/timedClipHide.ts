@@ -68,6 +68,11 @@ export function skipsHiddenImages(): boolean {
   return document.querySelector(`style[${SKIP_ATTR}]`) !== null;
 }
 
+export function skipsFlatClips(): boolean {
+  const mark = document.querySelector(STUDIO_PREVIEW_MARK);
+  return mark !== null && mark.getAttribute("content") !== STUDIO_PREVIEW_CAPTURE_MODE;
+}
+
 export function hideTimedClipsUntilFirstPass(): void {
   if (typeof document === "undefined") return;
   const parent = document.head ?? document.documentElement;

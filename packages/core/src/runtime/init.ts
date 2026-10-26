@@ -36,6 +36,7 @@ import {
   showClips,
   showHiddenClips,
   defersMedia,
+  skipsFlatClips,
   skipsHiddenImages,
 } from "./timedClipHide";
 import {
@@ -2895,11 +2896,13 @@ export function initSandboxRuntimeModular(): void {
   });
   const hiddenImagesSkipped = skipsHiddenImages();
   const mediaDeferred = defersMedia();
-  const skipFarScenes = createFarSceneSkip((host) =>
-    runtimeElementWindow(host, {
-      timelineRegistry: window.__timelines ?? {},
-      resolver: timingResolverFor(true),
-    }),
+  const skipFarScenes = createFarSceneSkip(
+    (host) =>
+      runtimeElementWindow(host, {
+        timelineRegistry: window.__timelines ?? {},
+        resolver: timingResolverFor(true),
+      }),
+    skipsFlatClips(),
   );
   // A clip's first visible style pass is slow; playing, each hidden clip gets it once just before its start.
   const clipsNeverStyledVisible = new Set<StylableElement>();
