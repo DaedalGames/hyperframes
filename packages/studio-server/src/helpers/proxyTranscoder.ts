@@ -575,7 +575,7 @@ const VP8_ARGS = [
 ];
 
 function streamMaps(metadata: MediaMetadata): string[] {
-  if (metadata.probeError) return [];
+  if (metadata.probeError || metadata.kind !== "video") return [];
   const audio = metadata.audioTrack === undefined ? [] : ["-map", `0:a:${metadata.audioTrack}`];
   return ["-map", "0:V:0?", ...audio];
 }
