@@ -206,17 +206,12 @@ describe("WebAudioTransport", () => {
       expect(mock.ctx.createMediaElementSource).toHaveBeenCalledTimes(1);
     });
 
-    it("re-aims FX automation on a global-rate change without resampling the native source", async () => {
+    it("does not resample the native source on a global-rate change", async () => {
       const { transport, mock, gen } = setupTransport(100);
       await transport.scheduleMediaElementPlayback(mockEl, 0, 0, 0, 1, gen, 1);
-      const active = (transport as unknown as { _activeSources: { fx?: unknown }[] })
-        ._activeSources;
-      const setRate = vi.fn();
-      active[0]!.fx = { dispose: vi.fn(), setRate };
 
       transport.setRate(2);
 
-      expect(setRate).toHaveBeenCalledWith(2);
       expect(mock.ctx.createBufferSource).not.toHaveBeenCalled();
     });
 
@@ -1082,12 +1077,18 @@ describe("WebAudioTransport", () => {
         ]);
       });
 
-      it("re-aims a clip's lane at a new rate", async () => {
-        const { transport, laneGain } = await playBed(FADE);
+      it("re-aims a clip's lane at a new rate when its element takes it, not before", async () => {
+        const { transport, el, laneGain } = await playBed(FADE);
         expect(rampsAfter(laneGain, 0)).toContainEqual([1, 103]);
         const before = param(laneGain).linearRampToValueAtTime.mock.calls.length;
 
         transport.setRate(2);
+        expect(rampsAfter(laneGain, before)).toEqual([]);
+        Object.defineProperties(el, {
+          paused: { value: false, configurable: true },
+          playbackRate: { value: 2, configurable: true },
+        });
+        el.dispatchEvent(new Event("ratechange"));
 
         expect(rampsAfter(laneGain, before)).toContainEqual([1, 101.5]);
       });
@@ -1209,6 +1210,19 @@ describe("WebAudioTransport", () => {
           at(100.3, 8.3, 1.03);
           el.dispatchEvent(new Event("ratechange"));
           expect(peakAfter(laneGain, before)).toBeCloseTo(100.3 + 2.7 / 1.03, 9);
+        });
+
+        it("books a looping element's lane on the pass the transport is in", async () => {
+          const { el, laneGain, at } = await routeTake();
+          Object.defineProperties(el, {
+            loop: { value: true, configurable: true },
+            duration: { value: 10, configurable: true },
+          });
+          const before = param(laneGain).linearRampToValueAtTime.mock.calls.length;
+          at(102.2, 8.1);
+          el.dispatchEvent(new Event("playing"));
+
+          expect(peakAfter(laneGain, before)).toBeCloseTo(103.1, 9);
         });
 
         it("leaves the lane alone while the element is paused and once the clip is stopped", async () => {
@@ -1946,9 +1960,9 @@ describe("WebAudioTransport clip fades on the audio clock", () => {
     expect(gains[0]!.gain.value).toBeCloseTo(0.4, 9);
   });
 
-  it("a rate change rebooks the fades on the new rate from where the clip is", async () => {
+  it("a rate change rebooks a decoded clip's fades on the new rate from where the clip is", async () => {
     const { transport, mock, gen, booked } = setup(100);
-    await transport.scheduleMediaElementPlayback(faded("0.02", "1"), 5, 0, 5, 1, gen, 2, 10);
+    await transport.schedulePlayback(faded("0.02", "1"), mockBuffer, 5, 0, () => 5, 1, gen, 2, 10);
     const gain = booked()!;
     mock.ctx.currentTime = 101;
     transport.setRate(1);
