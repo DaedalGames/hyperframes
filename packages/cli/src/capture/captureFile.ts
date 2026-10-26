@@ -1,14 +1,7 @@
-import {
-  mkdirSync,
-  mkdtempSync,
-  realpathSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { CaptureDirRefusedError } from "./captureErrors.js";
+import { createStagingDir } from "../utils/stagingDir.js";
 
 type WriteOptions = Parameters<typeof writeFileSync>[2];
 
@@ -25,7 +18,7 @@ function publishCaptureFileSync(
   data: string | NodeJS.ArrayBufferView,
   options: Exclude<WriteOptions, string>,
 ): void {
-  const stagingDir = mkdtempSync(join(dirname(path), ".capture-"));
+  const stagingDir = createStagingDir(dirname(path), ".capture-");
   try {
     const staged = join(stagingDir, basename(path));
     writeCaptureFileSync(staged, data, { ...options, flag: "wx" });

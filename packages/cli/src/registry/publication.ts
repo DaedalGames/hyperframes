@@ -1,6 +1,7 @@
-import { lstatSync, chmodSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { lstatSync, chmodSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { mkdirWithinProject, realpath } from "@hyperframes/core";
+import { createStagingDir } from "../utils/stagingDir.js";
 
 export { realProjectRoot as registryRoot } from "@hyperframes/core";
 
@@ -46,7 +47,7 @@ export function publishRegistryFile(
   const parent = realpath(dirname(path));
   assertContained(root, parent);
   const destination = resolve(parent, basename(path));
-  const stage = mkdtempSync(join(parent, ".hf-install-"));
+  const stage = createStagingDir(parent, ".hf-install-");
   try {
     const stagedFile = join(stage, "file");
     writeFileSync(stagedFile, bytes, { flag: "wx" });
