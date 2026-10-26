@@ -620,7 +620,9 @@ async function handleRenderChunk(
   const started = Date.now();
   const s3 = deps?.s3 ?? getS3Client();
   const primitive = deps?.primitives?.renderChunk ?? renderChunk;
+  const chromeStarted = Date.now();
   await ensureChromePath(deps);
+  const chromeMs = Date.now() - chromeStarted;
 
   const work = mkdtempSync(join(deps?.tmpRoot ?? tmpdir(), "hf-lambda-chunk-"));
   const planTar = join(work, "plan.tar.gz");
@@ -655,7 +657,7 @@ async function handleRenderChunk(
       chunkIndex: event.ChunkIndex,
       workers: result.workers,
       captureMode: result.captureMode,
-      ...chunkStageTimings(result, primitiveStarted - started),
+      ...chunkStageTimings(result, primitiveStarted - started, chromeMs),
     });
 
     const chunkUri = await uploadChunkOutput(
@@ -689,7 +691,9 @@ async function handleRenderChunkV2(
   const started = Date.now();
   const s3 = deps?.s3 ?? getS3Client();
   const primitive = deps?.primitives?.renderChunk ?? renderChunk;
+  const chromeStarted = Date.now();
   await ensureChromePath(deps);
+  const chromeMs = Date.now() - chromeStarted;
   const work = mkdtempSync(join(deps?.tmpRoot ?? tmpdir(), "hf-lambda-chunk-v2-"));
   try {
     const { planDir } = await downloadAndMaterializePlanV2(
@@ -714,7 +718,7 @@ async function handleRenderChunkV2(
       chunkIndex: event.ChunkIndex,
       workers: result.workers,
       captureMode: result.captureMode,
-      ...chunkStageTimings(result, primitiveStarted - started),
+      ...chunkStageTimings(result, primitiveStarted - started, chromeMs),
     });
     const chunkUri = await uploadChunkOutput(
       s3,
@@ -736,9 +740,17 @@ async function handleRenderChunkV2(
   }
 }
 
-function chunkStageTimings(result: ChunkResult, setupMs: number) {
+function chunkStageTimings(result: ChunkResult, setupMs: number, chromeMs: number) {
   const { planHashMs, sessionBootMs, captureStageMs, encodeStageMs, durationMs } = result;
-  return { setupMs, planHashMs, sessionBootMs, captureStageMs, encodeStageMs, durationMs };
+  return {
+    setupMs,
+    chromeMs,
+    planHashMs,
+    sessionBootMs,
+    captureStageMs,
+    encodeStageMs,
+    durationMs,
+  };
 }
 
 async function uploadChunkOutput(

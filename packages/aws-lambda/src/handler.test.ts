@@ -782,6 +782,7 @@ describe("handler dispatch", () => {
       workers: 5,
       captureMode: "beginframe",
       setupMs: expect.any(Number),
+      chromeMs: expect.any(Number),
       planHashMs: 1,
       sessionBootMs: 1,
       captureStageMs: 1,
