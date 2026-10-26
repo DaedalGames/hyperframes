@@ -376,7 +376,6 @@ export {
 export { createRuntimeStartTimeResolver } from "./runtime/startResolver.js";
 // Also exposed via the ./runtime/clip-window subpath; re-exported here for the same dist-emit reason.
 export { hasClipStarted, isClipVisibleAt, isInClipWindow } from "./runtime/clipWindow.js";
-// Also exposed via the ./runtime/media-clock subpath; re-exported here for the same dist-emit reason.
 export { mediaElementTime } from "./runtime/mediaClock.js";
 export {
   normalizePlaybackRate,

@@ -3,7 +3,8 @@ import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import { mediaElementTime } from "./mediaClock";
 
-// What Chrome does with the value: stores currentTime as whole microseconds, truncated.
+// Chrome stores currentTime as whole microseconds, truncated (WebMediaPlayerImpl::Seek -> base::Seconds), while frame
+// starts round to the microsecond, so a seek to an exact frame instant can show the previous frame.
 const storedMicroseconds = (seconds: number) => Math.trunc(seconds * 1e6);
 
 describe("mediaElementTime", () => {
@@ -28,6 +29,11 @@ describe("mediaElementTime", () => {
     expect(storedMicroseconds(mediaElementTime(4.3 + local))).toBeGreaterThanOrEqual(
       Math.round((130 / 30) * 1e6),
     );
+  });
+
+  it("runs from its own source, as the generator's inline script embeds it", () => {
+    const embedded = new Function(`${mediaElementTime}; return mediaElementTime(2 / 30);`);
+    expect(embedded()).toBe(mediaElementTime(2 / 30));
   });
 
   it("is what a raw seek to an exact frame instant is not", () => {
