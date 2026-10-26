@@ -2148,7 +2148,7 @@ describe("syncRuntimeMedia", () => {
         const clip = playingVideoAt(4.85, 1, "audio");
         tickDipping(clip, 5, false);
         tickDipping(clip, 5, false);
-        expect(clip.el.currentTime).toBe(5);
+        expect(clip.el.currentTime).toBe(mediaElementTime(5));
       });
 
       it("leaves video on its steps", () => {
