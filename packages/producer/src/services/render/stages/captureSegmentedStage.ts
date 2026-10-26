@@ -291,10 +291,8 @@ function defaultSessionFactory(input: CaptureSegmentedStageInput): SessionFactor
   let probeSession = input.probeSession;
   return {
     create: async () => {
-      // A probe that left frames to a screenshot session (deRiskFrames) throws on the first of
-      // them here: segments capture every frame on one session and cannot hand any over. A fresh
-      // segmented session (deFrameFallback: false) keeps the whole-render fallback instead.
-      if (probeSession?.deRiskFrames?.size) {
+      const probeCannotCaptureEveryFrame = Boolean(probeSession?.deRiskFrames?.size);
+      if (probeSession && probeCannotCaptureEveryFrame) {
         await closeCaptureSession(probeSession).catch(() => {});
         probeSession = null;
       }
