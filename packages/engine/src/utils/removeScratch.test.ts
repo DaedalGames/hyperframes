@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -9,7 +9,8 @@ vi.mock("node:fs", async (importOriginal) => {
 });
 
 import * as fs from "node:fs";
-import { removeScratch } from "./removeScratch.js";
+import { removeScratch, takeScratchLeftovers } from "./removeScratch.js";
+import { renameWithRetry } from "./renameWithRetry.js";
 
 describe("removeScratch", () => {
   it("removes a folder and what is in it", () => {
@@ -24,5 +25,22 @@ describe("removeScratch", () => {
       throw Object.assign(new Error("EPERM: operation not permitted, unlink"), { code: "EPERM" });
     });
     expect(() => removeScratch(join(tmpdir(), "hf-scratch-missing"))).not.toThrow();
+  });
+
+  it("reports what it could not remove once, and a copy that cannot clear its source leaves it", () => {
+    const refuse = () => {
+      throw Object.assign(new Error("EPERM: operation not permitted, unlink"), { code: "EPERM" });
+    };
+    const dir = mkdtempSync(join(tmpdir(), "hf-scratch-"));
+    const from = join(dir, "from.wav");
+    const to = join(dir, "to.wav");
+    writeFileSync(from, "audio");
+    takeScratchLeftovers();
+    vi.mocked(fs.rmSync).mockImplementationOnce(refuse);
+    renameWithRetry(from, to, { platform: "win32", rename: refuse });
+    expect(readFileSync(to, "utf-8")).toBe("audio");
+    expect(existsSync(from)).toBe(true);
+    expect(takeScratchLeftovers()).toEqual([from]);
+    expect(takeScratchLeftovers()).toEqual([]);
   });
 });

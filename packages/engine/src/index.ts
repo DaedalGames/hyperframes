@@ -396,7 +396,7 @@ export {
 
 export { trackChildProcess, killTrackedProcesses } from "./utils/processTracker.js";
 export { renameWithRetry, renameWithRetryAsync } from "./utils/renameWithRetry.js";
-export { removeScratch } from "./utils/removeScratch.js";
+export { removeScratch, takeScratchLeftovers } from "./utils/removeScratch.js";
 
 // drawElement self-verify comparison — shared by the streaming drain
 // (producer) and the parallel disk-path verify (parallelCoordinator).

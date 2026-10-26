@@ -24,6 +24,7 @@ import {
   audioFailureDiagnostics,
   processCompositionAudio,
   removeScratch,
+  takeScratchLeftovers,
   type AudioProcessingFailure,
   type MixResult,
 } from "@hyperframes/engine";
@@ -112,6 +113,8 @@ export async function runAudioStage(input: AudioStageInput): Promise<AudioStageR
     return { ...result, audioLoweredDb, audioProcessMs: Date.now() - stageStart };
   } finally {
     removeScratch(pcmSourcePath);
+    const left = takeScratchLeftovers();
+    if (left.length > 0) input.log?.warn("[audio] scratch left behind", { count: left.length });
   }
 }
 
