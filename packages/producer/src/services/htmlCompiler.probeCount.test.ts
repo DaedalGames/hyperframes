@@ -22,6 +22,7 @@ describe("compileForRender media probes", () => {
   const projectDir = mkdtempSync(join(tmpdir(), "hf-compiler-probe-count-"));
   const mediaDir = mkdtempSync(join(tmpdir(), "hf-compiler-probe-media-"));
   const logPath = join(projectDir, "ffprobe.log");
+  const sourceFiles = new Map<string, string>();
   let server: Server;
   let origin = "";
   const savedProbePath = process.env.HYPERFRAMES_FFPROBE_PATH;
@@ -44,6 +45,7 @@ describe("compileForRender media probes", () => {
         { encoding: "utf8" },
       );
       if (made.status !== 0) throw new Error(made.stderr || "failed to create fixture");
+      sourceFiles.set(`s${i}.mp4`, join(mediaDir, `s${i}.mp4`));
     }
     for (let n = 0; n < SCENES; n++) {
       writeFileSync(
@@ -52,7 +54,11 @@ describe("compileForRender media probes", () => {
       );
     }
     server = createServer((req, res) => {
-      const file = join(mediaDir, (req.url ?? "").split("?")[0]!.slice(1));
+      const file = sourceFiles.get((req.url ?? "").split("?")[0]!.slice(1));
+      if (!file) {
+        res.writeHead(404).end();
+        return;
+      }
       const size = statSync(file).size;
       const range = /bytes=(\d+)-(\d*)/.exec(req.headers.range ?? "");
       const start = range ? Number(range[1]) : 0;
@@ -80,7 +86,7 @@ describe("compileForRender media probes", () => {
   afterAll(() => {
     if (savedProbePath === undefined) delete process.env.HYPERFRAMES_FFPROBE_PATH;
     else process.env.HYPERFRAMES_FFPROBE_PATH = savedProbePath;
-    server.close();
+    server?.close();
     rmSync(projectDir, { recursive: true, force: true });
     rmSync(mediaDir, { recursive: true, force: true });
   });
