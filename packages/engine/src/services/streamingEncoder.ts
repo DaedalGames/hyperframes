@@ -162,9 +162,7 @@ export interface StreamingEncoderOptions {
   preset?: string;
   quality?: number;
   bitrate?: string;
-  /** See `EncoderOptions.maxBitrate`. */
   maxBitrate?: string;
-  /** See `EncoderOptions.bufferSize`. */
   bufferSize?: string;
   pixelFormat?: string;
   /** libvpx-vp9 -cpu-used value. Defaults to the engine VP9 setting. */
