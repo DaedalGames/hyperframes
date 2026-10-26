@@ -346,7 +346,6 @@ interface BeginFrameProbeResult {
   supported: boolean;
   detail: string;
   durationMs: number;
-  /** The budget ran out before an answer: a slow launch, not evidence the browser lacks BeginFrame. */
   timedOut?: boolean;
 }
 
@@ -502,7 +501,6 @@ async function probeBeginFrameSupport(
       );
     }
     if (!isPng) {
-      // Empty frames until the deadline is a renderer that never got going; bytes that are not a PNG are an answer.
       const Failure = bytes.length === 0 ? BeginFrameProbeTimeout : Error;
       throw new Failure(
         `beginFrame screenshot returned ${bytes.length} bytes after ` +
@@ -918,7 +916,6 @@ async function launchBrowser(
     if (captureMode === "beginframe") {
       let result = await probe(browser);
       if (!result.supported && result.timedOut) {
-        // A slow launch is not a verdict on the browser: one fresh launch with a longer budget first.
         console.warn(
           `[BrowserManager] HeadlessExperimental.beginFrame probe timed out after ${result.durationMs}ms: ` +
             `${result.detail}; retrying once with a longer budget.`,
