@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   _setSparticuzChromiumForTests,
+  pageInFile,
   ChromeBinaryUnavailableError,
   resolveChromeArgs,
   resolveChromeExecutablePath,
@@ -189,5 +190,17 @@ describe("resolveChromeExecutablePath", () => {
     await expect(resolveChromeExecutablePath()).rejects.toBeInstanceOf(
       ChromeBinaryUnavailableError,
     );
+  });
+});
+
+describe("pageInFile", () => {
+  it("reads the whole file and reports its size", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hf-pagein-"));
+    try {
+      writeFileSync(join(dir, "f"), Buffer.alloc(5_000_000, 1));
+      expect(await pageInFile(join(dir, "f"))).toBe(5_000_000);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

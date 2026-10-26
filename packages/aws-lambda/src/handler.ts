@@ -43,7 +43,7 @@ import {
   type RemoteProjectFile,
   renderChunk,
 } from "@hyperframes/producer/distributed";
-import { resolveChromeExecutablePath } from "./chromium.js";
+import { pageInFile, resolveChromeExecutablePath } from "./chromium.js";
 import { stitchMp4InS3 } from "./s3Stitch.js";
 import { type DistributedFormat, formatExtension } from "./formatExtension.js";
 import type {
@@ -124,6 +124,8 @@ export async function handler(event: LambdaEvent, deps?: HandlerDeps): Promise<L
   if ((event as { Action?: unknown }).Action === "warm") {
     primeRuntimeEnv();
     await ensureChromePath(deps);
+    const chrome = process.env.PRODUCER_HEADLESS_SHELL_PATH;
+    if (chrome && !deps?.skipChromeResolution) await pageInFile(chrome);
     return { Action: "warm" };
   }
   const unwrapped = unwrapEvent(event);

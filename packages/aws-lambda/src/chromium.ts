@@ -32,7 +32,7 @@
  * (e.g. the SAM-local RIE smoke).
  */
 
-import { existsSync } from "node:fs";
+import { createReadStream, existsSync } from "node:fs";
 import { join } from "node:path";
 
 /** Discriminator for the two supported Chrome sources. */
@@ -185,4 +185,16 @@ async function loadSparticuzChromium(): Promise<SparticuzChromiumModule> {
 /** Test-only seam: replace the cached `@sparticuz/chromium` module. */
 export function _setSparticuzChromiumForTests(mod: SparticuzChromiumModule | null): void {
   cachedSparticuz = mod;
+}
+
+/**
+ * Reads the whole file so a lazily loaded image has all its blocks cached before the first
+ * render; the first Chrome launch otherwise runs past the beginFrame probe's window.
+ */
+export async function pageInFile(path: string): Promise<number> {
+  let bytes = 0;
+  for await (const chunk of createReadStream(path, { highWaterMark: 1 << 22 })) {
+    bytes += (chunk as Buffer).length;
+  }
+  return bytes;
 }
