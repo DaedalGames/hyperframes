@@ -18,12 +18,12 @@
  */
 
 import { join } from "node:path";
-import { rmSync } from "node:fs";
 import type { Fps } from "@hyperframes/core";
 import {
   MIXED_AUDIO_FILENAME,
   audioFailureDiagnostics,
   processCompositionAudio,
+  removeScratch,
   type AudioProcessingFailure,
   type MixResult,
 } from "@hyperframes/engine";
@@ -111,7 +111,7 @@ export async function runAudioStage(input: AudioStageInput): Promise<AudioStageR
     }
     return { ...result, audioLoweredDb, audioProcessMs: Date.now() - stageStart };
   } finally {
-    rmSync(pcmSourcePath, { force: true });
+    removeScratch(pcmSourcePath);
   }
 }
 
