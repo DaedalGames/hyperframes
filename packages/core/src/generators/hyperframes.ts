@@ -11,6 +11,7 @@ import type { GsapAnimation } from "@hyperframes/parsers";
 import { serializeGsapAnimations, keyframesToGsapAnimations } from "@hyperframes/parsers";
 import { GSAP_CDN, BASE_STYLES, ZOOM_CONTAINER_STYLES } from "../templates/constants";
 import { COMPOSITION_ATTRIBUTES } from "../compositionContract.js";
+import { mediaElementTime } from "../runtime/mediaClock";
 
 function escapeHtmlAttributeValue(value: string): string {
   return value
@@ -832,6 +833,7 @@ function generateDefaultGsapAnimations(
     mediaElements.length > 0
       ? `
     // Sync media playback
+    ${mediaElementTime}
     tl.eventCallback("onUpdate", function() {
       const time = tl.time();
       document.querySelectorAll("video[data-start], audio[data-start]").forEach(function(media) {
@@ -840,7 +842,7 @@ function generateDefaultGsapAnimations(
         const mediaTime = time - start;
         if (time >= start && time < end) {
           if (Math.abs(media.currentTime - mediaTime) > 0.1) {
-            media.currentTime = mediaTime;
+            media.currentTime = mediaElementTime(mediaTime);
           }
           if (media.paused && !tl.paused()) {
             media.play().catch(function() {});

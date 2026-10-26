@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { mediaElementTime } from "./mediaClock";
 import { initSandboxRuntimeModular } from "./init";
 import { createMockTimeline, resetRuntimeFixtureDom } from "./runtimeSeekFixture.test-helpers";
 
@@ -94,7 +95,7 @@ describe.each([
     seeks.length = 0;
     player.play();
     step(3);
-    expect(seeks).toEqual([atFive]);
+    expect(seeks).toEqual([mediaElementTime(atFive)]);
     expect(video.currentTime).toBeCloseTo(atFive + 0.3 * rate, 5);
   });
 
@@ -106,7 +107,7 @@ describe.each([
     player.seek(5.5, { keepPlaying: true });
     step(3);
     expect(player.isPlaying()).toBe(true);
-    expect(seeks).toEqual([atFiveAndAHalf]);
+    expect(seeks).toEqual([mediaElementTime(atFiveAndAHalf)]);
     expect(video.currentTime).toBeCloseTo(atFiveAndAHalf + 0.3 * rate, 5);
   });
 });
@@ -159,7 +160,7 @@ describe("pause placement", () => {
     seeks.length = 0;
     player.pause();
     step(3);
-    expect(seeks).toEqual([0.3]);
+    expect(seeks).toEqual([mediaElementTime(0.3)]);
   });
 });
 
