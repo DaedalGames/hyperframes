@@ -70,6 +70,7 @@ const mockEl = {
   volume: 0.4,
   paused: true,
   addEventListener: () => {},
+  removeEventListener: () => {},
   getAttribute: (name: string) => (name === "data-playback-rate" ? "1" : null),
 } as unknown as HTMLMediaElement;
 
@@ -1150,6 +1151,82 @@ describe("WebAudioTransport", () => {
         );
         await settle();
         expect(rampsAfter(fader, before)).toContainEqual([0.25, 102]);
+      });
+
+      describe("a routed clip's lane and fades follow its element", () => {
+        // Routed at context 100, 0.1 s before its window opens at timeline 4 and source 8.
+        async function routeTake(extra: Record<string, string> = {}) {
+          const setup = setupGroupTransport();
+          const el = groupedAudioEl("take");
+          el.setAttribute("data-automation", FADE);
+          for (const [name, value] of Object.entries(extra)) el.setAttribute(name, value);
+          await setup.transport.scheduleMediaElementPlayback(el, 4, 8, 3.9, 1, setup.gen, 1, 2);
+          const [laneGain, fadeGain] = [setup.mock.gainNodes[1]!, setup.mock.gainNodes[3]];
+          const at = (ctxTime: number, currentTime: number, playbackRate = 1, paused = false) => {
+            setup.mock.ctx.currentTime = ctxTime;
+            Object.defineProperties(el, {
+              currentTime: { value: currentTime, configurable: true },
+              playbackRate: { value: playbackRate, configurable: true },
+              paused: { value: paused, configurable: true },
+            });
+          };
+          return { ...setup, el, laneGain, fadeGain, at };
+        }
+        const peakAfter = (node: { gain: unknown }, from: number) =>
+          rampsAfter(node, from).find(([value]) => value === 1)?.[1];
+
+        it("books the lane where the element starts sounding, not where the clock put it", async () => {
+          const { el, laneGain, at } = await routeTake();
+          expect(peakAfter(laneGain, 0)).toBeCloseTo(103.1, 9);
+
+          const before = param(laneGain).linearRampToValueAtTime.mock.calls.length;
+          at(100.155, 8);
+          el.dispatchEvent(new Event("playing"));
+
+          expect(peakAfter(laneGain, before)).toBeCloseTo(103.155, 9);
+        });
+
+        it("re-books the fades from the element too", async () => {
+          const { el, fadeGain, at } = await routeTake({ "data-fade-out": "0.03" });
+          expect(rampsAfter(fadeGain!, 0).at(-1)).toEqual([0, expect.closeTo(102.1, 9)]);
+
+          const before = param(fadeGain!).linearRampToValueAtTime.mock.calls.length;
+          at(100.155, 8);
+          el.dispatchEvent(new Event("playing"));
+
+          expect(rampsAfter(fadeGain!, before).at(-1)).toEqual([0, expect.closeTo(102.155, 9)]);
+        });
+
+        it("re-books the lane after the element is seeked and when its rate is steered", async () => {
+          const { el, laneGain, at } = await routeTake();
+          let before = param(laneGain).linearRampToValueAtTime.mock.calls.length;
+          at(100.2, 8.2);
+          el.dispatchEvent(new Event("seeked"));
+          expect(peakAfter(laneGain, before)).toBeCloseTo(103, 9);
+
+          before = param(laneGain).linearRampToValueAtTime.mock.calls.length;
+          at(100.3, 8.3, 1.03);
+          el.dispatchEvent(new Event("ratechange"));
+          expect(peakAfter(laneGain, before)).toBeCloseTo(100.3 + 2.7 / 1.03, 9);
+        });
+
+        it("leaves the lane alone while the element is paused and once the clip is stopped", async () => {
+          const { transport, el, laneGain, fadeGain, at } = await routeTake({
+            "data-fade-out": "0.03",
+          });
+          const booked = () =>
+            [laneGain, fadeGain!].map(
+              (node) => param(node).linearRampToValueAtTime.mock.calls.length,
+            );
+          const before = booked();
+          at(100.2, 8, 1, true);
+          el.dispatchEvent(new Event("seeked"));
+          transport.stopAll();
+          at(100.3, 8.1);
+          el.dispatchEvent(new Event("playing"));
+
+          expect(booked()).toEqual(before);
+        });
       });
     });
 
