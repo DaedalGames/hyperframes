@@ -18,7 +18,7 @@ import { createLevelTap, type LevelTap, type StereoLevel } from "./levelTap.js";
 import { clampAudioGain } from "../audioGain.js";
 import { getDebugSurface } from "./globals.js";
 import { readElementPlaybackRate, readElementRateSpec } from "./media.js";
-import { rateAt, timeAtSourceTime } from "../speedRamp.js";
+import { rateAt, sourceTimeAt, timeAtSourceTime } from "../speedRamp.js";
 import { classifyWebAudioMediaRoute, reportWebAudioMediaRoute } from "./webAudioRoute.js";
 import { assetUrl } from "./assetUrl.js";
 import { clampFadesToDuration, fadeGain, readElementFades } from "../audioFade.js";
@@ -556,8 +556,7 @@ export class WebAudioTransport {
         priorVolume: el.volume,
         mediaPlaybackRate: readElementPlaybackRate(el),
         bounded: false,
-        // ponytail: a looping element's position wraps, so its lane stays on the context clock.
-        unfollow: el.loop ? undefined : this.followElement(el, mediaStart, fx, fades),
+        unfollow: this.followElement(el, compositionStart, mediaStart, fx, fades),
       };
       // Chrome applies HTMLMediaElement.volume before MediaElementAudioSource.
       // Keep that upstream stage at unity so the existing downstream gain is
@@ -578,6 +577,7 @@ export class WebAudioTransport {
    */
   private followElement(
     el: HTMLMediaElement,
+    compositionStart: number,
     mediaStart: number,
     fx: ElementFxHandle | null,
     fades: BookedFades | null,
@@ -585,8 +585,16 @@ export class WebAudioTransport {
     const retime = () => {
       if (el.paused || !this._ctx) return;
       const spec = readElementRateSpec(el);
-      const elapsed = timeAtSourceTime(spec, el.currentTime - mediaStart);
+      let source = el.currentTime - mediaStart;
+      const loopLength = el.duration - mediaStart;
+      // A looping element's position wraps: it is on the pass nearest where the transport expects it.
+      if (el.loop && loopLength > 0) {
+        const expected = sourceTimeAt(spec, this.getTime() - compositionStart);
+        source += Math.round((expected - source) / loopLength) * loopLength;
+      }
+      const elapsed = timeAtSourceTime(spec, source);
       const rate = el.playbackRate / rateAt(spec, elapsed);
+      // Stopped at rate 0, or with no position yet: no audio moves, so there is nothing to aim at.
       if (!(rate > 0) || !Number.isFinite(elapsed)) return;
       const timing: AutomationTiming = { scheduledAt: this._ctx.currentTime, elapsed, rate };
       fx?.retime(timing);
@@ -1005,7 +1013,7 @@ export class WebAudioTransport {
    * start in the future keep their original wallclock start time — callers
    * that need rate-correct future starts should `stopAll()` and reschedule.
    *
-   * Each source's FX automation is re-aimed too. Lanes are committed to
+   * Each decoded source's FX automation is re-aimed too. Lanes are committed to
    * absolute context times when the source is scheduled, so bumping only
    * `playbackRate` left every automated parameter running its original plan
    * over audio moving at a different speed. The `stopAll()`+reschedule recovery
@@ -1021,11 +1029,11 @@ export class WebAudioTransport {
       this._rateAnchorCtx = this._ctx.currentTime;
     }
     this._rate = safeRate;
+    // A routed element is not touched: its rate change re-aims its own lane and fades (`followElement`).
     for (const source of this._activeSources) {
+      if (!isBufferSource(source)) continue;
       try {
-        if (isBufferSource(source)) {
-          source.sourceNode.playbackRate.value = safeRate * source.mediaPlaybackRate;
-        }
+        source.sourceNode.playbackRate.value = safeRate * source.mediaPlaybackRate;
         source.fx?.setRate(safeRate);
         if (this._ctx && !this._paused)
           source.fades?.rebook({
