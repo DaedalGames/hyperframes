@@ -1,4 +1,4 @@
-/** Two real mp4 renders, plain and with a keyframe interval and peak cap, probed with ffprobe. Needs Chrome + ffmpeg. */
+/** Two real mp4 renders, plain and with a keyframe interval and peak cap (ffprobe). Needs Chrome + ffmpeg. */
 
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
