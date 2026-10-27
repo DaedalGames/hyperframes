@@ -31,7 +31,7 @@ const tagged = (url: string) => {
   return withId.toString();
 };
 
-const DOWNLOAD = "https://hyperframes.dev/studio/download";
+const DOWNLOAD = "https://hyperframes.studio/studio/download";
 let mounted: { root: Root; host: HTMLElement } | null = null;
 let posts: number;
 let postBodies: unknown[];
