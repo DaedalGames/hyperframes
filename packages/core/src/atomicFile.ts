@@ -156,7 +156,6 @@ function writeTempSibling(
   }
 }
 
-/** renameSync onto `to`, again after short waits while Windows briefly holds the target open. */
 export function renameWithRetry(
   from: string,
   to: string,
