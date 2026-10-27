@@ -242,16 +242,16 @@ Preview instantly in the browser. Render locally or in Docker. The renderer seek
 
 HyperFrames is the open-source rendering engine, plus a growing set of tools around HTML-native video creation.
 
-| Piece                                           | Status              | What it does                                                                                      |
-| ----------------------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------- |
-| CLI                                             | Available           | Scaffold, preview, lint, inspect, and render local video projects                                 |
-| Core / Engine / Producer                        | Available           | Parse compositions, drive headless Chrome, encode video, and mix audio                            |
-| Catalog                                         | Available           | Reusable blocks and components for transitions, overlays, captions, charts, maps, and effects     |
-| Agent skills                                    | Available           | Teach coding agents the video-production patterns that generic web docs miss                      |
-| Studio                                          | Available, evolving | Browser surface for previewing and editing compositions                                           |
-| AWS Lambda rendering                            | Available           | Deploy a distributed render stack and drive renders from your laptop or CI                        |
+| Piece                                             | Status              | What it does                                                                                      |
+| ------------------------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------- |
+| CLI                                               | Available           | Scaffold, preview, lint, inspect, and render local video projects                                 |
+| Core / Engine / Producer                          | Available           | Parse compositions, drive headless Chrome, encode video, and mix audio                            |
+| Catalog                                           | Available           | Reusable blocks and components for transitions, overlays, captions, charts, maps, and effects     |
+| Agent skills                                      | Available           | Teach coding agents the video-production patterns that generic web docs miss                      |
+| Studio                                            | Available, evolving | Browser surface for previewing and editing compositions                                           |
+| AWS Lambda rendering                              | Available           | Deploy a distributed render stack and drive renders from your laptop or CI                        |
 | [hyperframes.studio](https://hyperframes.studio/) | Available           | Community playground for previewing, iterating, sharing, and rendering HTML-native video projects |
-| [frame.md](https://hyperframes.studio/design)  | Available           | Invert your design system for the camera — a DESIGN.md superset an agent can compose video from   |
+| [frame.md](https://hyperframes.studio/design)     | Available           | Invert your design system for the camera — a DESIGN.md superset an agent can compose video from   |
 
 ## Catalog
 
