@@ -13,7 +13,6 @@ const ALLOWED = new Set([
   "cli/src/media-use/lib/lut-preset-provider.mjs",
   "producer/src/server.ts",
   "producer/src/regression-harness.ts",
-  "producer/src/services/render/renderDirOwner.ts",
   "aws-lambda/src/s3PlanV2Publisher.ts",
   "gcp-cloud-run/src/gcsPlanV2Publisher.ts",
 ]);
