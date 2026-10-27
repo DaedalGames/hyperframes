@@ -146,3 +146,19 @@ it("a probe browser that fails surfaces its own error and the chunk is not retri
   expect(await render().catch((error: unknown) => error)).toBe(failure);
   expect(stage.calls).toHaveLength(1);
 });
+
+it("a worker that fails before the probe settles waits for it before any retry", async () => {
+  const failure = new Error("software GL required");
+  let failProbe!: () => void;
+  distributedCaptureSessionDependencies.assertSwiftShader = () =>
+    new Promise<void>((_, reject) => (failProbe = () => reject(failure)));
+  stage.run = async (call) => {
+    if (call === 1) {
+      setImmediate(() => failProbe());
+      throw new Error("[Parallel] Capture failed: worker 0: HeadlessExperimental.beginFrame boom");
+    }
+    throw STOP;
+  };
+  expect(await render().catch((error: unknown) => error)).toBe(failure);
+  expect(stage.calls).toHaveLength(1);
+});

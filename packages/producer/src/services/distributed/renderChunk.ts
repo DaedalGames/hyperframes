@@ -374,7 +374,7 @@ export function shouldRetryChunkCaptureWithScreenshot(error: unknown): boolean {
 export async function runCaptureWithScreenshotFallback<T>(input: {
   forceScreenshot: boolean;
   /** A failure that is not capture's (the probe's own) is never retried. */
-  canRetry?: () => boolean;
+  canRetry?: () => boolean | Promise<boolean>;
   run: (forceScreenshot: boolean) => Promise<T>;
   resetForScreenshotRetry: () => Promise<void> | void;
   onFallback?: (error: unknown) => void;
@@ -382,7 +382,7 @@ export async function runCaptureWithScreenshotFallback<T>(input: {
   try {
     return await input.run(input.forceScreenshot);
   } catch (error) {
-    if (input.forceScreenshot || input.canRetry?.() === false) throw error;
+    if (input.forceScreenshot || (await input.canRetry?.()) === false) throw error;
     if (!shouldRetryChunkCaptureWithScreenshot(error)) throw error;
     input.onFallback?.(error);
     await input.resetForScreenshotRetry();
@@ -970,7 +970,10 @@ export async function renderChunk(
       const captureStarted = Date.now();
       captureMode = await runCaptureWithScreenshotFallback({
         forceScreenshot: forceScreenshotForChunk,
-        canRetry: () => !probeFailed,
+        canRetry: async () => {
+          await probeRun.catch(() => {});
+          return !probeFailed;
+        },
         // fallow-ignore-next-line complexity
         run: async (forceScreenshot) => {
           const captureCfg: EngineConfig =

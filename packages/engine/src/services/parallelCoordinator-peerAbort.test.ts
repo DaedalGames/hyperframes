@@ -290,7 +290,9 @@ describe("executeParallelCapture peer abort", () => {
       expect(order).toEqual(["init", "init", "frame", "frame"]);
 
       order.length = 0;
-      await expect(run(Promise.reject(new Error("probe said no")))).rejects.toThrow(/probe said no/);
+      await expect(run(Promise.reject(new Error("probe said no")))).rejects.toThrow(
+        /probe said no/,
+      );
       expect(order).toEqual(["init", "init"]);
     } finally {
       rmSync(root, { recursive: true, force: true });
