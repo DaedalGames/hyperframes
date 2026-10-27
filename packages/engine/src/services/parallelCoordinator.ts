@@ -847,6 +847,7 @@ async function executeWorkerTask(
   parallel?: boolean,
   onFailure?: (failure: CaptureFailure) => void,
   onWorkerPhase?: (diagnostic: ParallelWorkerPhaseDiagnostic) => void,
+  beforeFirstFrame?: Promise<void>,
 ): Promise<WorkerResult> {
   const startTime = Date.now();
   let framesCaptured = 0;
@@ -915,6 +916,7 @@ async function executeWorkerTask(
         await assertSwiftShader(activeSession.page, readWebGlVendorInfoFromCanvas);
       }
       await initializeSession(activeSession);
+      await beforeFirstFrame;
     });
     canvasDrawElement = activeSession.captureMode === "drawelement";
     gpuBackend = activeSession.gpuRenderer ?? "unknown";
@@ -1021,6 +1023,7 @@ export interface ParallelCaptureHooks {
    * frame (the ordered writer) with the original error, not a stall.
    */
   onWorkerFailure?: (failure: CaptureFailure) => void;
+  beforeFirstFrame?: Promise<void>;
 }
 
 function pageErrorLinesOf(session: CaptureSession): string[] {
@@ -1152,6 +1155,7 @@ export async function executeParallelCapture(
         parallel,
         onFailure,
         onWorkerPhase,
+        hooks?.beforeFirstFrame,
       ),
     ),
   );

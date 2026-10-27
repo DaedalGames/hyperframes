@@ -238,4 +238,62 @@ describe("executeParallelCapture peer abort", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("boots every worker at once but captures no frame until beforeFirstFrame opens, and fails them if it rejects", async () => {
+    const root = mkdtempSync(join(tmpdir(), "hf-first-frame-gate-"));
+    const order: string[] = [];
+    const captureFrame = vi.fn(async () => {
+      order.push("frame");
+      return { path: join(root, "frame.jpg") };
+    });
+    vi.doMock("./frameCapture.js", () => ({
+      createCaptureSession: vi.fn(async () => ({ browserConsoleBuffer: [] })),
+      initializeSession: vi.fn(async () => {
+        order.push("init");
+      }),
+      captureFrame,
+      captureFrameToBuffer: vi.fn(),
+      captureFrameToBufferPipelined: vi.fn(),
+      closeCaptureSession: vi.fn().mockResolvedValue(undefined),
+      getCapturePerfSummary: vi.fn(() => ({ frames: 0 })),
+    }));
+    const tasks = [0, 1].map((workerId) => ({
+      workerId,
+      startFrame: workerId,
+      endFrame: workerId + 1,
+      outputDir: join(root, `worker-${workerId}`),
+    }));
+    const run = async (beforeFirstFrame: Promise<void>) => {
+      const { executeParallelCapture } = await import("./parallelCoordinator.js");
+      return executeParallelCapture(
+        "http://127.0.0.1",
+        root,
+        tasks,
+        { width: 320, height: 180, fps: { num: 30, den: 1 } },
+        () => null,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { beforeFirstFrame },
+      );
+    };
+
+    try {
+      let open!: () => void;
+      const gated = run(new Promise<void>((resolve) => (open = resolve)));
+      await vi.waitFor(() => expect(order).toEqual(["init", "init"]));
+      for (let turn = 0; turn < 20; turn++) await new Promise((resolve) => setImmediate(resolve));
+      expect(order).toEqual(["init", "init"]);
+      open();
+      await gated;
+      expect(order).toEqual(["init", "init", "frame", "frame"]);
+
+      order.length = 0;
+      await expect(run(Promise.reject(new Error("probe said no")))).rejects.toThrow(/probe said no/);
+      expect(order).toEqual(["init", "init"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
