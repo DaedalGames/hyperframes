@@ -1235,8 +1235,17 @@ async function extractVideoFramesRangeUnredacted(
   // emits that last slot: the fps filter ends a `-t` window at the nearest slot. A
   // decimal rate counts zero frames here and keeps the `-t` window.
   const boundVfrFrameCount = metadata.isVFR && totalFrames > 0;
+  const leadInSeconds = options.finalFrameOnly
+    ? startTime
+    : await leadInSecondsUnlessAborted(videoPath, startTime, signal);
+  // Every segment seeks back to the same keyframe and decodes the lead-in again, so a lead-in
+  // as long as a segment costs more than the parallelism buys; one process decodes it once.
+  const splitsIntoSegments =
+    options.frameRanges ||
+    boundVfrFrameCount ||
+    (totalFrames > segmentFrames && leadInSeconds < EXTRACTION_SEGMENT_SECONDS);
   const extract = (hwaccel: string[]) =>
-    sampleAtOutputFps && (options.frameRanges || boundVfrFrameCount || totalFrames > segmentFrames)
+    sampleAtOutputFps && splitsIntoSegments
       ? runSegmentedExtraction({
           decodeArgs: [...hwaccel, ...decodeArgs],
           filterAndEncodeArgs: (seek) => [...filterArgsFor(seek), ...encodeArgs],
@@ -1252,16 +1261,10 @@ async function extractVideoFramesRangeUnredacted(
           runOptions,
         })
       : inExtractionSlot(
-          async () =>
+          () =>
             runFfmpeg([...hwaccel, ...args, ...filterArgsFor(startTime), ...encodeArgs], {
               ...runOptions,
-              timeout: stallTimeoutMs(
-                ffmpegProcessTimeout,
-                options.finalFrameOnly
-                  ? startTime
-                  : await leadInSecondsUnlessAborted(videoPath, startTime, signal),
-                metadata.fps,
-              ),
+              timeout: stallTimeoutMs(ffmpegProcessTimeout, leadInSeconds, metadata.fps),
             }),
           signal,
         );
