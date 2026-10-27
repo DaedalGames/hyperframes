@@ -781,17 +781,8 @@ export async function renderChunk(
       const overlapStartup = chunkWorkerCount > 1 && !forceScreenshotForChunk;
       const runProbe = async (): Promise<void> => {
         if (chunkWorkerCount === 1 || !forceScreenshotForChunk) {
-          // Sequential capture reuses this session. Parallel BeginFrame capture
-          // uses it only for the composition liveness preflight.
-          // SwiftShader assertion runs BEFORE initializeSession (which
-          // navigates to the composition); on failure we tear down without
-          // ever touching the composition URL. We pass
-          // `readWebGlVendorInfoFromCanvas` rather than letting
-          // `assertSwiftShader` use its default `chrome://gpu` reader —
-          // `chrome-headless-shell` serves chrome:// pages as empty documents,
-          // which would trip a false-negative even when the GL backend is in
-          // fact SwiftShader. The canvas + WEBGL_debug_renderer_info probe
-          // works on any page (we navigate to about:blank inside the helper).
+          // Sequential capture reuses this session; parallel capture only checks liveness with it.
+          // The GL check reads the canvas, since chrome-headless-shell serves chrome://gpu empty.
           const bootStarted = Date.now();
           session = await createVerifiedDistributedCaptureSession(
             fileServer.url,
