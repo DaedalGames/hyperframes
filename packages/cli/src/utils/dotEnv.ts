@@ -1,6 +1,13 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { FEEDBACK_EMAIL_ENV } from "./feedbackSource.js";
 
-export const CAPTURE_ENV_KEYS = [
+/** The settings a project `.env` may supply: provider credentials, models and timeouts. Nothing else is read from it. */
+export const PROJECT_ENV_KEYS = [
+  "HEYGEN_API_KEY",
+  "HYPERFRAMES_API_KEY",
+  "ELEVENLABS_API_KEY",
+  "FIGMA_TOKEN",
   "OPENROUTER_API_KEY",
   "GEMINI_API_KEY",
   "GOOGLE_API_KEY",
@@ -76,17 +83,35 @@ export function applyDotEnv(
   content: string,
   env: NodeJS.ProcessEnv,
   allowedKeys?: readonly string[],
-): void {
+): string[] {
   const allowed = allowedKeys === undefined ? undefined : new Set(allowedKeys);
+  const ignored: string[] = [];
   for (const entry of logicalLines(content).map(entryOf)) {
     if (!entry) continue;
     const [key, value] = entry;
-    if (
-      key &&
-      key.toUpperCase() !== FEEDBACK_EMAIL_ENV &&
-      (allowed === undefined || allowed.has(key)) &&
-      !(key in env)
-    )
-      env[key] = value;
+    if (!key || key.toUpperCase() === FEEDBACK_EMAIL_ENV) continue;
+    if (allowed !== undefined && !allowed.has(key)) ignored.push(key);
+    else if (!(key in env)) env[key] = value;
+  }
+  return ignored;
+}
+
+/** Loads `<dir>/.env` into `env` for the keys the CLI reads from a project, and names the others on `warn` once. */
+export function loadProjectDotEnv(
+  dir: string,
+  env: NodeJS.ProcessEnv,
+  warn: (line: string) => void,
+): void {
+  let content: string;
+  try {
+    content = readFileSync(join(dir, ".env"), "utf-8");
+  } catch {
+    return;
+  }
+  const ignored = [...new Set(applyDotEnv(content, env, PROJECT_ENV_KEYS))];
+  if (ignored.length > 0) {
+    warn(
+      `[hyperframes] .env: ignoring ${ignored.join(", ")} (a project .env only sets the CLI's own settings)`,
+    );
   }
 }

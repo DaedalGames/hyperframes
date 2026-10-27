@@ -65,6 +65,11 @@ background process, and never under CI or `HYPERFRAMES_NO_UPDATE_CHECK=1`.
 `--json` never makes a network request of its own. Deprecated commands add
 `_meta.deprecated: true`.
 
+**The project `.env`.** The `.env` in the current directory sets only the CLI's own
+settings: `HEYGEN_API_KEY`, `HYPERFRAMES_API_KEY`, `ELEVENLABS_API_KEY`, `FIGMA_TOKEN`, and the
+vision keys, models, Vertex settings and timeout. A variable already in your environment wins. Any
+other key in the file is ignored, and one line on stderr names them.
+
 **Flags, not prompts.** A missing required flag fails immediately with a usage
 example rather than waiting for input. Two commands are interactive on a TTY:
 `init` prompts for a project name and example unless you pass
