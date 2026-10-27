@@ -1393,7 +1393,7 @@ export async function analyzeKeyframeIntervals(
   return promise;
 }
 
-/** Seconds of video ffmpeg decodes without writing a frame when it seeks to `seekSeconds`: the distance back to the keyframe it lands on. */
+/** Seconds ffmpeg decodes without output after a seek to `seekSeconds`: back to the keyframe it lands on. */
 export async function keyframeGapSeconds(
   filePath: string,
   seekSeconds: number,
