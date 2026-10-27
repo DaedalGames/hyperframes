@@ -1677,6 +1677,7 @@ describe("hf-proxy negotiation and media codec map injection (U3)", () => {
         join(projectDir, "clip.mp4"),
         "h264",
         { width: 1448, height: 2048 },
+        { priority: false },
       );
       const full = await app.request(
         "http://localhost/projects/demo/preview/clip.mp4?hf-proxy=h264",
@@ -1686,6 +1687,7 @@ describe("hf-proxy negotiation and media codec map injection (U3)", () => {
         join(projectDir, "clip.mp4"),
         "h264",
         undefined,
+        { priority: false },
       );
       expect(sized.headers.get("ETag")).toBeTruthy();
       expect(sized.headers.get("ETag")).not.toBe(full.headers.get("ETag"));
@@ -1726,6 +1728,7 @@ describe("hf-proxy negotiation and media codec map injection (U3)", () => {
           join(projectDir, "clip.mp4"),
           "h264",
           { width: 724, height: 362 },
+          { priority: false },
         );
       });
 
@@ -1880,6 +1883,7 @@ describe("hf-proxy negotiation and media codec map injection (U3)", () => {
         join(projectDir, "clip.mov"),
         "vp8",
         undefined,
+        { priority: false },
       );
     });
 
@@ -2163,6 +2167,7 @@ describe("hf-proxy negotiation and media codec map injection (U3)", () => {
         join(projectDir, "assets", "shared", "clip.mov"),
         "h264",
         undefined,
+        { priority: false },
       );
     });
 

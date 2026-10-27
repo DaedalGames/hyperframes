@@ -195,13 +195,11 @@ function requestBox(el: HTMLMediaElement, copy: BoxedCopy, box: PreviewProxyBox 
     wanted,
     (fraction) => noteCopy(el, "making", fraction),
     () => isActiveAtPlayhead(el),
-  ).then(
-    (served) => {
-      if (wanted()) noteCopy(el, served ? "ready" : "failed");
-      if (served && wanted()) loadProxy(el, href, copy.originalSrc, copy.variant, box, copy.light);
-      if (pendingUpgrades.get(el) === href) pendingUpgrades.delete(el);
-    },
-  );
+  ).then((served) => {
+    if (wanted()) noteCopy(el, served ? "ready" : "failed");
+    if (served && wanted()) loadProxy(el, href, copy.originalSrc, copy.variant, box, copy.light);
+    if (pendingUpgrades.get(el) === href) pendingUpgrades.delete(el);
+  });
 }
 
 /** Puts a video that only got a lighter copy back on its original. */
