@@ -946,6 +946,20 @@ export function sdrCanvasColourFilters(metadata: VideoMetadata, toneMappedToSdr 
 const EXTRACTION_SEGMENT_SECONDS = 120;
 /** Slowest decode rate the stall clock allows while ffmpeg discards frames from a keyframe up to the seek point. */
 const SKIP_DECODE_FPS_FLOOR = 30;
+async function leadInSecondsOrCancel(
+  videoPath: string,
+  seek: number,
+  signal?: AbortSignal,
+): Promise<number> {
+  try {
+    return await keyframeGapSeconds(videoPath, seek, signal);
+  } catch (error) {
+    if (signal?.aborted) {
+      throw new VideoSourceExtractionError("cancelled", false, "Video extraction cancelled");
+    }
+    throw error;
+  }
+}
 function stallTimeoutMs(baseMs: number, skippedSeconds: number, sourceFps: number): number {
   return baseMs + Math.ceil((skippedSeconds * sourceFps * 1000) / SKIP_DECODE_FPS_FLOOR);
 }
@@ -1030,7 +1044,7 @@ async function runSegmentedExtraction(job: SegmentedExtraction): Promise<RunFfmp
               signal,
               timeout: stallTimeoutMs(
                 job.runOptions.timeout,
-                await keyframeGapSeconds(videoPath, seek, signal),
+                await leadInSecondsOrCancel(videoPath, seek, signal),
                 sourceFps,
               ),
             },
@@ -1042,7 +1056,10 @@ async function runSegmentedExtraction(job: SegmentedExtraction): Promise<RunFfmp
     }
   };
   const workers = Math.min(segmentCount, EXTRACTION_SLOTS);
-  await Promise.all(Array.from({ length: workers }, worker));
+  await Promise.all(Array.from({ length: workers }, worker)).catch((error) => {
+    failed.abort();
+    throw error;
+  });
   const ran = results.filter(Boolean);
   // Report the segment that failed, not the ones stopped because of it.
   const failure =
@@ -1243,7 +1260,7 @@ async function extractVideoFramesRangeUnredacted(
                 ffmpegProcessTimeout,
                 options.finalFrameOnly
                   ? startTime
-                  : await keyframeGapSeconds(videoPath, startTime, signal),
+                  : await leadInSecondsOrCancel(videoPath, startTime, signal),
                 metadata.fps,
               ),
             }),
