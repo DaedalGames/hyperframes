@@ -214,7 +214,7 @@ describe("seek-dispatch", () => {
     await expect(waitForSeekCompletion()).resolves.toBeUndefined();
   });
 
-  // Fails on main: the barrier had no deadline, so one hold that never settles waited out the caller's protocol timeout.
+  // Main had no deadline: a hold that never settles waited out the caller's protocol timeout.
   it("a seek with a hold that never settles ends at its deadline, naming what it still waits on", async () => {
     registerSeekCompletion(new Promise(() => {}), "frame-source");
     registerSeekCompletion(Promise.resolve(), "video-frame");

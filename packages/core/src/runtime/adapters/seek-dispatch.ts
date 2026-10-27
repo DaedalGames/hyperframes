@@ -142,11 +142,7 @@ async function settledBy(
   }
 }
 
-/**
- * `videoFrames: false` skips only the video-frame holds: a geometry read needs every other completion. A seek that
- * has not settled by `timeoutMs` throws, naming the holds it still waits on, so a capture fails with why instead of
- * waiting on its caller's protocol timeout.
- */
+/** `videoFrames: false` skips only video-frame holds. Past `timeoutMs` it throws, naming the holds still pending. */
 export async function waitForSeekCompletion(options?: {
   videoFrames?: boolean;
   timeoutMs?: number;
