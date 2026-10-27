@@ -1,4 +1,8 @@
-import { PREVIEW_PROXY_PROGRESS_HEADER, PREVIEW_PROXY_RETRY_PARAM } from "../previewProxyBox";
+import {
+  PREVIEW_PROXY_PRIORITY_HEADER,
+  PREVIEW_PROXY_PROGRESS_HEADER,
+  PREVIEW_PROXY_RETRY_PARAM,
+} from "../previewProxyBox";
 
 const MAX_FAILED_ASKS = 3;
 
@@ -14,13 +18,14 @@ export async function waitForServedProxy(
   href: string,
   live: () => boolean,
   onProgress?: (fraction: number) => void,
+  atPlayhead: () => boolean = () => false,
 ): Promise<boolean> {
   let failed = 0;
   let ask = href;
   while (live()) {
-    const res = await fetch(ask, { headers: { Range: "bytes=0-0" }, cache: "no-store" }).catch(
-      () => null,
-    );
+    const headers: Record<string, string> = { Range: "bytes=0-0" };
+    if (atPlayhead()) headers[PREVIEW_PROXY_PRIORITY_HEADER] = "1";
+    const res = await fetch(ask, { headers, cache: "no-store" }).catch(() => null);
     ask = withoutRetryFlag(href);
     void res?.body?.cancel().catch(() => {});
     const pending = res?.status === 202 || res?.status === 503;

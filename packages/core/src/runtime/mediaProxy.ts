@@ -1,6 +1,6 @@
 import { postRuntimeMessage } from "./bridge";
 import { swallow } from "./diagnostics";
-import { evictMediaSyncState, HOLD_CAP_MS } from "./media";
+import { evictMediaSyncState, HOLD_CAP_MS, isActiveAtPlayhead } from "./media";
 import { findInjectedRenderFrame } from "./renderFrameSibling";
 import type { RuntimeJson } from "./types";
 import { isVideoElement } from "./domRealm";
@@ -190,7 +190,12 @@ function requestBox(el: HTMLMediaElement, copy: BoxedCopy, box: PreviewProxyBox 
   const wanted = () =>
     pendingUpgrades.get(el) === href && el.isConnected && el.getAttribute("src") === copy.href;
   noteCopy(el, "making");
-  void waitForServedProxy(href, wanted, (fraction) => noteCopy(el, "making", fraction)).then(
+  void waitForServedProxy(
+    href,
+    wanted,
+    (fraction) => noteCopy(el, "making", fraction),
+    () => isActiveAtPlayhead(el),
+  ).then(
     (served) => {
       if (wanted()) noteCopy(el, served ? "ready" : "failed");
       if (served && wanted()) loadProxy(el, href, copy.originalSrc, copy.variant, box, copy.light);
@@ -410,8 +415,11 @@ async function makeCopy(el: HTMLMediaElement, job: CopyJob, scale: number | null
     retryNext.delete(el),
   );
   noteCopy(el, "making");
-  const served = await waitForServedProxy(proxiedSrc, live, (fraction) =>
-    noteCopy(el, "making", fraction),
+  const served = await waitForServedProxy(
+    proxiedSrc,
+    live,
+    (fraction) => noteCopy(el, "making", fraction),
+    () => isActiveAtPlayhead(el),
   );
   if (!live()) {
     if (proxyRequested.get(el) === originalAttr) proxyRequested.delete(el);
