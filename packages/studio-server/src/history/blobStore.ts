@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { constants, createReadStream, createWriteStream, renameSync } from "node:fs";
+import { constants, createReadStream, createWriteStream } from "node:fs";
 import { copyFile, mkdir, readdir, readFile, rename, rm, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { pipeline } from "node:stream/promises";
-import { atomicTempPath } from "@hyperframes/core/atomic-file";
+import { atomicTempPath, renameWithRetry } from "@hyperframes/core/atomic-file";
 
 /** File contents stored once by sha256, text and binary alike. */
 export interface BlobStore {
@@ -53,7 +53,7 @@ async function cloneOrCopy(from: string, to: string, beforeReplace?: () => void)
   try {
     await copyFile(from, temp, constants.COPYFILE_FICLONE);
     beforeReplace?.();
-    renameSync(temp, to);
+    renameWithRetry(temp, to);
   } catch (error) {
     await rm(temp, { force: true });
     throw error;

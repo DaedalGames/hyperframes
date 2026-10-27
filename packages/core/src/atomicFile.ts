@@ -34,7 +34,7 @@ export function replaceFileAtomically(
 ): void {
   // Node fs.rename uses libuv uv_fs_rename; win32 calls MoveFileExW with MOVEFILE_REPLACE_EXISTING.
   publishSibling(filePath, content, mode, operations, (tempPath) =>
-    renameWithRetry(operations, tempPath, filePath),
+    renameWithRetry(tempPath, filePath, operations),
   );
 }
 
@@ -156,10 +156,11 @@ function writeTempSibling(
   }
 }
 
-function renameWithRetry(
-  operations: Pick<typeof fs, "renameSync">,
+/** renameSync onto `to`, again after short waits while Windows briefly holds the target open. */
+export function renameWithRetry(
   from: string,
   to: string,
+  operations: Pick<typeof fs, "renameSync"> = fs,
 ): void {
   for (let attempt = 0; ; attempt++) {
     try {
