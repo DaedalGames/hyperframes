@@ -1393,6 +1393,24 @@ export async function analyzeKeyframeIntervals(
   return promise;
 }
 
+/** Seconds of video ffmpeg decodes without writing a frame when it seeks to `seekSeconds`: the distance back to the keyframe it lands on. */
+export async function keyframeGapSeconds(
+  filePath: string,
+  seekSeconds: number,
+  signal?: AbortSignal,
+): Promise<number> {
+  const stdout = await runFfprobe(
+    filePath,
+    [
+      ...["-select_streams", "v:0", "-show_entries", "packet=pts_time", "-of", "csv=p=0"],
+      ...["-read_intervals", `${seekSeconds}%+#1`],
+    ],
+    signal,
+  );
+  const keyframe = parseFloat(stdout.split("\n")[0] ?? "");
+  return Number.isFinite(keyframe) ? Math.max(0, seekSeconds - keyframe) : 0;
+}
+
 async function analyzeKeyframeIntervalsUncached(
   filePath: string,
   videoStreamStartSeconds: number,
