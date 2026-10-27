@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { FEEDBACK_EMAIL_ENV } from "./feedbackSource.js";
 
-/** The settings a project `.env` may supply: provider credentials, models and timeouts. Nothing else is read from it. */
 export const PROJECT_ENV_KEYS = [
   "HEYGEN_API_KEY",
   "HYPERFRAMES_API_KEY",
@@ -96,7 +95,6 @@ export function applyDotEnv(
   return ignored;
 }
 
-/** Loads `<dir>/.env` into `env` for the keys the CLI reads from a project, and names the others on `warn` once. */
 export function loadProjectDotEnv(
   dir: string,
   env: NodeJS.ProcessEnv,
