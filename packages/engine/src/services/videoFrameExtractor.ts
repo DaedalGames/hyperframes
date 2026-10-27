@@ -946,7 +946,7 @@ export function sdrCanvasColourFilters(metadata: VideoMetadata, toneMappedToSdr 
 const EXTRACTION_SEGMENT_SECONDS = 120;
 /** Slowest decode rate the stall clock allows while ffmpeg discards frames from a keyframe up to the seek point. */
 const SKIP_DECODE_FPS_FLOOR = 30;
-async function leadInSecondsOrCancel(
+async function leadInSecondsUnlessAborted(
   videoPath: string,
   seek: number,
   signal?: AbortSignal,
@@ -954,9 +954,8 @@ async function leadInSecondsOrCancel(
   try {
     return await keyframeGapSeconds(videoPath, seek, signal);
   } catch (error) {
-    if (signal?.aborted) {
-      throw new VideoSourceExtractionError("cancelled", false, "Video extraction cancelled");
-    }
+    // Aborted: let runFfmpeg report the abort, so a segment stopped by another's failure reads as stopped.
+    if (signal?.aborted) return 0;
     throw error;
   }
 }
@@ -1044,7 +1043,7 @@ async function runSegmentedExtraction(job: SegmentedExtraction): Promise<RunFfmp
               signal,
               timeout: stallTimeoutMs(
                 job.runOptions.timeout,
-                await leadInSecondsOrCancel(videoPath, seek, signal),
+                await leadInSecondsUnlessAborted(videoPath, seek, signal),
                 sourceFps,
               ),
             },
@@ -1260,7 +1259,7 @@ async function extractVideoFramesRangeUnredacted(
                 ffmpegProcessTimeout,
                 options.finalFrameOnly
                   ? startTime
-                  : await leadInSecondsOrCancel(videoPath, startTime, signal),
+                  : await leadInSecondsUnlessAborted(videoPath, startTime, signal),
                 metadata.fps,
               ),
             }),
