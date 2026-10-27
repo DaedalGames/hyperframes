@@ -29,8 +29,6 @@ export type SeekHold =
   | "motion-blur"
   | "vfx"
   | "image-decode";
-/** A seek still unsettled after this is stuck: the barrier ends, naming what it still waits on. */
-export const SEEK_SETTLE_CAP_MS = 30_000;
 let _pendingCompletions = new Map<Promise<SeekCompletionResult>, SeekHold>();
 let _pendingFailure: { reason: unknown } | undefined;
 let _activeCompletionBarriers = 0;
@@ -129,8 +127,9 @@ export function hasPendingSeekCompletion(): boolean {
 /** All of `pending` settled, or null once `deadline` (epoch ms) passes first. */
 async function settledBy(
   pending: Promise<SeekCompletionResult>[],
-  deadline: number,
+  deadline: number | undefined,
 ): Promise<SeekCompletionResult[] | null> {
+  if (deadline === undefined) return Promise.all(pending);
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<null>((resolve) => {
     timer = setTimeout(() => resolve(null), Math.max(0, deadline - Date.now()));
@@ -142,7 +141,7 @@ async function settledBy(
   }
 }
 
-/** `videoFrames: false` skips only video-frame holds. Past `timeoutMs` it throws, naming the holds still pending. */
+/** `videoFrames: false` skips only video-frame holds. Past a caller's `timeoutMs` it throws, naming what is pending. */
 export async function waitForSeekCompletion(options?: {
   videoFrames?: boolean;
   timeoutMs?: number;
@@ -151,8 +150,8 @@ export async function waitForSeekCompletion(options?: {
     [..._pendingCompletions].filter(
       ([, hold]) => options?.videoFrames !== false || hold !== "video-frame",
     );
-  const timeoutMs = options?.timeoutMs ?? SEEK_SETTLE_CAP_MS;
-  const deadline = Date.now() + timeoutMs;
+  const timeoutMs = options?.timeoutMs;
+  const deadline = timeoutMs === undefined ? undefined : Date.now() + timeoutMs;
   _activeCompletionBarriers += 1;
   let failed = _pendingFailure;
   try {
@@ -162,7 +161,7 @@ export async function waitForSeekCompletion(options?: {
     for (let pending = awaited(); pending.length > 0; pending = awaited()) {
       // Holds that keep arriving past the deadline must not outrun it.
       const results =
-        Date.now() < deadline
+        deadline === undefined || Date.now() < deadline
           ? await settledBy(
               pending.map(([completion]) => completion),
               deadline,

@@ -4,7 +4,6 @@ import {
   forceDispatchSeekEvent,
   registerSeekCompletion,
   resetSeekDispatchState,
-  SEEK_SETTLE_CAP_MS,
   waitForSeekCompletion,
   type HfSeekEventDetail,
 } from "./seek-dispatch";
@@ -224,9 +223,9 @@ describe("seek-dispatch", () => {
   });
 
   it("holds registered while the barrier waits still end at the same deadline", async () => {
-    let more = 0;
+    let stopped = false;
     const again = (): void => {
-      if (more++ > 1000) return;
+      if (stopped) return;
       registerSeekCompletion(
         new Promise((resolve) => setTimeout(() => (again(), resolve(undefined)), 1)),
         "video-frame",
@@ -234,20 +233,25 @@ describe("seek-dispatch", () => {
     };
     again();
     const started = Date.now();
-    await expect(waitForSeekCompletion({ timeoutMs: 50 })).rejects.toThrow(
-      /still waiting on video-frame/,
-    );
+    try {
+      await expect(waitForSeekCompletion({ timeoutMs: 50 })).rejects.toThrow(
+        /still waiting on video-frame/,
+      );
+    } finally {
+      stopped = true;
+    }
     expect(Date.now() - started).toBeLessThan(1000);
   });
 
-  it("caps an unbounded wait at SEEK_SETTLE_CAP_MS by default", async () => {
+  it("without a caller's timeoutMs a seek waits as long as its holds take", async () => {
     vi.useFakeTimers();
     try {
-      registerSeekCompletion(new Promise(() => {}), "vfx");
+      let settle = () => {};
+      registerSeekCompletion(new Promise<void>((resolve) => (settle = resolve)), "vfx");
       const barrier = waitForSeekCompletion();
-      const outcome = expect(barrier).rejects.toThrow(/still waiting on vfx/);
-      await vi.advanceTimersByTimeAsync(SEEK_SETTLE_CAP_MS);
-      await outcome;
+      await vi.advanceTimersByTimeAsync(30 * 60_000);
+      settle();
+      await expect(barrier).resolves.toBeUndefined();
     } finally {
       vi.useRealTimers();
     }
