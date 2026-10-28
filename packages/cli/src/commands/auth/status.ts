@@ -265,8 +265,8 @@ const SOURCE_LABELS: Record<ResolvedCredential["source"], string> = {
   env: `env (${ENV_CREDENTIAL_VAR.env})`,
   env_alias: `env (${ENV_CREDENTIAL_VAR.env_alias})`,
   env_oauth: `env (${ENV_CREDENTIAL_VAR.env_oauth})`,
-  file_legacy: "file (~/.heygen/credentials — legacy plaintext)",
-  file_json: "file (~/.heygen/credentials)",
+  file_legacy: "file (~/.hyperframes/credentials — legacy plaintext)",
+  file_json: "file (~/.hyperframes/credentials)",
 };
 
 function describeSource(source: ResolvedCredential["source"]): string {

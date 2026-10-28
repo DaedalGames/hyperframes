@@ -28,8 +28,8 @@ export const examples: Example[] = [
 const HELP = `
 ${c.bold("hyperframes auth")} ${c.dim("<subcommand> [args]")}
 
-Manage HeyGen credentials. Credentials live in
-${c.accent("~/.hyperframes/credentials")} and are shared with heygen-cli.
+Manage HyperFrames credentials. Credentials live in
+${c.accent("~/.hyperframes/credentials")}, independently of heygen-cli.
 
 ${c.bold("SUBCOMMANDS:")}
   ${c.accent("login")}    ${c.dim("Sign in via browser, --device for SSH, or --api-key for a long-lived key.")}

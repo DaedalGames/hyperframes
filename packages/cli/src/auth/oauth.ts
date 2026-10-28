@@ -71,8 +71,6 @@ const MIN_EXPIRES_IN_SECONDS = 30;
 
 const DEFAULT_SCOPES = "openid profile email";
 
-// Endpoint defaults — see file-header comment for why these straddle two
-// hosts. Each is independently overridable.
 const DEVICE_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
 const MAX_DEVICE_FLOW_SECONDS = 30 * 60;
 const MIN_DEVICE_POLL_SECONDS = 5;
@@ -192,7 +190,7 @@ export async function startAuthorizationCodeFlow(
  * RFC 8628 attended device flow. This function deliberately returns an
  * unpersisted token set: the command must verify `/v3/users/me` first and only
  * then call `persistFreshOAuth`. That ordering prevents a token for the wrong
- * account/resource from ever becoming the active shared credential.
+ * account/resource from ever becoming the active HyperFrames credential.
  */
 export async function startDeviceAuthorizationFlow(
   opts: DeviceAuthorizationFlowOptions = {},

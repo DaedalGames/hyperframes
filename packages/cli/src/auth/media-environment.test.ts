@@ -25,8 +25,10 @@ describe("media-use authentication", () => {
       const copied = JSON.parse(await fs.readFile(path, "utf8"));
       expect(copied.oauth.access_token).toBe("hf-access");
       expect(copied.oauth.refresh_token).toBeUndefined();
-      expect((await fs.stat(path)).mode & 0o777).toBe(0o600);
-      expect((await fs.stat(env.HEYGEN_CONFIG_DIR!)).mode & 0o777).toBe(0o700);
+      if (process.platform !== "win32") {
+        expect((await fs.stat(path)).mode & 0o777).toBe(0o600);
+        expect((await fs.stat(env.HEYGEN_CONFIG_DIR!)).mode & 0o777).toBe(0o700);
+      }
     });
     await expect(fs.stat(path)).rejects.toMatchObject({ code: "ENOENT" });
     expect(await fs.readFile(join(fixture.dir, "credentials"), "utf8")).toContain("hf-refresh");
