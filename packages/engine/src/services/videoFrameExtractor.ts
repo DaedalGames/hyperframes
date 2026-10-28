@@ -2146,7 +2146,11 @@ export async function extractAllVideoFrames(
   // Phase 3 still calls `extractVideoFramesRange` on the same past-EOF
   // mediaStart, surfacing a second raw FFmpeg error for the same clip.
   const hdrSkippedIndices = new Set<number>();
-  if (!options.toneMapHdrToSdr && hdrInfo.hasHdr && hdrInfo.dominantTransfer) {
+  if (
+    (!options.toneMapHdrToSdr || options.hdrTransferAfterToneMap) &&
+    hdrInfo.hasHdr &&
+    hdrInfo.dominantTransfer
+  ) {
     // dominantTransfer is "majority wins" — if a composition mixes PQ and HLG
     // sources (rare but legal), the minority transfer's videos get converted
     // with the wrong curve. We treat this as caller-error: a single composition
