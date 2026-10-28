@@ -58,7 +58,8 @@ command, then run the same step again once they reply. Never trim the plan to fi
 
 ## At the end
 
-Run `npx hyperframes auth status` again and say what this run used and what is left, after where the project is.
+This closes every run, also one the person stops early. Run `npx hyperframes auth status` again and say what this
+run used and what is left, in credits (never dollars), after where the project is.
 
 > Your project is ready in `./goat`. This run used 180 credits; 24,820 are left.
 

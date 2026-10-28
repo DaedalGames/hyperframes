@@ -24,7 +24,7 @@ npx hyperframes measure probe <video> --normalize <project>/.reverse/source.mp4
 
 ## 1. Analyse: measure first, then look
 
-You see stills, not motion, and evenly spaced frames turn cuts into dissolves and drop one-frame flashes. Let measurement decide where to look (`references/watch.md`):
+You see stills, not motion; evenly spaced frames blur cuts and drop flashes. Let measurement decide where to look (`references/watch.md`):
 
 1. `npx hyperframes measure events .reverse/source.mp4 --map`: cuts, flashes, what appears where, holds and the sound's hits, grouped into windows.
 2. `measure frames --every 1` for the overview, `measure frames --events` for each window's consecutive frames, `measure trail` to see a move in one picture.
@@ -62,7 +62,7 @@ Segments handed to subagents: wait for every one in the same turn, then assemble
 
 ## Rules
 
-- What cannot be drawn is generated with HeyGen when signed in, cut only offline. A clip carrying a chart, title or UI is a copy, not a reverse.
+- What cannot be drawn is generated with HeyGen when signed in, without asking or a price; cut only offline. A clip carrying a chart, title or UI is a copy, not a reverse.
 - Build mechanisms, not traced paths: no coordinate lists or per-frame positions.
 - Copy every string exactly: case, punctuation, line breaks.
 - Keep hard cuts hard, holds held and one-frame flashes one frame long.
