@@ -1,45 +1,11 @@
 /**
- * Read/write the isolated `~/.hyperframes/credentials` file (JSON contents,
- * no `.json` extension).
+ * The HyperFrames store accepts legacy API-key text and JSON credentials.
+ * JSON keeps an optional API key, OAuth grant and display-only user metadata.
  *
- * Current format:
- *   {
- *     "api_key": "hg_...",
- *     "oauth": {
- *       "access_token": "...",
- *       "refresh_token": "...",
- *       "expires_at": "<ISO-8601 UTC>",
- *       "scope": "openid profile",
- *       "token_type": "Bearer"
- *     },
- *     "user": {
- *       "email": "...",
- *       "first_name": "...",
- *       "last_name": "...",
- *       "username": "..."
- *     }
- *   }
- *
- * Legacy: a single-line plaintext API key (the format heygen-cli has
- * written historically). If `JSON.parse` rejects the file, we treat the
- * trimmed contents as an API key; the next write upgrades to JSON.
- *
- * Writes go to a temp file + rename, 0600 mode, parent dir 0700.
- *
- * Forward compatibility: future HyperFrames versions may write keys this
- * version does not model. To preserve them on round-trip, the reader stashes every unrecognized
- * top-level key (and every unrecognized key inside the `oauth` / `user`
- * sub-objects) into a hidden passthrough bag, and the writer re-emits
- * them verbatim. Known fields are still strictly validated; the
- * passthrough is purely additive and never feeds an HTTP header.
- *
- * The same contract binds the destructive paths (`clearOAuth`,
- * `clearUserInfo`, and the failed `auth login --api-key` rollback): when
- * removing a credential would leave the file with no known credential but
- * a surviving unknown/foreign top-level (or user-block) key, they write
- * the credential-less remnant rather than deleting the file — see
- * `hasPreservedUnknownData`. Deleting there would clobber exactly the
- * cross-CLI data this machinery exists to preserve.
+ * Atomic rename plus 0600 files/0700 directories protects credential writes.
+ * OAuth callers verify the client/environment binding before using stored grants.
+ * Unknown JSON fields survive round-trips so older versions preserve newer data;
+ * known fields are validated before they can enter an HTTP header.
  */
 
 import { promises as fs } from "node:fs";
