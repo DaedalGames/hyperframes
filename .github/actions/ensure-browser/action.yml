@@ -1,0 +1,21 @@
+name: Ensure the pinned headless shell
+description: >-
+  Restores the pinned Chrome from the actions cache (keyed on the file that pins it), then runs `browser ensure`,
+  retrying a download that fails so one network blip does not fail the shard. Needs the built CLI at
+  packages/cli/dist.
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ~/.cache/hyperframes/chrome
+        key: hf-chrome-${{ runner.os }}-${{ hashFiles('packages/engine/src/services/chromeHostCeiling.ts') }}
+    - shell: bash
+      run: |
+        for attempt in 1 2 3; do
+          node packages/cli/dist/cli.js browser ensure && exit 0
+          echo "::warning::browser ensure failed (attempt $attempt of 3)"
+          sleep $((attempt * 10))
+        done
+        exit 1

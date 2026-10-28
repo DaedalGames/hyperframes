@@ -1206,7 +1206,7 @@ jobs:
           name: edit-accuracy-cli
           path: packages/cli/dist
       # Studio and the producer both run in the engine's pinned headless shell.
-      - run: node packages/cli/dist/cli.js browser ensure
+      - uses: ./.github/actions/ensure-browser
       - name: Read the base branch's edit accuracy baseline
         run: |
           bash scripts/ci/base-file.sh packages/studio/tests/e2e/edit-accuracy/baseline.json /tmp/base-edit-accuracy.json
@@ -1276,7 +1276,7 @@ jobs:
         with:
           name: edit-accuracy-cli
           path: packages/cli/dist
-      - run: node packages/cli/dist/cli.js browser ensure
+      - uses: ./.github/actions/ensure-browser
       - name: Read the base branch's edit accuracy baseline
         run: |
           bash scripts/ci/base-file.sh packages/studio/tests/e2e/edit-accuracy/baseline.json /tmp/base-edit-accuracy.json

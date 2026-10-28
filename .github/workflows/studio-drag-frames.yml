@@ -51,7 +51,7 @@ jobs:
       - uses: ./.github/actions/prepare-ffmpeg-bin
       - run: bash scripts/ci/install-workspace-dependencies.sh
       - run: bun run build
-      - run: node packages/cli/dist/cli.js browser ensure
+      - uses: ./.github/actions/ensure-browser
       - name: Run the drag cases
         working-directory: packages/studio
         run: |
