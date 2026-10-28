@@ -1,11 +1,14 @@
 import { existsSync } from "node:fs";
 import {
   envelope,
+  tempoOf,
   type AudioCapability,
   type AudioSignal,
   type LadderStep,
+  type Section,
+  type Tempo,
 } from "@hyperframes/core/audio-analysis";
-import { analyzeSignal, type AnalyzeOptions } from "./analyze.js";
+import { analyzeSignal, type Analysis, type AnalyzeOptions, type MarkedBeats } from "./analyze.js";
 import { decodeAudio, probeAudio, type AudioStreamInfo } from "./decode.js";
 import type { AudioTarget, Placement } from "./targets.js";
 import {
@@ -46,6 +49,10 @@ const round = (t: number) => Math.round(t * 1000) / 1000;
 const EDGE_CONTEXT_SECONDS = 0.1;
 const KIND_SAMPLE_RATE = 16_000;
 const KIND_DECODE_BYTES = 256 * 1024 * 1024;
+/** Rhythm is measured at 22.05 kHz (audioRhythm ANALYSIS_RATE), so a whole clip need not be decoded finer. */
+const RHYTHM_SAMPLE_RATE = 22_050;
+/** Beats, bars, tempo and sections depend on the music around a window, so a window reads them off the whole clip. */
+const RHYTHM: readonly AudioCapability[] = ["beats", "downbeats", "bpm", "sections"];
 
 /** A file the film does not play yet, placed where the caller would put it. */
 export async function previewTarget(
@@ -158,11 +165,12 @@ async function clipKindSignal(
   stream: AudioStreamInfo,
   sampleRate: number,
   windowSignal?: AudioSignal,
+  purpose = "kind",
 ): Promise<AudioSignal | undefined> {
   if (windowSignal) return windowSignal;
   const seconds = Math.min(target.clip!.seconds, Math.max(0, stream.duration - target.clip!.from));
   if (seconds * sampleRate * stream.channels * 4 > KIND_DECODE_BYTES)
-    throw new Error("whole clip exceeds the kind analysis decode limit");
+    throw new Error(`whole clip exceeds the ${purpose} analysis decode limit`);
   return (await decodeAudio(target.path, target.clip!, stream, { sampleRate }))?.signal;
 }
 
@@ -190,7 +198,127 @@ async function clipKind(
   return analysis;
 }
 
-/** Analyzes the window, except a kind the window would misjudge, which comes from the whole clip. */
+/** The kind of the whole clip, from its cache when it has one; the window's own when the clip cannot be read. */
+async function wholeClipKind(
+  target: AudioTarget,
+  signal: AudioSignal,
+  request: AnalyzeOptions,
+  stream: AudioStreamInfo,
+  cache?: KindCacheSource,
+): Promise<Analysis> {
+  try {
+    const kind = await clipKind(
+      target,
+      request,
+      stream,
+      cache,
+      coversPart(target) ? undefined : signal,
+    );
+    if (!kind) throw new Error("no audio stream");
+    return kind;
+  } catch (error) {
+    const kind = await analyzeSignal(signal, { ...request, capabilities: ["kind"] });
+    kind.warnings.push(
+      `kind uses only the selected range: could not analyze the whole clip (${firstLine(error)})`,
+    );
+    return kind;
+  }
+}
+
+const firstLine = (error: unknown) =>
+  error instanceof Error ? error.message.split("\n")[0] : String(error);
+
+const between = (from: number, to: number) => (t: number) => t >= from && t < to;
+
+function beatsBetween(value: MarkedBeats, from: number, to: number): MarkedBeats {
+  const keep = value.times.map(between(from, to));
+  return {
+    ...value,
+    times: value.times.filter((_, i) => keep[i]),
+    silent: value.silent.filter((_, i) => keep[i]),
+  };
+}
+
+interface RhythmWindow {
+  from: number;
+  to: number;
+  /** The whole clip's beats inside the window, which the window's tempo is read from. */
+  beats: MarkedBeats | null;
+}
+
+function tempoBetween(whole: Tempo, { from, to, beats }: RhythmWindow): Tempo {
+  const own = beats ? tempoOf(beats.times) : null;
+  return {
+    value: own?.value ?? whole.value,
+    curve: whole.curve.filter((point) => between(from, to)(point.t)),
+  };
+}
+
+/** How each rhythm answer is cut to a window: its beats and bars there, their tempo, and the sections it overlaps. */
+const CUTS: Partial<Record<AudioCapability, (value: unknown, window: RhythmWindow) => unknown>> = {
+  beats: (_value, window) => window.beats,
+  downbeats: (value, { from, to }) => beatsBetween(value as MarkedBeats, from, to),
+  bpm: (value, window) => tempoBetween(value as Tempo, window),
+  sections: (value, { from, to }) => {
+    const sections = value as { spans: Section[] };
+    return { ...sections, spans: sections.spans.filter((s) => s.end > from && s.start < to) };
+  },
+};
+
+/** The whole clip's rhythm answers cut to the window. */
+function rhythmBetween(
+  values: Analysis["values"],
+  asked: readonly AudioCapability[],
+  from: number,
+  to: number,
+): Analysis["values"] {
+  const beats = values.beats ? beatsBetween(values.beats as MarkedBeats, from, to) : null;
+  const window = { from, to, beats };
+  return Object.fromEntries(
+    asked.map((capability) => {
+      const value = values[capability];
+      return [capability, value == null ? value : (CUTS[capability]?.(value, window) ?? value)];
+    }),
+  );
+}
+
+/** Rhythm read off the whole clip and cut to the window: a window alone is too short to hear a beat, a bar or a section. */
+async function wholeClipRhythm(
+  target: AudioTarget,
+  signal: AudioSignal,
+  request: AnalyzeOptions,
+  stream: AudioStreamInfo,
+): Promise<Analysis> {
+  const asked = request.capabilities.filter((capability) => RHYTHM.includes(capability));
+  try {
+    const rate = Math.min(stream.sampleRate, RHYTHM_SAMPLE_RATE);
+    const clip = await clipKindSignal(target, stream, rate, undefined, "rhythm");
+    if (!clip) throw new Error("no audio stream");
+    // bpm in the window is the tempo of the window's beats, so the beats are measured even when only bpm is asked.
+    const measure =
+      asked.includes("bpm") && !asked.includes("beats") ? [...asked, "beats" as const] : asked;
+    const whole = await analyzeSignal(clip, {
+      ...request,
+      capabilities: measure,
+      fileOffset: target.clip!.from,
+      context: undefined,
+    });
+    const from = request.fileOffset ?? 0;
+    const to = from + target.window!.seconds;
+    return { ...whole, values: rhythmBetween(whole.values, asked, from, to) };
+  } catch (error) {
+    const rhythm = await analyzeSignal(signal, { ...request, capabilities: asked });
+    rhythm.warnings.push(
+      `beats, bars and sections use only the selected range: could not analyze the whole clip (${firstLine(error)})`,
+    );
+    return rhythm;
+  }
+}
+
+/**
+ * Analyzes the window, except what the window alone would misjudge, which comes from the whole clip: its kind, and
+ * when the window is only part of the clip, its rhythm.
+ */
 async function analyzeWindow(
   target: AudioTarget,
   signal: AudioSignal,
@@ -199,28 +327,26 @@ async function analyzeWindow(
   cache?: KindCacheSource,
 ) {
   const kindApart = request.capabilities.includes("kind") && target.clip !== undefined;
-  if (!kindApart) return analyzeSignal(signal, request);
-  const analysis = await analyzeSignal(signal, {
-    ...request,
-    capabilities: request.capabilities.filter((capability) => capability !== "kind"),
-  });
-  let kind;
-  try {
-    kind = await clipKind(target, request, stream, cache, coversPart(target) ? undefined : signal);
-    if (!kind) throw new Error("no audio stream");
-  } catch (error) {
-    kind = await analyzeSignal(signal, { ...request, capabilities: ["kind"] });
-    const reason = error instanceof Error ? error.message.split("\n")[0] : String(error);
-    kind.warnings.push(
-      `kind uses only the selected range: could not analyze the whole clip (${reason})`,
-    );
-  }
+  const rhythmApart =
+    coversPart(target) && request.capabilities.some((capability) => RHYTHM.includes(capability));
+  if (!kindApart && !rhythmApart) return analyzeSignal(signal, request);
+  const apart = (capability: AudioCapability) =>
+    (kindApart && capability === "kind") || (rhythmApart && RHYTHM.includes(capability));
+  const parts = [
+    await analyzeSignal(signal, {
+      ...request,
+      capabilities: request.capabilities.filter((capability) => !apart(capability)),
+    }),
+    ...(kindApart ? [await wholeClipKind(target, signal, request, stream, cache)] : []),
+    ...(rhythmApart ? [await wholeClipRhythm(target, signal, request, stream)] : []),
+  ];
+  const [window] = parts;
   return {
-    ...analysis,
-    values: { ...analysis.values, kind: kind.values.kind },
-    provenance: { ...analysis.provenance, ...kind.provenance },
-    ladder: { ...analysis.ladder, ...kind.ladder },
-    warnings: [...new Set([...analysis.warnings, ...kind.warnings])],
+    ...window!,
+    values: Object.assign({}, ...parts.map((part) => part.values)),
+    provenance: Object.assign({}, ...parts.map((part) => part.provenance)),
+    ladder: Object.assign({}, ...parts.map((part) => part.ladder)),
+    warnings: [...new Set(parts.flatMap((part) => part.warnings))],
   };
 }
 

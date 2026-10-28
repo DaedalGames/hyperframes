@@ -1,7 +1,11 @@
 import {
+  medianInterval,
+  rhythm,
   runLadder,
   signalDuration,
   signalProvider,
+  silence,
+  snapper,
   tempoOf,
   type AnalysisQuality,
   type AudioAnalysisProvider,
@@ -10,6 +14,7 @@ import {
   type Beats,
   type LadderResult,
   type LadderStep,
+  type SnapReport,
 } from "@hyperframes/core/audio-analysis";
 import { apiProvider } from "./providers/api.js";
 import { appleMuProvider, appleSoundProvider } from "./providers/apple.js";
@@ -121,11 +126,12 @@ export async function analyzeSignal(
     let result = ladders.get(capability);
     if (!result) {
       const withContext = capability === "onsets" && framing.cut;
-      result = runLadder(capability, withContext ? signal : framing.windowed, providers, {
+      const input = withContext ? signal : framing.windowed;
+      result = runLadder(capability, input, providers, {
         quality,
         provider: capability === "beats" ? beatProvider : request.provider?.[capability],
         options: optionsFor(capability, request, analysis.analyzed),
-      });
+      }).then((answer) => settled(capability, answer, input));
       ladders.set(capability, result);
     }
     return result;
@@ -157,6 +163,55 @@ function serviceHint(
   return quality === "local" && capabilities.some(leftToService)
     ? ["a service could have answered what is missing: --quality best uploads the audio to HeyGen"]
     : [];
+}
+
+/** Beats and downbeats as any provider answers them, once they are on the signal's own beats and marked where it is silent. */
+export interface MarkedBeats {
+  times: number[];
+  /** True for each beat that falls where the audio is silent: the grid runs on, but nothing sounds there. */
+  silent: boolean[];
+  meter?: number | null;
+  snap?: SnapReport;
+}
+
+const roundTime = (t: number) => Math.round(t * 1000) / 1000;
+
+/**
+ * One step after every ladder, so no provider is trusted on its own clock: a provider's beats and downbeats move onto
+ * the beats the signal measures when one is within a quarter beat, and every beat says whether it falls in silence.
+ */
+function settled(
+  capability: AudioCapability,
+  result: LadderResult,
+  signal: AudioSignal,
+): LadderResult {
+  if (capability !== "beats" && capability !== "downbeats") return result;
+  const value = result.value as Omit<MarkedBeats, "silent"> | null;
+  if (!value?.times) return result;
+  const onSignal =
+    result.provenance === "signal" ? value : snappedToSignal(capability, value, signal);
+  const quiet = silence(signal);
+  const silent = onSignal.times.map((t) => quiet.some((span) => t >= span.start && t < span.end));
+  return { ...result, value: { ...onSignal, silent } };
+}
+
+/** The beat is the answer's own beat interval, or its bar over its meter; the signal's when neither is known. */
+function snappedToSignal(
+  capability: "beats" | "downbeats",
+  value: Omit<MarkedBeats, "silent">,
+  signal: AudioSignal,
+) {
+  const measured = rhythm(signal).beats.times;
+  const interval = medianInterval(value.times);
+  const own =
+    capability === "beats" ? interval : interval && value.meter ? interval / value.meter : null;
+  const beat = own ?? medianInterval(measured) ?? 0;
+  const onBeat = snapper(measured, beat / 4, "signal beats");
+  return {
+    ...value,
+    times: value.times.map((t) => roundTime(onBeat.snap(t))),
+    snap: onBeat.report(),
+  };
 }
 
 /** Tempo is read off the beats of whichever provider placed them, so the two never disagree. */
