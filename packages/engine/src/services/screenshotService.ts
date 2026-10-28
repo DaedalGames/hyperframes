@@ -504,8 +504,13 @@ export async function applyDomLayerMask(
         showSelectors.push(`#${colorGradingEscaped}`, `#${colorGradingEscaped} *`);
       }
 
+      // A shown video's render frame and grading canvas are its siblings, so they count as shown too.
       const shownElements = args.show
-        .map(findElement)
+        .flatMap((id) => [
+          findElement(id),
+          document.getElementById(renderFrameId(id)),
+          document.getElementById(`${args.canvasIdPrefix}${id}`),
+        ])
         .filter((shown): shown is Element => shown !== null);
 
       const massHideRule = "body *{visibility:hidden !important;}";

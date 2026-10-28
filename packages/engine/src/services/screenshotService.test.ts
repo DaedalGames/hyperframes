@@ -951,6 +951,37 @@ describe("video-frame injection respects ancestor visibility", () => {
     }
   });
 
+  it("applyDomLayerMask keeps the render frame of an SDR video shown over an HDR video under a hidden ancestor", async () => {
+    const { window, document } = parseHTML(
+      `<html><head></head><body>
+        <div id="root" data-start="0">
+          <video id="hdr" data-start="0"></video>
+          <video id="pip" data-start="0"></video>
+          <img id="__render_frame_pip__">
+        </div>
+      </body></html>`,
+    );
+    const visibilityOf = (id: string) =>
+      (document.getElementById(id) as HTMLElement).style.visibility || "";
+    Object.defineProperty(window, "getComputedStyle", {
+      configurable: true,
+      value: (el: Element) => ({
+        display: (el as HTMLElement).style.display || "block",
+        visibility: (el as HTMLElement).style.visibility || "visible",
+      }),
+    });
+
+    const teardown = installDomMaskGlobals({ window, document });
+    try {
+      await applyDomLayerMask(passthroughPage(), ["pip"], ["root", "hdr"]);
+      expect(visibilityOf("root")).toBe("hidden");
+      expect(visibilityOf("hdr")).toBe("hidden");
+      expect(visibilityOf("__render_frame_pip__")).toBe("");
+    } finally {
+      teardown();
+    }
+  });
+
   it("removeDomLayerMask restores extraHideIds and render frames to previous visibility", async () => {
     const { window, document } = parseHTML(
       `<html><head></head><body>
