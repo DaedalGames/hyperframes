@@ -90,10 +90,8 @@ export function getMediaTreatmentCapabilityOverview() {
   };
 }
 
-// The grading payload key that names a family, where it differs from the family id.
 const FAMILY_PAYLOAD_KEY: Record<string, string> = { correction: "adjust" };
 
-/** The family a name printed by this command points at: its id, its label, or its payload key. */
 function familyIdFor(name: string): string | undefined {
   const wanted = name.toLowerCase();
   return getMediaTreatmentCapabilityOverview().families.find(
