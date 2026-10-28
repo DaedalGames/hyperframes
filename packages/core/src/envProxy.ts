@@ -1,4 +1,4 @@
-/** Whether Node was started so that `fetch` follows the proxy variables (`NODE_USE_ENV_PROXY=1` or `--use-env-proxy`). */
+/** Whether `fetch` follows the proxy variables (`NODE_USE_ENV_PROXY=1` or `--use-env-proxy`). */
 export function envProxyEnabled(
   env: NodeJS.ProcessEnv = process.env,
   execArgv: readonly string[] = process.execArgv,
