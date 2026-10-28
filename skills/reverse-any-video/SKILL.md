@@ -36,7 +36,7 @@ Write `REVERSE.md` (`references/spec.md`): the brief, the recurring objects, the
 
 ## 2. Rebuild by layer
 
-| Layer | Signed in (default) | Offline, or asked: local only |
+| Layer | Signed in (default) | Offline, or asked local only |
 | --- | --- | --- |
 | Text, shapes, UI, charts, transitions | HTML + GSAP, registry first | — |
 | Burned-in captions | a caption track styled like the original, timed from the transcript | — |
