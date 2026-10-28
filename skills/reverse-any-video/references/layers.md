@@ -46,7 +46,7 @@ The original's sound is one file, `measure extract .reverse/source.mp4 --out ass
 
 ## New pixels
 
-Presenters are re-shot by default when HeyGen is available; anything else is regenerated only when the person asks. Regenerated media is made with `npx hyperframes media-use generate` (`/media-use`). Ground every generation in the original:
+Signed in, every camera or generated pixel is remade with HeyGen by default: presenters re-shot, stills and shots generated, music generated to the original's length and tempo. Cut from the original only offline or when the person asks for local only. Regenerated media is made with `npx hyperframes media-use generate` (`/media-use`). Ground every generation in the original:
 
 - **A still:** `--type image --reference <the original frame>`, asked to keep the composition and leave out what HeyGen should not draw: a clean plate.
 - **A shot:** `--type video --first-frame <the shot's first frame>` at the shot's length, 5–15 s; a longer shot is chained shots, each starting from the last frame of the one before (`measure extract --at` cuts both).

@@ -36,14 +36,14 @@ Write `REVERSE.md` (`references/spec.md`): the brief, the recurring objects, the
 
 ## 2. Rebuild by layer
 
-| Layer | Default | When the person asks for new pixels |
+| Layer | Signed in (default) | Offline, or asked: local only |
 | --- | --- | --- |
 | Text, shapes, UI, charts, transitions | HTML + GSAP, registry first | — |
 | Burned-in captions | a caption track styled like the original, timed from the transcript | — |
 | Logos | SVG geometry; cut from the original when photographic | — |
-| Photos, footage, AI shots | each cut on its own (`measure extract --roi`) | generated (`/media-use`) |
-| A presenter | re-shot with HeyGen from a still and their own voice | — |
-| Sound | the original's track (`measure extract --out assets/sound.m4a`) as one `<audio id>` | voice, music (`/media-use`) |
+| Photos, footage, AI shots | generated from its frame (`/media-use`) | cut on its own (`measure extract --roi`) |
+| A presenter | re-shot with HeyGen from a still and their voice | cut from the original |
+| Sound | original voice (`measure extract --out assets/sound.m4a`), generated music | the original's track |
 
 `references/layers.md` covers placement, burned-in text over reused footage, fonts and regeneration. One sub-composition per segment (one scene when a single camera spans several); each string one element bound to a variable; colours as `:root` variables.
 
