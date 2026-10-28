@@ -30,7 +30,7 @@ import {
 } from "../../auth/index.js";
 import { getSystemMeta } from "../../telemetry/system.js";
 import { c } from "../../ui/colors.js";
-import { plansUrl } from "../../heygen/v3.js";
+import { pageUrl, readPlan, type Plan } from "../../heygen/plan.js";
 import { resolveMusic, resolveVoice } from "../../audio/providers.js";
 import {
   buildUnconfiguredJson,
@@ -50,6 +50,8 @@ interface VerifiedStatus {
    */
   persistedUser: StoredUserInfo | null;
   apiError: string | null;
+  /** The HyperFrames plan and credits, when the server (or the mock) answers. */
+  plan?: Plan | null;
 }
 
 /** True for credentials resolved from the shared file (not env). */
@@ -154,7 +156,7 @@ async function verify(credential: ResolvedCredential): Promise<VerifiedStatus> {
   const persistedUser = await loadPersistedUser(credential);
   try {
     const user = await client.getCurrentUser(credential);
-    return { credential, user, persistedUser, apiError: null };
+    return { credential, user, persistedUser, apiError: null, plan: await readPlan() };
   } catch (err) {
     if (!isAuthError(err)) throw err;
     return {
@@ -193,7 +195,7 @@ function printJsonStatus(s: VerifiedStatus): void {
     // unchanged. Lets callers read identity offline / on an API blip.
     persisted_user: persistedUserJson(s.persistedUser),
     api_error: s.apiError,
-    hyperframes: mockPlan(),
+    hyperframes: s.plan ?? null,
   };
   if (s.credential.type === "oauth") {
     payload["expires_at"] = s.credential.expires_at?.toISOString() ?? null;
@@ -242,24 +244,17 @@ function collectStatusRows(s: VerifiedStatus): [string, string][] {
     return rows;
   }
   if (s.user) rows.push(...identityRows(s.user));
-  const plan = mockPlan();
-  if (plan)
+  const plan = s.plan;
+  if (plan) {
+    const tag = plan.mock ? ` ${c.dim("(mock)")}` : "";
     rows.push([
       "HyperFrames:",
       plan.plan === "none"
-        ? `no plan · Subscribe: ${plansUrl()} ${c.dim("(mock)")}`
-        : `${plan.plan} plan, ${plan.credits} credits ${c.dim("(mock)")}`,
+        ? `no plan · Subscribe: ${pageUrl("plans")}${tag}`
+        : `${plan.plan} plan, ${plan.credits.toLocaleString("en-US")} credits${tag}`,
     ]);
+  }
   return rows;
-}
-
-// ponytail: HYPERFRAMES_MOCK_PLAN="pro:25000" | "none" stands in for the plan read the CLI client cannot make yet;
-// replace with GET /v1/payment/hyperframes/subscription once EF admits the CLI client.
-function mockPlan(): { plan: string; credits: number } | null {
-  const raw = process.env["HYPERFRAMES_MOCK_PLAN"]?.trim();
-  if (!raw) return null;
-  const [plan = "none", credits = "0"] = raw.split(":");
-  return { plan, credits: Number(credits) || 0 };
 }
 
 // fallow-ignore-next-line complexity

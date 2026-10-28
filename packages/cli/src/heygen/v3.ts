@@ -6,6 +6,7 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { resolveCloudAuthHeaders, resolveCloudBaseUrl } from "../cloud/auth.js";
 import { Fix } from "../measure/media.js";
+import { pageUrl } from "./plan.js";
 
 export interface Job {
   id: string;
@@ -26,26 +27,24 @@ export function idempotencyKey(route: string, parts: readonly (string | Buffer)[
   return `hf-${h.digest("hex").slice(0, 40)}`;
 }
 
-// The plans and credits pages are not live yet; HYPERFRAMES_PLANS_URL / HYPERFRAMES_CREDITS_URL override them.
-export const plansUrl = () => process.env["HYPERFRAMES_PLANS_URL"] || "https://hyperframes.studio/";
-const creditsUrl = () => process.env["HYPERFRAMES_CREDITS_URL"] || plansUrl();
-
 /** A refused call says what to do: sign in, subscribe, add credits, or change the request. */
 function refusal(status: number, body: unknown): Fix {
   const err = isRecord(body) && isRecord(body.error) ? body.error : isRecord(body) ? body : {};
   const code = String(err.code ?? err.failure_code ?? "");
   const message = String(err.message ?? err.failure_message ?? "").slice(0, 300);
   const url = typeof err.url === "string" ? err.url : undefined;
-  // The fix is the one line the agent relays as printed.
+  const needed = Number(err.needed_credits) || undefined;
+  const balance = err.balance === undefined ? "" : `, balance ${String(err.balance)}`;
+  // The fix is the one line the agent relays as printed; the problem says how to wait for the person.
   if (/hf_subscription_required/i.test(code))
     return new Fix(
-      "this needs a HyperFrames plan; nothing was charged",
-      `Subscribe: ${url ?? plansUrl()}`,
+      `this needs a HyperFrames plan; nothing was charged. Run \`npx hyperframes billing subscribe\`: it opens the page and waits`,
+      `Subscribe: ${url ?? pageUrl("plans", { needed })}`,
     );
   if (/hf_usage_exhausted/i.test(code))
     return new Fix(
-      "out of HyperFrames credits; nothing was charged",
-      `Add credits: ${url ?? creditsUrl()}`,
+      `out of HyperFrames credits (this step needs ${needed ?? "more"}${balance}); nothing was charged. Run \`npx hyperframes billing top-up${needed ? ` --needed ${needed}` : ""}\`: it opens the page and waits`,
+      `Add credits: ${url ?? pageUrl("credits", { needed })}`,
     );
   if (/api_key_required/i.test(code))
     return new Fix(

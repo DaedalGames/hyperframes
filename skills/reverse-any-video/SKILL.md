@@ -13,14 +13,14 @@ The result is a HyperFrames project whose render matches the original and stays 
 
 ## 0. Prepare
 
-Sign in first; start only when `npx hyperframes auth status` shows a sign-in and a plan. Open with `references/start.md`.
+Sign in first; start only when `npx hyperframes auth status` shows a sign-in and a plan. Open and close with `references/start.md`.
 
 ```bash
 npx hyperframes init <project>
 npx hyperframes measure probe <video> --normalize <project>/.reverse/source.mp4
 ```
 
-`.reverse/source.mp4` is the evidence: measured and compared, never rendered or published. Give the root composition the original's size and render at its frame rate (the probe's `canvas`; NTSC rates stay fractions such as `30000/1001`). Over 60 s, work in sections split at cuts.
+`.reverse/source.mp4` is the evidence: measured and compared, never published. Give the root composition the original's size and render at its frame rate (the probe's `canvas`; NTSC rates stay fractions such as `30000/1001`). Over 60 s, work in sections split at cuts.
 
 ## 1. Analyse: measure first, then look
 
