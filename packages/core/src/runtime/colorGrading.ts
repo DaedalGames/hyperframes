@@ -320,7 +320,6 @@ type LutCacheEntry =
 const LUT_CACHE = new Map<string, LutCacheEntry>();
 const COLOR_GRADING_CANVAS_ATTR = "data-hf-color-grading-canvas";
 const COLOR_GRADING_CANVAS_CLASS = "__hf_color_grading_canvas__";
-// A WebGL drawing buffer past these limits is silently clamped by the GPU, and what it draws is blank.
 const MAX_GRADING_CANVAS_PIXELS = 1 << 24;
 const MAX_GRADING_CANVAS_SIDE = 8192;
 
@@ -2903,8 +2902,6 @@ function resolvedLayoutSize(primary: number, fallback: number): number {
   return Math.max(0, Math.round(primary > 0 ? primary : fallback));
 }
 
-/** The pixel size to draw a clip at: its own, or smaller in the same shape when the GPU could not draw it, as for a
- * clip zoomed far past the screen. */
 function fitToGpuLimits(width: number, height: number): { width: number; height: number } {
   const scale = Math.min(
     1,
@@ -3789,8 +3786,6 @@ function installEntryListeners(entry: ColorGradingEntry): void {
   const redraw = () => {
     drawEntry(entry);
   };
-  // A video says it has data before the GPU can upload it, so this draw can sample nothing; the draw once the
-  // frame is presented is the one that holds the picture.
   const redrawOnPresentedFrame = () => {
     drawEntry(entry);
     scheduleVideoDraw(entry);
