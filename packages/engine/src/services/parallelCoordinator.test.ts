@@ -185,6 +185,15 @@ describe("computeWorkerSizing", () => {
     } finally {
       delete (process.versions as Record<string, string | undefined>).electron;
     }
+    // A packaged app runs the CLI on its own plain Node, tagged as the desktop client.
+    vi.stubEnv("HYPERFRAMES_CLIENT", "desktop/1.4.0/stable");
+    try {
+      expect(computeWorkerSizing(1300, undefined, { concurrency: "auto" }).heapBasedWorkers).toBe(
+        4,
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("sizes Apple-GPU disk capture by its own heap and core budget", () => {
