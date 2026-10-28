@@ -182,6 +182,22 @@ describe("analyzeSignal beats, from any provider", () => {
     );
   });
 
+  it("keeps a beat heard when only its own onset is missing, as at a drop the detector misses", async () => {
+    // a held tone under the clicks, so the gap is not silence: only the onset is missing
+    const signal = clicks(12, 6.2, 6.3);
+    const samples = signal.channels[0]!;
+    for (let i = 0; i < samples.length; i++)
+      samples[i]! += 0.05 * Math.sin((2 * Math.PI * 220 * i) / RATE);
+    expect(silence(signal)).toEqual([]);
+    const grid = Array.from({ length: 24 }, (_, k) => 0.25 + k * 0.5);
+    const beats = (
+      await analyzeSignal(signal, { capabilities: ["beats"] }, [answering("grid", grid)])
+    ).values.beats as MarkedBeats;
+    const missing = beats.times.findIndex((t) => Math.abs(t - 6.25) < 0.05);
+    expect(missing).toBeGreaterThan(0);
+    expect(beats.unheard[missing]).toBe(false);
+  });
+
   it("marks downbeats the same way, and moves them by the bar's own beat", async () => {
     const signal = clicks(12, 4, 6);
     const measured = rhythm(signal).beats.times;

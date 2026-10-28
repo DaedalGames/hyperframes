@@ -179,7 +179,7 @@ const NEAR_ONSET_SECONDS = 0.05;
 
 const roundTime = (t: number) => Math.round(t * 1000) / 1000;
 
-/** Every provider's beats move onto the signal's own within a quarter beat, and each says whether it is heard. */
+/** Beats move onto the signal's own; a beat is unheard in silence, or where two in a row have no onset. */
 function settled(
   capability: AudioCapability,
   result: LadderResult,
@@ -192,10 +192,13 @@ function settled(
     result.provenance === "signal" ? value : snappedToSignal(capability, value, signal);
   const quiet = silence(signal);
   const hits = onsets(signal).events.map((event) => event.t);
+  const bare = onSignal.times.map(
+    (t) => !hits.some((hit) => Math.abs(hit - t) <= NEAR_ONSET_SECONDS),
+  );
   const unheard = onSignal.times.map(
-    (t) =>
+    (t, i) =>
       quiet.some((span) => t >= span.start && t < span.end) ||
-      !hits.some((hit) => Math.abs(hit - t) <= NEAR_ONSET_SECONDS),
+      (bare[i]! && (bare[i - 1] === true || bare[i + 1] === true)),
   );
   return { ...result, value: { ...onSignal, unheard } };
 }
