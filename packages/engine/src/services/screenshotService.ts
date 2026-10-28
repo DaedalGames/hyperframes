@@ -19,6 +19,8 @@ import {
   renderFrameIdForRenderId,
 } from "@hyperframes/core";
 
+export const HDR_LAYER_UNIT_ATTR = "data-hf-layer-unit";
+
 export const cdpSessionCache = new WeakMap<Page, import("puppeteer-core").CDPSession>();
 
 export async function getCdpSession(page: Page): Promise<import("puppeteer-core").CDPSession> {
@@ -406,6 +408,7 @@ export async function applyDomLayerMask(
       show: string[];
       hide: string[];
       renderIdAttr: string;
+      layerUnitAttr: string;
       renderFramePrefix: string;
       renderFrameSuffix: string;
       styleId: string;
@@ -473,14 +476,21 @@ export async function applyDomLayerMask(
       };
 
       const showSelectors: string[] = [];
+      const findElement = (id: string) =>
+        window.__hfMediaEl?.(id) ??
+        document.getElementById(id) ??
+        document.querySelector(`[${args.layerUnitAttr}="${CSS.escape(id)}"]`);
       for (const id of args.show) {
-        const el = window.__hfMediaEl?.(id) ?? document.getElementById(id);
+        const el = findElement(id);
         if (el) rememberHiddenTimedDescendants(el);
         // Address the element by its render id when it has one. `#id` must not
         // be used as an extra fallback here: an id is duplicated exactly when
         // two compositions share it, so `#id` would also unhide the other
         // scene's element — the collision this render id exists to resolve.
-        if (el?.hasAttribute(args.renderIdAttr)) {
+        if (el?.hasAttribute(args.layerUnitAttr)) {
+          const byUnit = `[${args.layerUnitAttr}="${CSS.escape(id)}"]`;
+          showSelectors.push(byUnit, `${byUnit} *`);
+        } else if (el?.hasAttribute(args.renderIdAttr)) {
           const attrEscaped = id.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
           const byRenderId = `[${args.renderIdAttr}="${attrEscaped}"]`;
           showSelectors.push(byRenderId, `${byRenderId} *`);
@@ -510,7 +520,7 @@ export async function applyDomLayerMask(
       }
 
       for (const id of args.hide) {
-        const el = window.__hfMediaEl?.(id) ?? document.getElementById(id);
+        const el = findElement(id);
         if (el instanceof HTMLElement) {
           rememberAndHideElement(el);
         }
@@ -528,6 +538,7 @@ export async function applyDomLayerMask(
       show: showIds,
       hide: extraHideIds,
       renderIdAttr: MEDIA_RENDER_ID_ATTR,
+      layerUnitAttr: HDR_LAYER_UNIT_ATTR,
       renderFramePrefix: RENDER_FRAME_ID_PREFIX,
       renderFrameSuffix: RENDER_FRAME_ID_SUFFIX,
       styleId: DOM_LAYER_MASK_STYLE_ID,

@@ -11,7 +11,11 @@ import { type Page } from "puppeteer-core";
 import { promises as fs } from "fs";
 import { type FrameLookupTable } from "./videoFrameExtractor.js";
 import { touchCacheDir } from "./extractionCache.js";
-import { injectVideoFramesBatch, syncVideoFrameVisibility } from "./screenshotService.js";
+import {
+  HDR_LAYER_UNIT_ATTR,
+  injectVideoFramesBatch,
+  syncVideoFrameVisibility,
+} from "./screenshotService.js";
 import { type BeforeCaptureHook } from "./frameCapture.js";
 import { DEFAULT_CONFIG, type EngineConfig } from "../config.js";
 import {
@@ -187,7 +191,7 @@ export function createVideoFrameInjector(
   );
   const bytesLimit = bytesLimitMb * 1024 * 1024;
   const frameCache = createFrameSourceCache(entryLimit, bytesLimit, config?.frameSrcResolver);
-  const lastInjectedFrameByVideo = new Map<string, number>();
+  const lastInjectedFrameByVideo = new Map<string, string>();
   const lastCacheTouchByDir = new Map<string, number>();
 
   /**
@@ -214,24 +218,23 @@ export function createVideoFrameInjector(
       }
     }
 
-    const updates: Array<{ videoId: string; dataUri: string; frameIndex: number }> = [];
+    const updates: Array<{ videoId: string; dataUri: string; framePath: string }> = [];
     const restyleIds: string[] = [];
     const activeIds = new Set<string>();
     const isBlurSubSample = heldVideoTime !== undefined && heldVideoTime !== time;
     if (activePayloads.size > 0) {
-      const pendingReads: Array<Promise<{ videoId: string; dataUri: string; frameIndex: number }>> =
+      const pendingReads: Array<Promise<{ videoId: string; dataUri: string; framePath: string }>> =
         [];
       for (const [videoId, payload] of activePayloads) {
         activeIds.add(videoId);
-        const lastFrameIndex = lastInjectedFrameByVideo.get(videoId);
-        if (lastFrameIndex === payload.frameIndex) {
+        if (lastInjectedFrameByVideo.get(videoId) === payload.framePath) {
           if (!isBlurSubSample) restyleIds.push(videoId);
           continue;
         }
         pendingReads.push(
           frameCache
             .get(payload.framePath)
-            .then((dataUri) => ({ videoId, dataUri, frameIndex: payload.frameIndex })),
+            .then((dataUri) => ({ videoId, dataUri, framePath: payload.framePath })),
         );
       }
       updates.push(...(await Promise.all(pendingReads)));
@@ -249,7 +252,7 @@ export function createVideoFrameInjector(
       // injectVideoFramesBatch skips any video whose visual ancestor is
       // hidden (sub-comp host out-of-window) and returns the subset of ids
       // it really wrote — recording the rest would short-circuit the next
-      // call at the same frameIndex and leave the host's first visible
+      // call at the same frame and leave the host's first visible
       // frame blank.
       const injectedIds = new Set(
         await injectVideoFramesBatch(
@@ -260,7 +263,7 @@ export function createVideoFrameInjector(
       );
       for (const update of updates) {
         if (injectedIds.has(update.videoId)) {
-          lastInjectedFrameByVideo.set(update.videoId, update.frameIndex);
+          lastInjectedFrameByVideo.set(update.videoId, update.framePath);
         }
       }
       if (injectedIds.size > 0) {
@@ -534,7 +537,13 @@ export async function queryElementStacking(
   const hdrIds = Array.from(nativeHdrIds);
   return page.evaluate(
     // fallow-ignore-next-line complexity
-    (hdrIdList: string[], prefix: string, suffix: string): ElementStackingInfo[] => {
+    (
+      hdrIdList: string[],
+      prefix: string,
+      suffix: string,
+      layerUnitAttr: string,
+      canvasPrefix: string,
+    ): ElementStackingInfo[] => {
       const hdrSet = new Set(hdrIdList);
       const elements = document.querySelectorAll("[data-start]");
       const results: ElementStackingInfo[] = [];
@@ -774,11 +783,7 @@ export async function queryElementStacking(
         );
       }
 
-      for (const el of elements) {
-        // Report the render id so callers can match these back to the media list.
-        // `||`, not `??`: `__hfMediaId` yields "" for an element with neither id.
-        const id = window.__hfMediaId?.(el) || el.id;
-        if (!id) continue;
+      function describe(el: Element, id: string): ElementStackingInfo {
         const rect = el.getBoundingClientRect();
         const style = window.getComputedStyle(el);
         const zIndex = getEffectiveZIndex(el);
@@ -796,7 +801,7 @@ export async function queryElementStacking(
         // dimensions for non-HTML elements so callers always get sensible
         // layout numbers.
         const htmlEl = el instanceof HTMLElement ? el : null;
-        results.push({
+        return {
           id,
           zIndex,
           x: Math.round(rect.x),
@@ -820,12 +825,68 @@ export async function queryElementStacking(
           objectFit: style.objectFit || "fill",
           objectPosition: style.objectPosition || "50% 50%",
           clipRect: isHdrEl ? getClipRect(el) : null,
-        });
+        };
+      }
+
+      const hdrElements: Element[] = [];
+      for (const el of elements) {
+        // Report the render id so callers can match these back to the media list.
+        // `||`, not `??`: `__hfMediaId` yields "" for an element with neither id.
+        const id = window.__hfMediaId?.(el) || el.id;
+        if (!id) continue;
+        results.push(describe(el, id));
+        if (hdrSet.has(id)) hdrElements.push(el);
+      }
+
+      // Untimed content that paints above an HDR element (a later sibling of it or of an
+      // ancestor, or one with a higher z-index) is its own layer, so the HDR blit stays under it.
+      const lastHdrBelow = new Map<Element, Element>();
+      for (const hdrEl of hdrElements) {
+        const hdrZ = getEffectiveZIndex(hdrEl);
+        for (
+          let node: Element = hdrEl;
+          node.parentElement && node.parentElement !== document.body;
+          node = node.parentElement
+        ) {
+          let afterNode = false;
+          for (const sibling of node.parentElement.children) {
+            if (sibling === node) {
+              afterNode = true;
+              continue;
+            }
+            if (
+              sibling.hasAttribute("data-start") ||
+              sibling.matches("script,style,template,link,meta")
+            )
+              continue;
+            if (sibling.id.startsWith(prefix) || sibling.id.startsWith(canvasPrefix)) continue;
+            const siblingZ = getEffectiveZIndex(sibling);
+            if (siblingZ > hdrZ || (siblingZ === hdrZ && afterNode))
+              lastHdrBelow.set(sibling, hdrEl);
+          }
+        }
+      }
+      const seq = window as unknown as { __hfLayerUnitSeq?: number };
+      const placedAfter = new Map<Element, number>();
+      for (const [unit, hdrEl] of lastHdrBelow) {
+        let unitId = unit.getAttribute(layerUnitAttr);
+        if (!unitId) {
+          seq.__hfLayerUnitSeq = (seq.__hfLayerUnitSeq ?? 0) + 1;
+          unitId = `hf-layer-unit-${seq.__hfLayerUnitSeq}`;
+          unit.setAttribute(layerUnitAttr, unitId);
+        }
+        const hdrId = window.__hfMediaId?.(hdrEl) || hdrEl.id;
+        const placed = placedAfter.get(hdrEl) ?? 0;
+        const at = results.findIndex((entry) => entry.id === hdrId);
+        results.splice(at + 1 + placed, 0, describe(unit, unitId));
+        placedAfter.set(hdrEl, placed + 1);
       }
       return results;
     },
     hdrIds,
     RENDER_FRAME_ID_PREFIX,
     RENDER_FRAME_ID_SUFFIX,
+    HDR_LAYER_UNIT_ATTR,
+    HF_COLOR_GRADING_CANVAS_ID_PREFIX,
   );
 }
