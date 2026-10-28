@@ -167,6 +167,26 @@ describe("computeWorkerSizing", () => {
     expect(computeWorkerSizing(1300, undefined, { concurrency: "auto" }).workers).toBe(5);
   });
 
+  it("keeps the desktop app's 4,192 MB heap at the old per-worker figure (#5149)", () => {
+    vi.mocked(cpus).mockReturnValue(
+      Array.from({ length: 14 }, () => ({}) as ReturnType<typeof cpus>[number]),
+    );
+    vi.mocked(totalmem).mockReturnValue(24 * 1024 ** 3);
+    vi.mocked(getHeapStatistics).mockReturnValue({
+      heap_size_limit: 4192 * 1024 ** 2,
+    } as ReturnType<typeof getHeapStatistics>);
+    expect(computeWorkerSizing(1300, undefined, { concurrency: "auto" }).heapBasedWorkers).toBe(9);
+    Object.defineProperty(process.versions, "electron", { value: "44.2.0", configurable: true });
+    try {
+      const sizing = computeWorkerSizing(1300, undefined, { concurrency: "auto" });
+      expect(sizing.heapBasedWorkers).toBe(4);
+      expect(sizing.workers).toBe(4);
+      expect(sizing.boundBy).toBe("heap");
+    } finally {
+      delete (process.versions as Record<string, string | undefined>).electron;
+    }
+  });
+
   it("sizes Apple-GPU disk capture by its own heap and core budget", () => {
     vi.mocked(cpus).mockReturnValue(
       Array.from({ length: 14 }, () => ({}) as ReturnType<typeof cpus>[number]),

@@ -151,6 +151,8 @@ const HEAP_RESERVED_MB = 1024;
 // Parent heap per worker, by --trace-gc in a 10 GB container (10-28): 21 MB on a short film, 228 MB on a 1080×1920
 // video-heavy one (427 → 1,110 MB from 1 to 4 workers). 320 keeps 1.4× over that; `--workers N` still overrides.
 const HEAP_PER_WORKER_MB = 320;
+// Inside Electron (the desktop app) the old figure stays: its 4,192 MB heap cage is where 5 workers ran out (#5149).
+const ELECTRON_HEAP_PER_WORKER_MB = 640;
 // Apple-GPU disk capture measured ~15-25 MB parent heap per worker; 14 cores kept gaining to 8.
 const APPLE_DISK_HEAP_PER_WORKER_MB = 128;
 const APPLE_DISK_CORES_PER_WORKER = 1.75;
@@ -330,7 +332,11 @@ export function computeWorkerSizing(
     1,
     Math.floor(
       (heapLimitMb - HEAP_RESERVED_MB) /
-        (appleDisk ? APPLE_DISK_HEAP_PER_WORKER_MB : HEAP_PER_WORKER_MB),
+        (appleDisk
+          ? APPLE_DISK_HEAP_PER_WORKER_MB
+          : process.versions.electron
+            ? ELECTRON_HEAP_PER_WORKER_MB
+            : HEAP_PER_WORKER_MB),
     ),
   );
   // A CPU quota (docker --cpus) bounds workers at its whole CPUs: at 3.5, 3 beat 2 and 4 (johnny, 10-28).
