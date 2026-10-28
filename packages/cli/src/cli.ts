@@ -212,6 +212,9 @@ const cliCommandArg = process.argv[2];
 // check), so its type can't be inferred from its own initializer.
 const command: string = cliCommandArg && cliCommandArg in subCommands ? cliCommandArg : "unknown";
 const hasJsonFlag = process.argv.includes("--json");
+// A render relaunched with a larger heap (utils/renderHeap.ts sets this): its parent already counts the command
+// and prints the notices, so the child skips them.
+const isHeapRelaunch = process.env.HF_RENDER_HEAP_MB !== undefined;
 
 // Captured references — populated when the lazy imports resolve.
 // Used in exit handlers where dynamic import() is unsafe (beforeExit loops,
@@ -253,6 +256,7 @@ if (
   telemetryReady = import("./telemetry/index.js").then((mod) => {
     _flushSync = mod.flushSync;
     _trackCliError = mod.trackCliError;
+    if (isHeapRelaunch) return;
     _trackCommandResult = mod.trackCommandResult;
     mod.showTelemetryNotice();
     mod.trackCommand(command, runId);
@@ -272,6 +276,7 @@ if (
 // cached check while reporting fresh results of its own).
 if (
   !isHelp &&
+  !isHeapRelaunch &&
   command !== "upgrade" &&
   command !== "events" &&
   command !== "telemetry" &&
@@ -310,7 +315,11 @@ if (
 
 // A command run on a project the desktop app chatted about since it was last caught up on ends by saying so.
 let _appHistoryNotice: string | null = null;
-if (!isHelp && !["unknown", "catch-up", "events", "telemetry"].includes(command)) {
+if (
+  !isHelp &&
+  !isHeapRelaunch &&
+  !["unknown", "catch-up", "events", "telemetry"].includes(command)
+) {
   import("./utils/appHistory.js")
     .then((mod) => {
       _appHistoryNotice = mod.appHistoryNotice(process.cwd(), process.argv.slice(3));

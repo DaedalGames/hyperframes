@@ -31,6 +31,9 @@ describe("renderHeapToRelaunch", () => {
     expect(
       renderHeapToRelaunch({ ...container, execArgv: ["--max-old-space-size=2048"] }),
     ).toBeNull();
+    expect(
+      renderHeapToRelaunch({ ...container, execArgv: ["--max_old_space_size=2048"] }),
+    ).toBeNull();
     expect(renderHeapToRelaunch({ ...container, env: { [RENDER_HEAP_ENV]: "2944" } })).toBeNull();
   });
 });

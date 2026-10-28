@@ -7,6 +7,9 @@ import { constants } from "node:os";
 import { getHeapStatistics } from "node:v8";
 import { getSystemTotalMb, heapMbForAutoWorkers } from "@hyperframes/engine";
 
+// V8 takes the flag with dashes or underscores.
+const HEAP_FLAG = /--max[-_]old[-_]space[-_]size/;
+
 /** Set in the relaunched process (to the heap it was given), so it never relaunches again. */
 export const RENDER_HEAP_ENV = "HF_RENDER_HEAP_MB";
 
@@ -31,8 +34,8 @@ function liveFacts(): RenderHeapFacts {
 /** The heap (MB) to relaunch the render with, or null when this process's heap already suffices or is set by hand. */
 export function renderHeapToRelaunch(facts: RenderHeapFacts = liveFacts()): number | null {
   const setByHand =
-    /--max-old-space-size/.test(facts.env.NODE_OPTIONS ?? "") ||
-    facts.execArgv.some((arg) => arg.startsWith("--max-old-space-size"));
+    HEAP_FLAG.test(facts.env.NODE_OPTIONS ?? "") ||
+    facts.execArgv.some((arg) => HEAP_FLAG.test(arg));
   if (facts.env[RENDER_HEAP_ENV] || setByHand) return null;
   const target = Math.min(facts.neededMb, Math.floor(facts.memoryMb / 2));
   // Below one worker's share (640 MB) more, the budget would give the same count.
@@ -47,7 +50,11 @@ export function relaunchWithHeap(heapMb: number): Promise<number> {
     { stdio: "inherit", env: { ...process.env, [RENDER_HEAP_ENV]: String(heapMb) } },
   );
   const forward = (signal: NodeJS.Signals) => child.kill(signal);
-  const signals: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP"];
+  // A detached render leaves SIGHUP at its default (renderCancellation.ts), so forwarding it would kill the child.
+  const signals: NodeJS.Signals[] =
+    process.env.HYPERFRAMES_RENDER_DETACHED === "1"
+      ? ["SIGINT", "SIGTERM"]
+      : ["SIGINT", "SIGTERM", "SIGHUP"];
   for (const signal of signals) process.on(signal, forward);
   return new Promise((resolve) => {
     child.on("error", () => resolve(1));
