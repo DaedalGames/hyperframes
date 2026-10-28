@@ -3509,6 +3509,8 @@ function renderGradedFrame(
   );
   drawFullscreenQuad(gl, { quad: program.quad, position: shader.position });
   if (gl.drawingBufferWidth < layout.width || gl.drawingBufferHeight < layout.height) {
+    restoreSourceElement(entry);
+    entry.canvas.style.display = "none";
     throw new Error("The GPU's drawing buffer is smaller than the grading canvas");
   }
   presentEntry(entry, layout);

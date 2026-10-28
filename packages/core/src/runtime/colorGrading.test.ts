@@ -128,8 +128,12 @@ function createMockWebGl(
     drawArrays: vi.fn(),
     deleteTexture: vi.fn(),
     deleteBuffer: vi.fn(),
-    drawingBufferWidth: options.drawingBuffer?.width,
-    drawingBufferHeight: options.drawingBuffer?.height,
+    get drawingBufferWidth() {
+      return options.drawingBuffer?.width;
+    },
+    get drawingBufferHeight() {
+      return options.drawingBuffer?.height;
+    },
   } as unknown as WebGLRenderingContext;
 }
 
@@ -974,6 +978,23 @@ describe("createColorGradingRuntime", () => {
     const { video } = startRuntimeWithVideo();
 
     expect(video.style.getPropertyValue("opacity")).not.toBe("0");
+  });
+
+  it("gives a drawn clip back to its source when a later draw outgrows the drawing buffer", () => {
+    const drawingBuffer = { width: 4096, height: 4096 };
+    getContextSpy.mockImplementation((type: string) =>
+      type === "webgl" ? createMockWebGl({ drawingBuffer }) : type === "2d" ? mock2d() : null,
+    );
+    const { video, canvas } = startRuntimeWithVideo();
+    expect(video.style.getPropertyValue("opacity")).toBe("0");
+
+    drawingBuffer.width = 100;
+    drawingBuffer.height = 100;
+    Object.defineProperty(video, "offsetWidth", { value: 3000, configurable: true });
+    video.dispatchEvent(new Event("seeked"));
+
+    expect(video.style.getPropertyValue("opacity")).not.toBe("0");
+    expect(canvas.style.display).toBe("none");
   });
 
   it("draws a paused video again once its frame is presented, after the first draw sampled nothing", () => {
