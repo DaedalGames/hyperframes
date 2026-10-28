@@ -26,20 +26,31 @@ export function idempotencyKey(route: string, parts: readonly (string | Buffer)[
   return `hf-${h.digest("hex").slice(0, 40)}`;
 }
 
-/** A refused call says what to do: sign in, top up, or change the request. */
+// The plans and credits pages are not live yet; HYPERFRAMES_PLANS_URL / HYPERFRAMES_CREDITS_URL override them.
+const plansUrl = () => process.env["HYPERFRAMES_PLANS_URL"] || "https://hyperframes.studio/";
+const creditsUrl = () => process.env["HYPERFRAMES_CREDITS_URL"] || plansUrl();
+
+/** A refused call says what to do: sign in, subscribe, add credits, or change the request. */
 function refusal(status: number, body: unknown): Fix {
   const err = isRecord(body) && isRecord(body.error) ? body.error : isRecord(body) ? body : {};
   const code = String(err.code ?? err.failure_code ?? "");
   const message = String(err.message ?? err.failure_message ?? "").slice(0, 300);
+  const url = typeof err.url === "string" ? err.url : undefined;
+  // The fix is the one line the agent relays as printed.
+  if (/hf_subscription_required/i.test(code))
+    return new Fix(
+      "this needs a HyperFrames plan; nothing was charged",
+      `Subscribe: ${url ?? plansUrl()}`,
+    );
+  if (/hf_usage_exhausted/i.test(code))
+    return new Fix(
+      "out of HyperFrames credits; nothing was charged",
+      `Add credits: ${url ?? creditsUrl()}`,
+    );
   if (/api_key_required/i.test(code))
     return new Fix(
-      "this HeyGen route takes an API key; a sign-in covers video, avatar and voice only",
-      "set HEYGEN_API_KEY (charged to API credits), or leave this step to the free path",
-    );
-  if (/hf_usage_exhausted|hf_subscription_required/i.test(code))
-    return new Fix(
-      `the HyperFrames plan's HeyGen allowance is used up (${code})`,
-      "set HEYGEN_API_KEY to continue on API credits",
+      "this HeyGen feature is not available with this sign-in yet; nothing was charged",
+      "continue without this step",
     );
   if (status === 401 || status === 403)
     return new Fix(
@@ -70,10 +81,7 @@ async function call(
 ): Promise<Job> {
   const headers: Record<string, string> = {
     ...(await resolveCloudAuthHeaders().catch(() => {
-      throw new Fix(
-        "no HeyGen sign-in on this machine",
-        "npx hyperframes auth login, or set HEYGEN_API_KEY",
-      );
+      throw new Fix("no HeyGen sign-in on this machine", "npx hyperframes auth login");
     })),
     accept: "application/json",
   };

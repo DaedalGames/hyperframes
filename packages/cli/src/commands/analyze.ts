@@ -138,7 +138,7 @@ export default defineCommand({
       if (!credential)
         throw new Fix(
           "analyze needs a HeyGen sign-in; without one, measure the video and look at its frames instead",
-          "npx hyperframes auth login, or set HEYGEN_API_KEY",
+          "npx hyperframes auth login",
         );
       const info = probeVideo(String(args.video));
       const a = num(args.start, "--start", 0);
@@ -201,8 +201,8 @@ export default defineCommand({
               credential.type === "oauth"
             )
               throw new Fix(
-                "HeyGen's video analysis takes an API key, not a sign-in",
-                "set HEYGEN_API_KEY, or continue without analyze: measure the video and look at its frames",
+                "HeyGen's video analysis is not available with this sign-in yet",
+                "continue without analyze: measure the video and look at its frames",
               );
             throw err;
           });

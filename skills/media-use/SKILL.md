@@ -29,7 +29,7 @@ It prints one line, `resolved <id> → <path> (<type>, <metadata>)`. List reusab
 | Cutouts | | `heygen background-removal` | `npx hyperframes remove-background` |
 | Grades, LUTs, looks | `npx hyperframes media-treatment` | | |
 
-**Sign in.** Every time a request needs a HeyGen model or the catalog, check the sign-in first with `npx hyperframes auth status`. With none, tell the person in one line that sign-in is free and gives Voice Turbo, the music catalog and asset search, then run `npx hyperframes auth login` and show the link it prints. Don't fall back to local models on your own; use local tools only when the person asks.
+**Sign in.** Every time a request needs a HeyGen model or the catalog, check the sign-in first with `npx hyperframes auth status`. With none, tell the person in one line that sign-in is free and gives Voice Turbo, the music catalog and asset search, then run `npx hyperframes auth login`, allowing it 3 minutes: it opens the sign-in page and waits for the person. Don't fall back to local models on your own; use local tools only when the person asks.
 
 **Host apps.** Inside an app with its own media tools, use those first. When `HEYGEN_API_BASE` is set, the host pays for HeyGen: don't ask for a sign-in, and when a call is refused, relay the host's message as written and stop.
 

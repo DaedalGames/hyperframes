@@ -43,6 +43,18 @@ describe("runJob", () => {
     await expect(runJob("/v3/x", {}, "k", (id) => id)).rejects.toMatchObject({
       fix: expect.stringContaining("top up"),
     });
+    vi.stubGlobal("fetch", async () =>
+      reply(402, { error: { code: "hf_subscription_required", message: "no plan" } }),
+    );
+    await expect(runJob("/v3/x", {}, "k", (id) => id)).rejects.toMatchObject({
+      fix: "Subscribe: https://hyperframes.studio/",
+    });
+    vi.stubGlobal("fetch", async () =>
+      reply(402, { code: "hf_usage_exhausted", url: "https://pay.test/credits" }),
+    );
+    await expect(runJob("/v3/x", {}, "k", (id) => id)).rejects.toMatchObject({
+      fix: "Add credits: https://pay.test/credits",
+    });
     vi.stubGlobal("fetch", async () => reply(401, { message: "bad" }));
     await expect(runJob("/v3/x", {}, "k", (id) => id)).rejects.toMatchObject({
       fix: "npx hyperframes auth login",
