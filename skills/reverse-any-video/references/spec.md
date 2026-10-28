@@ -61,7 +61,7 @@ Follow the original's own units: split at cuts and layout changes, never inside 
 | ------------------- | --------------------------------------------------------------------- | ---------------------------------------- |
 | `rebuilt` (default) | drawn in HTML: text, shapes, UI                                       | SSIM, whole frame and worst cell         |
 | `reused`            | cut from the original with `measure extract`, overlays rebuilt on top | SSIM, which should come out near 1       |
-| `regenerated`       | new media the person asked for                                        | how much and when it moves, and its look |
+| `regenerated`       | made with HeyGen: the signed-in default, or what the person asked for | how much and when it moves, and its look |
 
 ## Report
 

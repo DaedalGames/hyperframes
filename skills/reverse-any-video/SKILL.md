@@ -58,11 +58,11 @@ Write `REVERSE.md` (`references/spec.md`): the brief, the recurring objects, the
 
 Fix what `worst.jpg` shows: missing elements, then position and size, then timing, then colour. Stop when every segment passes, or after two rounds without gain on the worst segment, and write what is left in the report (`references/check.md`).
 
-Segments handed to subagents: wait for every one in the same turn, then assemble `REVERSE.md` and run step 4 yourself. A headless run (`claude -p`, `codex exec`, CI) ends with your turn and drops background work; a segment left empty still scores high on a plain background, which `diff` flags as missing content.
+Segments handed to subagents: wait for every one in the same turn, then assemble `REVERSE.md` and run step 4 yourself. A headless run (`claude -p`) ends with your turn and drops background work; a segment left empty still scores high on a plain background, which `diff` flags as missing content.
 
 ## Rules
 
-- Cut only what cannot be drawn. A clip of the original that carries a map, chart, title or UI along is a copy, not a reverse.
+- What cannot be drawn is generated with HeyGen when signed in, cut only offline. A clip carrying a chart, title or UI is a copy, not a reverse.
 - Build mechanisms, not traced paths: no coordinate lists or per-frame positions.
 - Copy every string exactly: case, punctuation, line breaks.
 - Keep hard cuts hard, holds held and one-frame flashes one frame long.
