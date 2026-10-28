@@ -301,6 +301,8 @@ export interface WorkerSizing {
   captureCostMultiplier: number;
   /** true when the chosen count exceeds the heap budget (only an explicit request can). */
   exceedsHeapAdvisory: boolean;
+  /** The count every other bound allows, before the heap budget clamps it. */
+  preHeapWorkers: number;
 }
 
 /**
@@ -340,12 +342,18 @@ export function computeWorkerSizing(
     cpuCount,
     captureCostMultiplier,
   };
-  const finish = (workers: number, boundBy: WorkerSizingBound, effectiveMaxWorkers: number) => ({
+  const finish = (
+    workers: number,
+    boundBy: WorkerSizingBound,
+    effectiveMaxWorkers: number,
+    preHeapWorkers: number = workers,
+  ) => ({
     workers,
     boundBy,
     effectiveMaxWorkers,
     ...base,
     exceedsHeapAdvisory: workers > heapBasedWorkers,
+    preHeapWorkers,
   });
 
   if (requested !== undefined) {
@@ -404,12 +412,23 @@ export function computeWorkerSizing(
     }
   }
 
+  const preHeapWorkers = finalWorkers;
   if (finalWorkers > heapBasedWorkers) {
     finalWorkers = heapBasedWorkers;
     boundBy = "heap";
   }
 
-  return finish(finalWorkers, boundBy, effectiveMaxWorkers);
+  return finish(finalWorkers, boundBy, effectiveMaxWorkers, preHeapWorkers);
+}
+
+/**
+ * The V8 heap (MB) a render process needs for auto sizing of a long render to stop at its CPU and memory bounds
+ * instead of the heap's. Node sizes its default heap from the memory it sees and caps it near 2–4 GB: in a 10 GB
+ * container that is 2,096 MB, which the heap budget floors to one capture worker on any number of cores.
+ */
+export function heapMbForAutoWorkers(config?: WorkerSizingConfig): number {
+  const sizing = computeWorkerSizing(Number.MAX_SAFE_INTEGER, undefined, config);
+  return HEAP_RESERVED_MB + sizing.preHeapWorkers * HEAP_PER_WORKER_MB;
 }
 
 export function calculateOptimalWorkers(

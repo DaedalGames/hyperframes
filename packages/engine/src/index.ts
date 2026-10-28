@@ -298,6 +298,7 @@ export type {
 export {
   calculateOptimalWorkers,
   computeWorkerSizing,
+  heapMbForAutoWorkers,
   selectVerifySampleIndicesForTask,
   verifyDiskDrawElementSamples,
   distributeFrames,
