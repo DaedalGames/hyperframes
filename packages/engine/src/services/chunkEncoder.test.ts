@@ -1071,7 +1071,7 @@ describe("buildEncoderArgs GPU preset mapping", () => {
     expect(presetArg(args)).toBe("p4");
   });
 
-  it("translates the high slow preset to NVENC p5", () => {
+  it("translates the slow preset to NVENC p5", () => {
     const args = buildEncoderArgs(
       { ...baseOptions, codec: "h264", preset: "slow", quality: 15, useGpu: true },
       inputArgs,
