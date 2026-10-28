@@ -105,7 +105,6 @@ export interface VideoElement {
   loop: boolean;
   hasAudio: boolean;
   hidden?: boolean;
-  /** Carries a `data-color-grading` treatment, which grades in SDR. */
   graded?: boolean;
 }
 
@@ -858,8 +857,14 @@ export interface ImageElement {
   src: string;
   start: number;
   end: number;
-  /** Carries a `data-color-grading` treatment, which grades in SDR. */
   graded?: boolean;
+}
+
+export function hasGradedCanvas(html: string): boolean {
+  return (
+    parseHTML(unwrapTemplate(html)).document.querySelector(`canvas[${HF_COLOR_GRADING_ATTR}]`) !==
+    null
+  );
 }
 
 export function parseImageElements(html: string): ImageElement[] {

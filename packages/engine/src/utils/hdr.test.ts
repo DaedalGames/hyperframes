@@ -233,5 +233,6 @@ describe("gradingKeepsSdr", () => {
     expect(gradingKeepsSdr("auto", graded)).toBe(true);
     expect(gradingKeepsSdr("force-hdr", graded)).toBe(false);
     expect(gradingKeepsSdr("auto", { videos: [{}], images: [] })).toBe(false);
+    expect(gradingKeepsSdr("auto", { videos: [], images: [], gradedCanvas: true })).toBe(true);
   });
 });

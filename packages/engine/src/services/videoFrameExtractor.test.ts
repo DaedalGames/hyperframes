@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import {
   parseVideoElements,
+  hasGradedCanvas,
   parseImageElements,
   extractAllVideoFrames,
   extractVideoFramesRange,
@@ -751,6 +752,10 @@ describe("parseVideoElements", () => {
       ["gi", true],
       ["pi", undefined],
     ]);
+    expect(hasGradedCanvas(html)).toBe(false);
+    expect(
+      hasGradedCanvas(`<canvas data-color-grading='{"preset":"clean-studio"}'></canvas>`),
+    ).toBe(true);
   });
 
   it.each([

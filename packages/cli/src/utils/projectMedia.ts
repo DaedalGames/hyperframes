@@ -9,6 +9,7 @@ import { loadProducer } from "./producer.js";
 export interface ProjectMedia {
   videos: readonly Pick<VideoElement, "src" | "hasAudio" | "graded">[];
   images: readonly { src: string; graded?: boolean }[];
+  gradedCanvas?: boolean;
   audios: readonly AudioElement[];
   /** The bundled document the lists were read from. */
   html: string;

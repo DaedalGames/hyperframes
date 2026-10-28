@@ -145,11 +145,16 @@ export function findHdrAutoPromotion(
 /** Grading is SDR-only, so in auto mode a composition with graded media renders SDR, as `--sdr` does. */
 export function gradingKeepsSdr(
   hdrMode: "auto" | "force-hdr" | "force-sdr" | undefined,
-  media: { videos: readonly { graded?: boolean }[]; images: readonly { graded?: boolean }[] },
+  media: {
+    videos: readonly { graded?: boolean }[];
+    images: readonly { graded?: boolean }[];
+    gradedCanvas?: boolean;
+  },
 ): boolean {
   return (
     (hdrMode ?? "auto") === "auto" &&
-    [...media.videos, ...media.images].some(({ graded }) => graded === true)
+    (media.gradedCanvas === true ||
+      [...media.videos, ...media.images].some(({ graded }) => graded === true))
   );
 }
 
