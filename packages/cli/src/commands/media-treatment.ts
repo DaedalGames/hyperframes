@@ -90,6 +90,18 @@ export function getMediaTreatmentCapabilityOverview() {
   };
 }
 
+// The grading payload key that names a family, where it differs from the family id.
+const FAMILY_PAYLOAD_KEY: Record<string, string> = { correction: "adjust" };
+
+/** The family a name printed by this command points at: its id, its label, or its payload key. */
+function familyIdFor(name: string): string | undefined {
+  const wanted = name.toLowerCase();
+  return getMediaTreatmentCapabilityOverview().families.find(
+    ({ id, label }) =>
+      id === wanted || label.toLowerCase() === wanted || FAMILY_PAYLOAD_KEY[id] === wanted,
+  )?.id;
+}
+
 export function getMediaTreatmentCapabilityDetail(id: string): unknown {
   const capabilities = getHfColorGradingCapabilities();
   const animation = (path: string) => {
@@ -306,6 +318,8 @@ export function getMediaTreatmentCapabilityDetail(id: string): unknown {
 
   const detail = Object.hasOwn(details, id) ? Reflect.get(details, id) : undefined;
   if (detail) return detail;
+  const family = familyIdFor(id);
+  if (family && family !== id) return getMediaTreatmentCapabilityDetail(family);
   const families = [...Object.keys(details), ...capabilities.effectFamilies.map((f) => f.id)];
   throw new Error(
     `Unknown media-treatment capability: ${id}. Available areas: ${families.join(", ")}.`,
