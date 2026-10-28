@@ -37,7 +37,7 @@ describe("auth status — persisted user block surface", () => {
   let stdout: string[];
 
   beforeEach(async () => {
-    envFixture = await setupTempAuthEnv("hf-status-");
+    envFixture = await setupTempAuthEnv("hf-status-99-");
     probeState.apiReject = false;
     probeState.user = { email: "live@example.com" };
     stdout = [];
@@ -119,9 +119,9 @@ describe("auth status — persisted user block surface", () => {
     if (mode === "hyperframes_dev") expect(text).toContain(join("dev", "credentials"));
     if (mode === "api_key") {
       expect(text).toContain("Wallet:");
-      expect(text).toContain("99");
+      expect(text).toMatch(/^Wallet:\s+99$/m);
     } else {
-      expect(text).not.toContain("99");
+      expect(text).not.toMatch(/^Wallet:/m);
       expect(text).not.toContain("HeyGen Pro");
       expect(text).toContain(
         mode.startsWith("hyperframes")
