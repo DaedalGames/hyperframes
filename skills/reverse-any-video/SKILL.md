@@ -30,7 +30,7 @@ You see stills, not motion, and evenly spaced frames turn cuts into dissolves an
 2. `measure frames --every 1` for the overview, `measure frames --events` for each window's consecutive frames, `measure trail` to see a move in one picture.
 3. Numbers from `measure box | ink | curve | objects | rhythm | look`; words from `npx hyperframes transcribe`; beats from `npx hyperframes audio`.
 
-`npx hyperframes analyze .reverse/source.mp4 --preset reverse` can draft the same timeline first; correct the draft against the frames either way.
+Start with `npx hyperframes analyze .reverse/source.mp4 --preset reverse`: HeyGen drafts the same timeline; correct it against the frames.
 
 Write `REVERSE.md` (`references/spec.md`): the brief, the recurring objects, then one section per segment with its copy, actions, times and where its pixels come from. Every number comes from a measurement; tag each claim observed, measured or hypothesis.
 
