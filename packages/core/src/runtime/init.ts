@@ -167,6 +167,7 @@ import {
 } from "./captureMotionBlur";
 import { TransportClock } from "./clock";
 import { WebAudioTransport } from "./webAudioTransport";
+import { watchAudioLoadErrors } from "./mediaLoadFailure";
 import {
   classifyWebAudioMediaRoute,
   isRouteSelectionSettled,
@@ -3601,6 +3602,7 @@ export function initSandboxRuntimeModular(): void {
   runtimeCleanupCallbacks.push(() => {
     document.removeEventListener("play", onMediaPlayWakeTransport, true);
   });
+  runtimeCleanupCallbacks.push(watchAudioLoadErrors(document));
 
   let lastVisibilityPassSeconds: number | null = null;
   const syncMediaForCurrentState = (timingRevision?: number) => {
@@ -4511,7 +4513,8 @@ export function initSandboxRuntimeModular(): void {
     bindRootTimelineIfAvailable();
     postTimeline();
   };
-  // Scenes Studio holds mounted for selecting or editing, whatever the playhead does.
+  // Scenes held mounted whatever the playhead does: Studio's for selecting or editing, the inspector's for a query.
+  const holds = new Map<string, Set<string>>();
   let heldScenes = new Set<string>();
   moveSceneWindow = (time: number): boolean => {
     if (windowScenes.length === 0 || state.tornDown) return false;
@@ -4558,9 +4561,12 @@ export function initSandboxRuntimeModular(): void {
     if (landed) registerSeekCompletion(windowWork);
     return landed !== undefined;
   };
-  // Mounts the named scenes and keeps them mounted until the next call names others.
-  const holdScenes = async (names: string[]): Promise<void> => {
-    heldScenes = new Set(names.filter((name) => windowScenes.some((s) => s.name === name)));
+  // Mounts the named scenes and keeps them mounted until the same holder's next call names others.
+  const holdScenes = async (names: string[], holder = "studio"): Promise<void> => {
+    const scenes = new Set(names.filter((name) => windowScenes.some((s) => s.name === name)));
+    if (scenes.size) holds.set(holder, scenes);
+    else holds.delete(holder);
+    heldScenes = new Set([...holds.values()].flatMap((held) => [...held]));
     windowNear = "";
     // Bounded: a scene that cannot mount must not keep this waiting.
     for (let turn = 0; turn <= windowScenes.length && !state.tornDown; turn++) {

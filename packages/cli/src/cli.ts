@@ -31,6 +31,7 @@ for (const stream of [process.stdout, process.stderr]) {
 // probe lands in a directory that does not contain the bundled worker.
 // We emit the worker entry next to cli.js (see tsup.config.ts) and tell
 // the pool where to find it via the published env-var override.
+import "./utils/hideChildConsoles.js";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
@@ -49,6 +50,10 @@ import { existsSync } from "node:fs";
 import { VERSION } from "./version.js";
 
 let argv = process.argv.slice(2);
+if (argv[0] === "help") {
+  process.argv = [...process.argv.slice(0, 2), ...argv.slice(1), "--help"];
+  argv = process.argv.slice(2);
+}
 const commandArg = argv[0];
 const rootVersionRequested =
   commandArg === "--version" ||
@@ -87,8 +92,14 @@ import { defineCommand } from "./utils/defineCommand.js";
 import type { ArgsDef, CommandDef } from "citty";
 import { getRunId } from "./telemetry/runId.js";
 import { reportCommandFailure, trackCommandFailures } from "./utils/command-failure-tracking.js";
-import { isRenderSucceeded } from "./utils/render-success-state.js";
-import { resolveCommandUsage } from "./utils/commandUsageResolution.js";
+import {
+  isRenderSucceeded,
+  isRunDelivered,
+  markCommandDelivered,
+} from "./utils/render-success-state.js";
+import { resolveCommandUsage, type ResolvedCommandUsage } from "./utils/commandUsageResolution.js";
+import { closestMatch } from "./utils/didYouMean.js";
+import { jsonErrorBody, watchOutput, writeJsonFailure } from "./utils/jsonError.js";
 import { isDevMode } from "./utils/env.js";
 import {
   CliResultSignal,
@@ -212,9 +223,8 @@ const cliCommandArg = process.argv[2];
 // check), so its type can't be inferred from its own initializer.
 const command: string = cliCommandArg && cliCommandArg in subCommands ? cliCommandArg : "unknown";
 const hasJsonFlag = process.argv.includes("--json");
-// A render relaunched with a larger heap (utils/renderHeap.ts sets this): its parent already counts the command
-// and prints the notices, so the child skips them.
-const isHeapRelaunch = process.env.HF_RENDER_HEAP_MB !== undefined;
+// Under --json a failure always answers on stdout with the shared envelope (see executeCli).
+const jsonOutput = hasJsonFlag ? watchOutput() : undefined;
 
 // Captured references — populated when the lazy imports resolve.
 // Used in exit handlers where dynamic import() is unsafe (beforeExit loops,
@@ -256,7 +266,6 @@ if (
   telemetryReady = import("./telemetry/index.js").then((mod) => {
     _flushSync = mod.flushSync;
     _trackCliError = mod.trackCliError;
-    if (isHeapRelaunch) return;
     _trackCommandResult = mod.trackCommandResult;
     mod.showTelemetryNotice();
     mod.trackCommand(command, runId);
@@ -276,7 +285,6 @@ if (
 // cached check while reporting fresh results of its own).
 if (
   !isHelp &&
-  !isHeapRelaunch &&
   command !== "upgrade" &&
   command !== "events" &&
   command !== "telemetry" &&
@@ -315,11 +323,7 @@ if (
 
 // A command run on a project the desktop app chatted about since it was last caught up on ends by saying so.
 let _appHistoryNotice: string | null = null;
-if (
-  !isHelp &&
-  !isHeapRelaunch &&
-  !["unknown", "catch-up", "events", "telemetry"].includes(command)
-) {
+if (!isHelp && !["unknown", "catch-up", "events", "telemetry"].includes(command)) {
   import("./utils/appHistory.js")
     .then((mod) => {
       _appHistoryNotice = mod.appHistoryNotice(process.cwd(), process.argv.slice(3));
@@ -345,6 +349,7 @@ async function finalizeCli(result: CommandResult): Promise<void> {
   // here, once, is what those handlers cannot cover, and it keeps the exit
   // code and the telemetry record from disagreeing about the same run.
   const exitCode = isRenderSucceeded() ? 0 : result.exitCode;
+  if (exitCode === 0) markCommandDelivered();
   commandFailed ||= exitCode !== 0;
   await telemetryReady.catch(() => {});
   _trackCommandResult?.({
@@ -355,13 +360,17 @@ async function finalizeCli(result: CommandResult): Promise<void> {
     runId,
   });
   // No network wait: the exit handler's flushSync() delivers what is still queued.
+  if (result.kind !== "usage_error") printNotices();
+  process.exitCode = exitCode;
+}
+
+function printNotices(): void {
   if (!hasJsonFlag) {
     _printUpdateNotice?.();
     _printStalePinNotice?.();
   }
   _printSkillsUpdateNotice?.();
   if (_appHistoryNotice) process.stderr.write(`◇  ${_appHistoryNotice}\n`);
-  process.exitCode = exitCode;
 }
 
 registerRootExitRequester((exitCode) => {
@@ -429,7 +438,7 @@ function reportPostRenderTerminationEvent(
   error: Error,
 ): void {
   process.stderr.write(
-    `  [hyperframes] Post-render ${label} (render already succeeded): ${error.message}\n`,
+    `  [hyperframes] Late ${label} (the command already delivered its result): ${error.message}\n`,
   );
   emitCliErrorEvent(kind, error);
 }
@@ -457,7 +466,7 @@ function exitAfterPostRenderTermination(
 // still queued (render_complete's eager flush() dies with the process) is
 // owned by the unconditional flushSync() in the `exit` handler below.
 function handleStreamEpipe(): never {
-  if (!isRenderSucceeded()) commandFailed = true;
+  if (!isRunDelivered()) commandFailed = true;
   process.exit(0);
 }
 
@@ -493,7 +502,7 @@ process.on("uncaughtException", (error) => {
   // into an exit-1 "no final error message" failure. The render command
   // sets `renderSucceeded` right after the producer resolves and the
   // artifact is committed.
-  if (isRenderSucceeded()) {
+  if (isRunDelivered()) {
     exitAfterPostRenderTermination("uncaughtException", "uncaught_exception", error);
   }
   exitAfterCliFailure("uncaught_exception", error);
@@ -508,7 +517,7 @@ process.on("unhandledRejection", (reason) => {
   // rejection during post-artifact-validated cleanup must not mark a valid
   // render as failed. `commandFailed` gates the success:true telemetry
   // field — keep it false when the render actually succeeded.
-  if (isRenderSucceeded()) {
+  if (isRunDelivered()) {
     reportPostRenderTerminationEvent("unhandledRejection", "unhandled_rejection", error);
     return;
   }
@@ -520,26 +529,73 @@ process.on("unhandledRejection", (reason) => {
 // Lazy-load help renderer — avoids allocating help data on non-help invocations
 async function showUsage<T extends ArgsDef>(
   cmd: CommandDef<T>,
-  parent?: CommandDef<T>,
+  parent: CommandDef<T> | undefined,
+  print: (text: string) => void,
 ): Promise<void> {
   const { showUsage: impl } = await import("./help.js");
-  return impl(cmd as CommandDef, parent as CommandDef | undefined);
+  return impl(cmd as CommandDef, parent as CommandDef | undefined, print);
 }
 
-async function showRequestedUsage(): Promise<void> {
+// Prints the suggestion and the group's usage on stderr; the caller throws the returned error.
+async function unknownCommandError(requested: ResolvedCommandUsage): Promise<CliUsageError> {
+  const word = requested.unknownSubcommand ?? "";
+  const group = ["hyperframes", ...requested.path].join(" ");
+  const declared = requested.command.subCommands;
+  const subCommands = typeof declared === "function" ? await declared() : await declared;
+  const match = closestMatch(word, Object.keys(subCommands ?? {}));
+  console.error(`Unknown command: ${word}`);
+  if (match) console.error(`Did you mean '${group} ${match}'?`);
+  console.error("");
+  await showUsage(requested.command, requested.parent, console.error);
+  return new CliUsageError(`Unknown command: ${word}`, {
+    presented: true,
+    code: "unknown_command",
+    hint: match ? `Did you mean '${group} ${match}'?` : undefined,
+  });
+}
+
+// A group like `timeline` also takes a project directory, so a word it does not know may be one.
+function takesPositionals(command: CommandDef): boolean {
+  const args = command.args;
+  return (
+    typeof args === "object" &&
+    args !== null &&
+    Object.values(args).some((arg) => arg.type === "positional")
+  );
+}
+
+async function showRequestedUsage(print: (text: string) => void): Promise<void> {
   const requested = await resolveCommandUsage(main as CommandDef, argv);
-  return showUsage(requested.command, requested.parent);
+  if (requested.unknownSubcommand && !takesPositionals(requested.command)) {
+    throw await unknownCommandError(requested);
+  }
+  return showUsage(requested.command, requested.parent, print);
+}
+
+// citty would load every command looking for an alias before it gives up on an unknown name.
+async function rejectUnknownTopLevelCommand(): Promise<void> {
+  const word = argv[0];
+  if (!word || word.startsWith("-") || Object.hasOwn(subCommands, word)) return;
+  throw await unknownCommandError({
+    command: main as CommandDef,
+    path: [],
+    unknownSubcommand: word,
+  });
+}
+
+function isCittyError(error: unknown, code: string): boolean {
+  return (
+    error instanceof Error &&
+    error.name === "CLIError" &&
+    (error as { code?: unknown }).code === code
+  );
 }
 
 // citty's own parse errors (missing argument, bad enum value, unknown or missing subcommand).
 const CITTY_USAGE_CODES = new Set(["EARG", "E_UNKNOWN_COMMAND", "E_NO_COMMAND"]);
 
 function isCittyUsageError(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    error.name === "CLIError" &&
-    CITTY_USAGE_CODES.has(String((error as { code?: unknown }).code))
-  );
+  return [...CITTY_USAGE_CODES].some((code) => isCittyError(error, code));
 }
 
 function commandResultForError(error: unknown): CommandResult {
@@ -554,17 +610,25 @@ function commandResultForError(error: unknown): CommandResult {
 // fallow-ignore-next-line complexity
 async function executeCli(): Promise<void> {
   let result: CommandResult = { exitCode: 0, kind: "success" };
+  let failure: unknown;
   try {
-    if (isHelp) await showRequestedUsage();
-    else await runCommand(main, { rawArgs: argv });
-  } catch (error) {
+    if (isHelp) await showRequestedUsage(console.log);
+    else {
+      await rejectUnknownTopLevelCommand();
+      await runCommand(main, { rawArgs: argv });
+    }
+  } catch (caught) {
+    const error = isCittyError(caught, "E_UNKNOWN_COMMAND")
+      ? await unknownCommandError(await resolveCommandUsage(main as CommandDef, argv))
+      : caught;
+    failure = error;
     result = commandResultForError(error);
     if (!(error instanceof CliResultSignal)) {
       commandFailed = true;
       await reportCommandFailure(command, error);
       const typed = error instanceof CliUsageError || error instanceof CliRuntimeError;
       const usage = error instanceof CliUsageError && !error.result.presented;
-      if (usage && !error.hint) await showRequestedUsage();
+      if (usage && !error.hint) await showRequestedUsage(console.error);
       if (!typed || !error.result.presented) {
         console.error(error instanceof Error ? error.message : String(error));
       }
@@ -573,6 +637,9 @@ async function executeCli(): Promise<void> {
   } finally {
     const pending = consumeCommandResult();
     if (pending.exitCode !== 0 || result.exitCode === 0) result = pending;
+    if (jsonOutput && result.exitCode !== 0 && !jsonOutput.wroteStdout()) {
+      writeJsonFailure(jsonErrorBody(failure, result, jsonOutput.stderrText()));
+    }
     await finalizeCli(result);
   }
 }

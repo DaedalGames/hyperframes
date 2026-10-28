@@ -1,7 +1,6 @@
 import { captureArtifactRevision } from "../utils/artifactCapture.js";
 import { recordRenderSuccess, registerRenderOutput } from "@hyperframes/studio-server/history";
 import { failCommand, requestCliExit, scheduleCliExit } from "../utils/commandResult.js";
-import { relaunchWithHeap, renderHeapToRelaunch } from "../utils/renderHeap.js";
 import { defineCommand } from "../utils/defineCommand.js";
 import type { Example } from "./_examples.js";
 import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync, rmSync } from "node:fs";
@@ -348,7 +347,8 @@ export default defineCommand({
     },
     json: {
       type: "boolean",
-      description: "With --batch, emit exactly one final JSON result document.",
+      description:
+        "With --batch, emit exactly one final JSON result document. Without --batch, print no progress, and on failure print the JSON error envelope.",
       default: false,
     },
     resolution: {
@@ -447,12 +447,6 @@ export default defineCommand({
   },
   // Keep the transport adapter thin: each phase has one ownership boundary.
   async run({ args }) {
-    const autoWorkers = args.workers === undefined || args.workers === "auto";
-    const heapMb = !args.docker && autoWorkers ? renderHeapToRelaunch() : null;
-    if (heapMb) {
-      requestCliExit(await relaunchWithHeap(heapMb));
-      return;
-    }
     const plan = createRenderPlan(args);
     const cancellation = plan.useDocker ? undefined : createRenderCancellationScope();
     try {

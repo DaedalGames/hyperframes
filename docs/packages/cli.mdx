@@ -8,7 +8,9 @@ This page lists every command and every flag. If you are still deciding which
 command you need, the [CLI guide](/developers/cli) is the shorter route.
 
 The installed version is always the authority. Run
-`npx hyperframes <command> --help` to see exactly what your copy accepts.
+`npx hyperframes help <command>` (or `npx hyperframes <command> --help`) to see
+exactly what your copy accepts. A mistyped command or flag exits 2 and suggests
+the closest one: `Did you mean 'hyperframes render'?`.
 
 ```bash
 # No install needed
@@ -44,9 +46,10 @@ default to the current directory: `npx hyperframes check ./my-video`. A few
 take it as a flag instead — `add`, `transcribe`, `feedback`, `skills`, `history`, and
 the `timeline` edit commands use `--dir`.
 
-**`--json` for agents and scripts.** Almost every command accepts it. The
-payload is wrapped with a `_meta` field so a script can spot an outdated CLI
-from any command's output, without a second call:
+**`--json` for agents and scripts.** Most commands accept it, and the ones
+that do not reject it with exit 2. The payload is wrapped with a `_meta` field
+so a script can spot an outdated CLI from any command's output, without a
+second call:
 
 ```json
 {
@@ -65,11 +68,34 @@ background process, and never under CI or `HYPERFRAMES_NO_UPDATE_CHECK=1`.
 `--json` never makes a network request of its own. Deprecated commands add
 `_meta.deprecated: true`.
 
+A failure under `--json` always prints one JSON object on stdout, with a
+machine-readable `code` and, when there is a next step, a `hint`:
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "unknown_flag",
+    "message": "Unknown flag: --out",
+    "hint": "Did you mean --output? Run 'hyperframes render --help' to see its flags."
+  }
+}
+```
+
+Some commands add their own fields next to `error`, such as `findings` from
+`lint` or `reason` and `fix` from a refused `timeline` edit.
+
 **Flags, not prompts.** A missing required flag fails immediately with a usage
 example rather than waiting for input. Two commands are interactive on a TTY:
 `init` prompts for a project name and example unless you pass
 `--non-interactive`, and `catalog --human-friendly` opens a picker. Nothing else
 prompts, apart from confirmations you can skip with `--yes` or `--no-confirm`.
+
+**Unattended runs never prompt.** A run is unattended when stdin or stdout is not
+a terminal, under CI, inside a coding agent, or with `HYPERFRAMES_AGENT=1`.
+There, a command that would ask for confirmation, such as `publish` or `upgrade`,
+exits 2 instead and names the flag to pass (`--yes`), and spinners print only
+their final line, on stderr.
 
 **Exit codes.** `0` means the command succeeded, `1` means it ran and failed, and
 `2` means the command line itself is wrong: an unknown command or flag, or a
@@ -85,8 +111,16 @@ it cannot install — `npx`, an unknown installer — you get a notice instead:
   Run: npx hyperframes@latest
 ```
 
-Both stay silent in CI and non-TTY shells. `HYPERFRAMES_NO_UPDATE_CHECK=1` turns
-off the check, the install, and the notice.
+Both stay silent in unattended runs, and the background install never starts
+there. While an install is underway, the notice is not shown.
+`HYPERFRAMES_NO_UPDATE_CHECK=1` turns off the check, the install, and the
+notice; `HYPERFRAMES_NO_AUTO_INSTALL=1` turns off only the install.
+
+**Skills notice.** When installed HyperFrames skills are out of date or missing,
+a command ends with one line on stderr naming `npx hyperframes skills update`.
+It shows at most once a day per project. In an unattended run it shows only when
+a core skill is missing. `HYPERFRAMES_SKIP_SKILLS=1` turns it off. No notice
+follows a usage error.
 
 ## Create a project
 
@@ -1027,7 +1061,7 @@ npx hyperframes publish --space <space-id>
 
 | Flag                     | Description                                                        |
 | ------------------------ | ------------------------------------------------------------------ |
-| `--yes, -y`              | Skip the confirmation prompt                                       |
+| `--yes, -y`              | Skip the confirmation prompt. Required in an unattended run        |
 | `--public`               | Make the claimed project visible to anyone                         |
 | `--update <url-or-id>`   | Update an existing project in place. Requires sign-in.             |
 | `--space <space-id>`     | Publish into a shared team space. Requires sign-in.                |
@@ -1887,7 +1921,8 @@ npx hyperframes upgrade --project       # bump pinned CLI scripts in package.jso
 
 `upgrade` compares your installed version against npm. `--check` exits without
 prompting, `--yes, -y` upgrades a detected global install (otherwise it prints
-the right `npx` command), and `--project [dir]` rewrites
+the right `npx` command; an unattended run without `--yes` or `--check` exits 2),
+and `--project [dir]` rewrites
 `hyperframes@<version>` script pins in a project's `package.json`.
 `--check --json` returns:
 

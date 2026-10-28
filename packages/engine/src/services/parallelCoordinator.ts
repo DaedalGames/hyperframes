@@ -31,7 +31,7 @@ import { DEFAULT_CONFIG, type EngineConfig } from "../config.js";
 import { assertSwiftShader } from "../utils/assertSwiftShader.js";
 import { readWebGlVendorInfoFromCanvas } from "../utils/readWebGlVendorInfoFromCanvas.js";
 import { resolveHeadlessShellPath } from "./browserManager.js";
-import { getSystemTotalMb } from "./systemMemory.js";
+import { getCgroupCpuLimit, getSystemTotalMb } from "./systemMemory.js";
 import {
   CaptureFailure,
   classifyCaptureFailure,
@@ -131,6 +131,8 @@ export interface WorkerSizingConfig extends Partial<
    * than a plain DOM screenshot. Explicit --workers requests ignore this hint.
    */
   captureCostMultiplier?: number;
+  /** macOS, hardware GPU, screenshot frames written to disk (not streamed through this process). */
+  appleGpuDiskCapture?: boolean;
 }
 
 type WorkerBrowserPoolDecision = {
@@ -146,11 +148,13 @@ const MEMORY_PER_WORKER_MB = 1536;
 // Parent-process V8 heap the coordinator itself needs regardless of worker
 // count (compile artifacts, puppeteer sessions, encoder state).
 const HEAP_RESERVED_MB = 1024;
-// Parent-process V8 heap consumed per worker (protocol buffers + in-flight
-// frame buffers). Derived from the field OOM: 6 workers exhausted a ~4GB
-// default heap ⇒ >~500MB/worker + base. Caps auto sizing; an explicit
-// `--workers N` is still the operator's call.
-const HEAP_PER_WORKER_MB = 640;
+// Parent heap per worker, by --trace-gc in a 10 GB container (10-28): 21 MB on a short film, 228 MB on a 1080×1920
+// video-heavy one (427 → 1,110 MB from 1 to 4 workers). 320 keeps 1.4× over that; `--workers N` still overrides.
+const HEAP_PER_WORKER_MB = 320;
+// Apple-GPU disk capture measured ~15-25 MB parent heap per worker; 14 cores kept gaining to 8.
+const APPLE_DISK_HEAP_PER_WORKER_MB = 128;
+const APPLE_DISK_CORES_PER_WORKER = 1.75;
+const APPLE_DISK_MAX_WORKERS = 8;
 const MIN_WORKERS = 1;
 const MAX_WORKER_DIAGNOSTIC_LINES = 8;
 // Hard ceiling on explicit `--workers N` requests. Above this, the cost of
@@ -301,8 +305,6 @@ export interface WorkerSizing {
   captureCostMultiplier: number;
   /** true when the chosen count exceeds the heap budget (only an explicit request can). */
   exceedsHeapAdvisory: boolean;
-  /** The count every other bound allows, before the heap budget clamps it. */
-  preHeapWorkers: number;
 }
 
 /**
@@ -323,11 +325,20 @@ export function computeWorkerSizing(
   // is immediately reclaimable.
   const totalMemoryMb = getSystemTotalMb();
   const heapLimitMb = Math.round(getHeapStatistics().heap_size_limit / (1024 * 1024));
+  const appleDisk = config?.appleGpuDiskCapture === true;
   const heapBasedWorkers = Math.max(
     1,
-    Math.floor((heapLimitMb - HEAP_RESERVED_MB) / HEAP_PER_WORKER_MB),
+    Math.floor(
+      (heapLimitMb - HEAP_RESERVED_MB) /
+        (appleDisk ? APPLE_DISK_HEAP_PER_WORKER_MB : HEAP_PER_WORKER_MB),
+    ),
   );
-  const cpuBasedWorkers = Math.max(1, cpuCount - 2);
+  // A CPU quota (docker --cpus) bounds workers at its whole CPUs: at 3.5, 3 beat 2 and 4 (johnny, 10-28).
+  const cpuQuota = getCgroupCpuLimit();
+  const cpuBasedWorkers = Math.max(
+    1,
+    cpuQuota === null ? cpuCount - 2 : Math.min(cpuCount - 2, Math.floor(cpuQuota)),
+  );
   const memoryBasedWorkers = Math.max(1, Math.floor((totalMemoryMb * 0.5) / MEMORY_PER_WORKER_MB));
   const frameBasedWorkers = Math.floor(totalFrames / MIN_FRAMES_PER_WORKER);
   const captureCostMultiplier = Math.max(1, config?.captureCostMultiplier ?? 1);
@@ -342,18 +353,12 @@ export function computeWorkerSizing(
     cpuCount,
     captureCostMultiplier,
   };
-  const finish = (
-    workers: number,
-    boundBy: WorkerSizingBound,
-    effectiveMaxWorkers: number,
-    preHeapWorkers: number = workers,
-  ) => ({
+  const finish = (workers: number, boundBy: WorkerSizingBound, effectiveMaxWorkers: number) => ({
     workers,
     boundBy,
     effectiveMaxWorkers,
     ...base,
     exceedsHeapAdvisory: workers > heapBasedWorkers,
-    preHeapWorkers,
   });
 
   if (requested !== undefined) {
@@ -370,9 +375,15 @@ export function computeWorkerSizing(
     if (concurrency !== "auto") {
       return Math.max(MIN_WORKERS, Math.min(ABSOLUTE_MAX_WORKERS, Math.floor(concurrency)));
     }
-    return defaultSafeMaxWorkers();
+    return appleDisk
+      ? Math.max(defaultSafeMaxWorkers(), APPLE_DISK_MAX_WORKERS)
+      : defaultSafeMaxWorkers();
   })();
-  const effectiveCoresPerWorker = config?.coresPerWorker ?? DEFAULT_CONFIG.coresPerWorker;
+  const configuredCoresPerWorker = config?.coresPerWorker ?? DEFAULT_CONFIG.coresPerWorker;
+  const effectiveCoresPerWorker =
+    appleDisk && configuredCoresPerWorker === DEFAULT_CONFIG.coresPerWorker
+      ? APPLE_DISK_CORES_PER_WORKER
+      : configuredCoresPerWorker;
   const effectiveMinParallelFrames = config?.minParallelFrames ?? DEFAULT_CONFIG.minParallelFrames;
   const effectiveLargeRenderThreshold =
     config?.largeRenderThreshold ?? DEFAULT_CONFIG.largeRenderThreshold;
@@ -412,23 +423,12 @@ export function computeWorkerSizing(
     }
   }
 
-  const preHeapWorkers = finalWorkers;
   if (finalWorkers > heapBasedWorkers) {
     finalWorkers = heapBasedWorkers;
     boundBy = "heap";
   }
 
-  return finish(finalWorkers, boundBy, effectiveMaxWorkers, preHeapWorkers);
-}
-
-/**
- * The V8 heap (MB) a render process needs for auto sizing of a long render to stop at its CPU and memory bounds
- * instead of the heap's. Node sizes its default heap from the memory it sees and caps it near 2–4 GB: in a 10 GB
- * container that is 2,096 MB, which the heap budget floors to one capture worker on any number of cores.
- */
-export function heapMbForAutoWorkers(config?: WorkerSizingConfig): number {
-  const sizing = computeWorkerSizing(Number.MAX_SAFE_INTEGER, undefined, config);
-  return HEAP_RESERVED_MB + sizing.preHeapWorkers * HEAP_PER_WORKER_MB;
+  return finish(finalWorkers, boundBy, effectiveMaxWorkers);
 }
 
 export function calculateOptimalWorkers(

@@ -16,7 +16,6 @@ function sizing(overrides: Partial<WorkerSizing>): WorkerSizing {
     cpuCount: 18,
     captureCostMultiplier: 1,
     exceedsHeapAdvisory: true,
-    preHeapWorkers: 6,
     ...overrides,
   };
 }
