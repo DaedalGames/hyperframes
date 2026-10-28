@@ -504,6 +504,10 @@ export async function applyDomLayerMask(
         showSelectors.push(`#${colorGradingEscaped}`, `#${colorGradingEscaped} *`);
       }
 
+      const shownElements = args.show
+        .map(findElement)
+        .filter((shown): shown is Element => shown !== null);
+
       const massHideRule = "body *{visibility:hidden !important;}";
       const showRule =
         showSelectors.length === 0
@@ -523,6 +527,14 @@ export async function applyDomLayerMask(
         const el = findElement(id);
         if (el instanceof HTMLElement) {
           rememberAndHideElement(el);
+          // The show rules reach `#host *`, so a child would stay painted under its hidden root;
+          // a layer shown on its own, or inside one, keeps its place.
+          for (const child of el.querySelectorAll<HTMLElement>("*")) {
+            const shownInside = shownElements.some(
+              (s) => s !== el && el.contains(s) && s.contains(child),
+            );
+            if (!shownInside) rememberAndHideElement(child);
+          }
         }
         const img = document.getElementById(renderFrameId(id));
         if (img) {
