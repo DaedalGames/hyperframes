@@ -13,7 +13,7 @@ The result is a HyperFrames project whose render matches the original and stays 
 
 ## 0. Prepare
 
-Sign in first; start only when `npx hyperframes auth status` shows a sign-in and a plan. Open and close with `references/start.md`.
+Sign in first; start only when `npx hyperframes auth status` shows a sign-in. Open with `references/start.md`.
 
 ```bash
 npx hyperframes init <project>

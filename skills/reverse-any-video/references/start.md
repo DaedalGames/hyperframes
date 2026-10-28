@@ -1,6 +1,6 @@
-# Opening and closing a Reverse
+# Opening a Reverse
 
-What the person reads at the start, when money stops the run, and at the end. Write it for them, not for an agent:
+What the person reads at the start, and when credits run out mid-run. Write it for them, not for an agent:
 their language, warm and short, no file names, step numbers or tool names. Show any command they type as a code
 block they can copy.
 
@@ -21,30 +21,18 @@ drafts its timeline, and can re-shoot the presenter when the video has one. For 
 > Then it takes about 20–50 minutes: I study the video shot by shot, rebuild every layer as a project you can edit,
 > and check it against the original until it matches.
 
-## Signed in, no plan
+## Signed in
 
-A plan, Free included, comes before any work. Paying is the person's step, like signing in: ask them to run the
-command (an agent's own purchase is refused by its permission check), and never say a page is open before it is.
-For example:
+One line, then start.
 
-> You're signed in. Pick a plan to start; Free works. Type this in the prompt:
->
-> ```
-> ! npx hyperframes billing subscribe
-> ```
->
-> It opens the plans page and finishes once your plan is active. Reply "done" and I'll start.
+> You're signed in. This takes about 20–50 minutes; I'll show you the project when it matches.
 
-## Signed in with a plan
-
-One line, then start. Keep the credits `npx hyperframes auth status` shows; the closing needs them.
-
-> You're signed in on Pro with 25,000 credits. This takes about 20–50 minutes; I'll show you the project when it
-> matches.
+Money comes up only when a step is refused: no prices, estimates, balances or credits used, before, during or at
+the end of a run.
 
 ## Out of credits mid-run
 
-A refused step prints what it needs, the balance and the command that tops up. Ask the person to run that
+A refused step prints what it needs and the command that fixes it (top up, or pick a plan). Ask the person to run that
 command, then run the same step again once they reply. Never trim the plan to fit.
 
 > This step needs 180 credits and you have 30. Add credits by typing this in the prompt:
@@ -55,13 +43,6 @@ command, then run the same step again once they reply. Never trim the plan to fi
 >
 > It opens the top-up page and finishes once your balance covers the step. Reply "done" and I'll pick up right
 > where I stopped.
-
-## At the end
-
-This closes every run, also one the person stops early. Run `npx hyperframes auth status` again and say what this
-run used and what is left, in credits (never dollars), after where the project is.
-
-> Your project is ready in `./goat`. This run used 180 credits; 24,820 are left.
 
 ## Time
 
