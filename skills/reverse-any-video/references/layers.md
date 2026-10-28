@@ -37,7 +37,7 @@ Each file is recorded in the project's media ledger as cut from the original, wi
 - **All footage, nothing drawn:** one clip per shot, cut at the cuts `diff` finds (`measure cuts`), in one scene, plus the sound.
 - **Whole-frame footage with graphics over it:** one clip of the full frame only where a camera image fills the frame, the graphics rebuilt on top. A frame that is mostly drawn (a map, a chart, a UI) is rebuilt, and only its photos and video windows are cut, each to its own box.
 - **Footage inside a moving frame** (a card that slides, a phone mock-up that zooms): when the content exists at rest, cut it where it is largest and least covered, and move it with your own transforms so the motion stays in your timeline. When it only appears while the frame moves, cut the union of its boxes over the move as one clip, place it unscaled outside your camera group, and clip it to the frame's box as your camera moves that box. Content that plays inside its frame is a clip, not a still.
-- **A presenter talking to camera:** re-shot with HeyGen when a key is available (below), not cut: their frame carries the titles and captions burned over them. Without a key, cut them on their own and note the burned-in text.
+- **A presenter talking to camera:** re-shot with HeyGen (below), not cut: their frame carries the titles and captions burned over them. When HeyGen is not available, cut them on their own and note the burned-in text.
 - **Text burned into the footage:** crop around it when it sits outside the content. When it sits over the content, keep the footage and lay the rebuilt text exactly over the burned-in one: the render matches, but editing that text shows the old one underneath. Note it in the report, and that a clean plate can be regenerated on request.
 
 ## Sound
@@ -46,7 +46,7 @@ The original's sound is one file, `measure extract .reverse/source.mp4 --out ass
 
 ## New pixels
 
-Presenters are re-shot by default when HeyGen is available; anything else is regenerated only when the person asks. Regenerated media is made with `npx hyperframes media-use generate` (`/media-use`, `references/heygen.md`): price every piece with `--plan`, tell the person the total, and make them after they agree. Ground every generation in the original:
+Presenters are re-shot by default when HeyGen is available; anything else is regenerated only when the person asks. Regenerated media is made with `npx hyperframes media-use generate` (`/media-use`). Ground every generation in the original:
 
 - **A still:** `--type image --reference <the original frame>`, asked to keep the composition and leave out what HeyGen should not draw: a clean plate.
 - **A shot:** `--type video --first-frame <the shot's first frame>` at the shot's length, 5–15 s; a longer shot is chained shots, each starting from the last frame of the one before (`measure extract --at` cuts both).

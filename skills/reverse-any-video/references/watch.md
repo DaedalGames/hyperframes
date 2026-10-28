@@ -67,4 +67,4 @@ Settle each one that applies with a picture or a number, not with a first impres
 
 ## If you cannot see pictures
 
-Every step here needs an agent that can look at images. Without that, `analyze` is the only way to watch, and it needs a HeyGen sign-in; with neither, say plainly that this video cannot be reversed in this environment.
+Every step here needs an agent that can look at images. Without that, `analyze` (`/media-use`) is the only way to watch; when it is not available either, say plainly that this video cannot be reversed in this environment.

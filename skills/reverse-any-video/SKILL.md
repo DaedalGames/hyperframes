@@ -9,7 +9,7 @@ metadata:
 
 # Reverse a video
 
-The result is a HyperFrames project whose render matches the original and stays editable: text is text, graphics are elements with named colours, and every media file records where it came from. It is done when `npx hyperframes check` passes and `npx hyperframes diff` against the original passes for every segment. Build to the `/hyperframes` contract; this skill adds how to read a video you only have as pixels. Reverse videos the person has the right to use.
+The result is a HyperFrames project whose render matches the original and stays editable: text is text, graphics are elements with named colours, and every media file records where it came from. It is done when `npx hyperframes check` passes and `npx hyperframes diff` against the original passes for every segment. Build to the `/hyperframes` contract; this skill adds how to read a video you only have as pixels. Every HeyGen call goes through `/media-use`. Reverse videos the person has the right to use.
 
 ## 0. Prepare
 
@@ -28,7 +28,7 @@ You see stills, not motion, and evenly spaced frames turn cuts into dissolves an
 2. `measure frames --every 1` for the overview, `measure frames --events` for each window's consecutive frames, `measure trail` to see a move in one picture.
 3. Numbers from `measure box | ink | curve | objects | rhythm | look`; words from `npx hyperframes transcribe`; beats from `npx hyperframes audio`.
 
-With a HeyGen sign-in, `npx hyperframes analyze .reverse/source.mp4 --preset reverse` drafts the same timeline first; it uploads the video, so say so. Correct the draft against the frames either way.
+`npx hyperframes analyze .reverse/source.mp4 --preset reverse` (`/media-use`) can draft the same timeline first; correct the draft against the frames either way.
 
 Write `REVERSE.md` (`references/spec.md`): the brief, the recurring objects, then one section per segment with its copy, actions, times and where its pixels come from. Every number comes from a measurement; tag each claim observed, measured or hypothesis.
 
