@@ -15,27 +15,27 @@ npx hyperframes media-use resolve --type <type> --intent "<what you need>" --pro
 
 It prints one line, `resolved <id> → <path> (<type>, <metadata>)`. List reusable assets first with `--candidates` and judge the fit yourself; reuse, ingest (`--from`) and adopt are in `references/resolve.md`.
 
-## Two ways to get it
+## Where it comes from
 
-| Need | HeyGen (best quality) | Free, no account |
-| --- | --- | --- |
-| Music (`bgm`) | Catalog of 10k+ tracks | Local MusicGen (`audio/references/bgm.md`) |
-| Sound effects (`sfx`) | | Openverse; 21 bundled offline |
-| Images, icons | Asset search, 75k+ | Local FLUX (mflux), if installed |
-| Logos (`logo`) | | theSVG, GitHub avatar, favicon; never redrawn |
-| Voiceover (`voice`) | HeyGen voices, voice cloning | `npx hyperframes tts` (Kokoro on device; Python 3.10+ with `pip install kokoro-onnx soundfile`) |
-| A presenter speaking | Avatar video (`--type video`) | Local LTX for generic clips, if installed |
-| Transcripts | | `npx hyperframes transcribe` (Parakeet or whisper) |
-| Cutouts | `heygen background-removal` | `npx hyperframes remove-background` |
-| Grades, LUTs, looks | | `npx hyperframes media-treatment` |
+| Need | Free | HyperFrames credits | Local or the person's own key (only when they ask) |
+| --- | --- | --- | --- |
+| Music (`bgm`) | HeyGen catalog of 10k+ tracks (signed in) | Generated track | Local MusicGen (`audio/references/bgm.md`) |
+| Sound effects (`sfx`) | Openverse; 21 bundled offline | | |
+| Images, icons | HeyGen asset search, 75k+ (signed in) | Generated images | Local FLUX (mflux), if installed |
+| Logos (`logo`) | theSVG, GitHub avatar, favicon; never redrawn | | |
+| Voiceover (`voice`) | HeyGen Voice Turbo (signed in) | Other HeyGen voices, voice cloning | `npx hyperframes tts` (Kokoro on device; Python 3.10+ with `pip install kokoro-onnx soundfile`) |
+| A presenter speaking | | Avatar video (`--type video`) | Local LTX for generic clips, if installed |
+| Transcripts | `npx hyperframes transcribe` (Parakeet or whisper) | | |
+| Cutouts | | `heygen background-removal` | `npx hyperframes remove-background` |
+| Grades, LUTs, looks | `npx hyperframes media-treatment` | | |
 
-**Host apps.** Inside an app that gives you its own media tools, use those first. When `HEYGEN_API_BASE` is set, the host pays for HeyGen: don't ask for the `heygen` CLI or a sign-in, and when a call is refused, relay the host's message as written and stop.
+**Sign in.** When a request needs a HeyGen model or the catalog and there is no credential, tell the person in one line that sign-in is free and gives Voice Turbo, the music catalog and asset search, then run `npx hyperframes auth login` and show the link it prints. Check setup with `npx hyperframes media-use resolve --doctor`. Don't fall back to local models on your own; use local tools or the person's own keys only when they ask for that.
 
-**HeyGen.** Install the [`heygen` CLI](https://developers.heygen.com/cli) and sign in with `heygen auth login --oauth`: the OAuth session carries a free allowance on subscription credits; an API key (`--api-key`) bills API credits. Check setup with `npx hyperframes media-use resolve --doctor`. When a request needs HeyGen (a presenter or avatar, a HeyGen voice, catalog music) and `heygen` is missing or signed out, tell the person how to get it: the install link, `heygen auth login --oauth` for the free allowance, or an API key for credits. Then offer the free path or wait. Beyond `resolve`, the same CLI makes text-to-video (`heygen video-agent create`), avatar videos with a recorded track (`heygen video create`), cloned voices (`heygen voice clone create`), dubbing (`heygen lipsync`), translated videos (`heygen video-translate`) and short clips from a long video (`heygen ai-clipping`): recipes in `references/operations.md`.
+**Host apps.** Inside an app that gives you its own media tools, use those first. When `HEYGEN_API_BASE` is set, the host pays for HeyGen: don't ask for a sign-in, and when a call is refused, relay the host's message as written and stop.
 
-**Free.** Every tool in the free column needs no account; local models are opt-in installs (`references/setup-providers.md`). Without `heygen`, `resolve` for music, images and icons fails and says so; credit CC BY sounds (`audio/references/sfx.md`). `--local-only` skips every network provider.
+**Credits.** Plan for the best result; don't swap in cheaper or free options, or drop items, to save credits unless the person asks to save cost. Before the first paid item, tell the person the total for everything you intend to make and get one yes for that budget; inside it, don't ask again. When a call answers with a `Subscribe:` or `Add credits:` line, show it to the person exactly as printed and stop paid steps until they are done. `--provider <name>` pins one generator when the person names it. `--local-only` skips every network provider.
 
-**Cost.** Confirm before a paid call you chose to make (an avatar video counts); one the person asked for just runs. `--provider <name>` pins one generator when the person names it.
+**More HeyGen recipes.** The [`heygen` CLI](https://developers.heygen.com/cli) makes text-to-video (`heygen video-agent create`), avatar videos with a recorded track (`heygen video create`), cloned voices (`heygen voice clone create`), dubbing (`heygen lipsync`), translated videos (`heygen video-translate`) and short clips from a long video (`heygen ai-clipping`): recipes in `references/operations.md`. Credit CC BY sounds (`audio/references/sfx.md`).
 
 ## Looks on real footage
 
