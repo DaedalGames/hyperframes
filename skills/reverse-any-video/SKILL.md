@@ -13,7 +13,7 @@ The result is a HyperFrames project whose render matches the original and stays 
 
 ## 0. Prepare
 
-Sign in first; nothing starts until `npx hyperframes auth status` shows one. Sign-in and HeyGen calls: `/media-use`.
+Sign in first; nothing starts until `npx hyperframes auth status` shows a sign-in and a plan (`/media-use`).
 
 ```bash
 npx hyperframes init <project>

@@ -27,7 +27,7 @@ export function idempotencyKey(route: string, parts: readonly (string | Buffer)[
 }
 
 // The plans and credits pages are not live yet; HYPERFRAMES_PLANS_URL / HYPERFRAMES_CREDITS_URL override them.
-const plansUrl = () => process.env["HYPERFRAMES_PLANS_URL"] || "https://hyperframes.studio/";
+export const plansUrl = () => process.env["HYPERFRAMES_PLANS_URL"] || "https://hyperframes.studio/";
 const creditsUrl = () => process.env["HYPERFRAMES_CREDITS_URL"] || plansUrl();
 
 /** A refused call says what to do: sign in, subscribe, add credits, or change the request. */

@@ -30,6 +30,7 @@ import {
 } from "../../auth/index.js";
 import { getSystemMeta } from "../../telemetry/system.js";
 import { c } from "../../ui/colors.js";
+import { plansUrl } from "../../heygen/v3.js";
 import { resolveMusic, resolveVoice } from "../../audio/providers.js";
 import {
   buildUnconfiguredJson,
@@ -94,7 +95,10 @@ export default defineCommand({
  */
 function detectUnconfiguredContext(): UnconfiguredContext {
   const sys = getSystemMeta();
-  return { interactive: !sys.is_ci && (sys.is_tty || sys.agent_runtime !== null) };
+  return {
+    interactive: !sys.is_ci && (sys.is_tty || sys.agent_runtime !== null),
+    agent: !sys.is_ci && sys.agent_runtime !== null,
+  };
 }
 
 /**
@@ -189,6 +193,7 @@ function printJsonStatus(s: VerifiedStatus): void {
     // unchanged. Lets callers read identity offline / on an API blip.
     persisted_user: persistedUserJson(s.persistedUser),
     api_error: s.apiError,
+    hyperframes: mockPlan(),
   };
   if (s.credential.type === "oauth") {
     payload["expires_at"] = s.credential.expires_at?.toISOString() ?? null;
@@ -237,7 +242,24 @@ function collectStatusRows(s: VerifiedStatus): [string, string][] {
     return rows;
   }
   if (s.user) rows.push(...identityRows(s.user));
+  const plan = mockPlan();
+  if (plan)
+    rows.push([
+      "HyperFrames:",
+      plan.plan === "none"
+        ? `no plan · Subscribe: ${plansUrl()} ${c.dim("(mock)")}`
+        : `${plan.plan} plan, ${plan.credits} credits ${c.dim("(mock)")}`,
+    ]);
   return rows;
+}
+
+// ponytail: HYPERFRAMES_MOCK_PLAN="pro:25000" | "none" stands in for the plan read the CLI client cannot make yet;
+// replace with GET /v1/payment/hyperframes/subscription once EF admits the CLI client.
+function mockPlan(): { plan: string; credits: number } | null {
+  const raw = process.env["HYPERFRAMES_MOCK_PLAN"]?.trim();
+  if (!raw) return null;
+  const [plan = "none", credits = "0"] = raw.split(":");
+  return { plan, credits: Number(credits) || 0 };
 }
 
 // fallow-ignore-next-line complexity

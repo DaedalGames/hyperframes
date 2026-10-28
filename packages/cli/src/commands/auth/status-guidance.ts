@@ -12,6 +12,8 @@ import { c } from "../../ui/colors.js";
 export interface UnconfiguredContext {
   /** A human can act on guidance now — a TTY, or a coding agent driving the CLI. */
   interactive: boolean;
+  /** A coding agent runs this; the person reads what it relays. */
+  agent?: boolean;
 }
 
 /** The local engine a workflow will fall back to, and whether it's ready. */
@@ -69,6 +71,12 @@ export function buildUnconfiguredLines(
   ctx: UnconfiguredContext,
   engines?: OfflineEngineLine[],
 ): string[] {
+  // The agent relays one step and waits; local engines and API keys are for the person to raise.
+  if (ctx.agent)
+    return [
+      c.warn("Not signed in to HeyGen."),
+      `Ask the person to run ${c.accent("! npx hyperframes auth login")} in this prompt, then wait until they say it is done.`,
+    ];
   if (!ctx.interactive) {
     return [
       c.warn("Not signed in to HeyGen (non-interactive)."),
