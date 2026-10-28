@@ -8,10 +8,12 @@ export function oauthEnvironment(): "prod" | "dev" {
   throw new AuthError("OAUTH_NOT_CONFIGURED", "HYPERFRAMES_ENV must be prod or dev");
 }
 
+export function defaultClientId(): string {
+  return oauthEnvironment() === "prod" ? PROD_CLIENT_ID : "9QoaiwCZov9O0cAkC4OZbR4p";
+}
+
 export function resolveClientId(): string {
-  const id =
-    process.env["HYPERFRAMES_OAUTH_CLIENT_ID"] ||
-    (oauthEnvironment() === "prod" ? PROD_CLIENT_ID : "9QoaiwCZov9O0cAkC4OZbR4p");
+  const id = process.env["HYPERFRAMES_OAUTH_CLIENT_ID"] || defaultClientId();
   if (!id) throw ErrOAuthNotConfigured();
   return id;
 }

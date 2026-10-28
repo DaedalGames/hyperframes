@@ -120,7 +120,8 @@ function anonymousId() {
 }
 
 function heygenAccountDistinctId() {
-  const file = join(process.env.HEYGEN_CONFIG_DIR || join(homedir(), ".heygen"), "credentials");
+  const root = process.env.HYPERFRAMES_CONFIG_DIR || join(homedir(), ".hyperframes");
+  const file = join(root, ...(process.env.HYPERFRAMES_ENV === "dev" ? ["dev"] : []), "credentials");
   try {
     if (!existsSync(file)) return null;
     const raw = readFileSync(file, "utf8").trim();

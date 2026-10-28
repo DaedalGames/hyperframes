@@ -39,6 +39,8 @@ Signing in is the same OAuth step as creating an account — new users land on t
 
 HyperFrames uses its own public OAuth client and stores credentials in `~/.hyperframes/credentials` (mode `0600`). Sign in again after upgrading from the shared HeyGen login. The separate [`heygen` CLI](https://github.com/heygen-com/heygen-cli) keeps its own login in `~/.heygen`; HyperFrames does not move or delete it. An expired HyperFrames OAuth session requires refresh or sign-in and never selects a saved API key instead. An explicit API-key login or environment key selects API-key billing.
 
+`auth status` verifies identity. For a dedicated HyperFrames OAuth login it reports the billing product, but the HyperFrames balance is unavailable here: `/v3/users/me` returns generic HeyGen account billing fields. Those raw fields remain in JSON and are not presented as the HyperFrames balance. Host-injected or custom-client OAuth is reported as an unverified billing product.
+
 <Tip>
   No account is needed to try HyperFrames locally. With no credential, voice can
   use **Kokoro** and music can use **MusicGen** — see [Working

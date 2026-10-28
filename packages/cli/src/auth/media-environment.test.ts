@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setupTempAuthEnv } from "./_test-utils.js";
 import { persistFreshOAuth } from "./oauth.js";
 import { withMediaAuthEnvironment } from "./media-environment.js";
@@ -11,6 +11,7 @@ describe("media-use authentication", () => {
     fixture = await setupTempAuthEnv();
   });
   afterEach(async () => {
+    vi.unstubAllGlobals();
     await fixture.restore();
   });
 
@@ -32,6 +33,32 @@ describe("media-use authentication", () => {
     });
     await expect(fs.stat(path)).rejects.toMatchObject({ code: "ENOENT" });
     expect(await fs.readFile(join(fixture.dir, "credentials"), "utf8")).toContain("hf-refresh");
+  });
+
+  it("refreshes a token before a helper could outlive it", async () => {
+    await persistFreshOAuth({
+      access_token: "near-expiry",
+      refresh_token: "hf-refresh",
+      expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+    });
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ access_token: "refreshed", refresh_token: "rotated", expires_in: 3600 }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await withMediaAuthEnvironment(async (env) => {
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(env.HEYGEN_ACCESS_TOKEN).toBe("refreshed");
+      const copied = JSON.parse(
+        await fs.readFile(join(env.HEYGEN_CONFIG_DIR!, "credentials"), "utf8"),
+      );
+      expect(copied.oauth.access_token).toBe("refreshed");
+      expect(copied.oauth.refresh_token).toBeUndefined();
+    });
+    expect(await fs.readFile(join(fixture.dir, "credentials"), "utf8")).toContain("rotated");
   });
 
   it("refuses to send OAuth to a non-HeyGen media gateway", async () => {

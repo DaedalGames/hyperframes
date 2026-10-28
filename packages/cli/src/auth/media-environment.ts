@@ -7,6 +7,9 @@ import { AuthError, isAuthError } from "./errors.js";
 import { resolveCredential, tryResolveCredential } from "./resolver.js";
 import { writeStore } from "./store.js";
 
+// Avatar helpers can poll for five minutes after submitting paid work.
+const MIN_HELPER_TOKEN_LIFETIME_MS = 10 * 60 * 1000;
+
 /** The Go CLI accepts OAuth through a credential file, but cannot refresh a HyperFrames grant. */
 export async function withMediaAuthEnvironment<T>(run: (env: NodeJS.ProcessEnv) => T): Promise<T> {
   let credential;
@@ -16,7 +19,15 @@ export async function withMediaAuthEnvironment<T>(run: (env: NodeJS.ProcessEnv) 
     // An expired login must not stop anonymous/local providers or select another wallet.
     if (!isAuthError(error) || error.code !== "LOGIN_EXPIRED") throw error;
   }
-  if (credential?.type === "oauth" && credential.refreshable && credential.refresh_token) {
+  const expiresDuringHelper =
+    credential?.type === "oauth" &&
+    credential.expires_at !== undefined &&
+    credential.expires_at.getTime() - Date.now() < MIN_HELPER_TOKEN_LIFETIME_MS;
+  if (
+    credential?.type === "oauth" &&
+    credential.refresh_token &&
+    (credential.refreshable || expiresDuringHelper)
+  ) {
     await refreshTokens(credential.refresh_token);
     credential = await resolveCredential();
   }
