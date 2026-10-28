@@ -20,7 +20,7 @@ It prints one line, `resolved <id> → <path> (<type>, <metadata>)`. List reusab
 | Need | Free | HyperFrames credits | Local or the person's own key (only when they ask) |
 | --- | --- | --- | --- |
 | Music (`bgm`) | HeyGen catalog of 10k+ tracks (signed in) | Generated track | Local MusicGen (`audio/references/bgm.md`) |
-| Sound effects (`sfx`) | Openverse; 21 bundled offline | | |
+| Sound effects (`sfx`) | Openverse (credit CC BY: `audio/references/sfx.md`); 21 bundled offline | | |
 | Images, icons | HeyGen asset search, 75k+ (signed in) | Generated images | Local FLUX (mflux), if installed |
 | Logos (`logo`) | theSVG, GitHub avatar, favicon; never redrawn | | |
 | Voiceover (`voice`) | HeyGen Voice Turbo (signed in) | Other HeyGen voices, voice cloning | `npx hyperframes tts` (Kokoro on device; Python 3.10+ with `pip install kokoro-onnx soundfile`) |
@@ -29,13 +29,13 @@ It prints one line, `resolved <id> → <path> (<type>, <metadata>)`. List reusab
 | Cutouts | | `heygen background-removal` | `npx hyperframes remove-background` |
 | Grades, LUTs, looks | `npx hyperframes media-treatment` | | |
 
-**Sign in.** When a request needs a HeyGen model or the catalog and there is no credential, tell the person in one line that sign-in is free and gives Voice Turbo, the music catalog and asset search, then run `npx hyperframes auth login` and show the link it prints. Check setup with `npx hyperframes media-use resolve --doctor`. Don't fall back to local models on your own; use local tools or the person's own keys only when they ask for that.
+**Sign in.** When a request needs a HeyGen model or the catalog and there is no credential, tell the person in one line that sign-in is free and gives Voice Turbo, the music catalog and asset search, then run `npx hyperframes auth login` and show the link it prints. Check with `npx hyperframes media-use resolve --doctor`. Don't fall back to local models on your own; use local tools or the person's own keys only when they ask for that.
 
-**Host apps.** Inside an app that gives you its own media tools, use those first. When `HEYGEN_API_BASE` is set, the host pays for HeyGen: don't ask for a sign-in, and when a call is refused, relay the host's message as written and stop.
+**Host apps.** Inside an app with its own media tools, use those first. When `HEYGEN_API_BASE` is set, the host pays for HeyGen: don't ask for a sign-in, and when a call is refused, relay the host's message as written and stop.
 
-**Credits.** Plan for the best result; don't swap in cheaper or free options, or drop items, to save credits unless the person asks to save cost. Before the first paid item, tell the person the total for everything you intend to make and get one yes for that budget; inside it, don't ask again. When a call answers with a `Subscribe:` or `Add credits:` line, show it to the person exactly as printed and stop paid steps until they are done. `--provider <name>` pins one generator when the person names it. `--local-only` skips every network provider.
+**Generate.** `npx hyperframes media-use generate` makes images, shots, talking photos, voices and music; price each with `--plan` (`references/heygen.md`).
 
-**More HeyGen recipes.** The [`heygen` CLI](https://developers.heygen.com/cli) makes text-to-video (`heygen video-agent create`), avatar videos with a recorded track (`heygen video create`), cloned voices (`heygen voice clone create`), dubbing (`heygen lipsync`), translated videos (`heygen video-translate`) and short clips from a long video (`heygen ai-clipping`): recipes in `references/operations.md`. Credit CC BY sounds (`audio/references/sfx.md`).
+**Credits.** Plan for the best result; don't swap in cheaper or free options, or drop items, to save credits unless the person asks to save cost. Before the first paid item, tell the person the total for everything you intend to make and get one yes for that budget; inside it, don't ask again. When a call answers with a `Subscribe:` or `Add credits:` line, show it to the person exactly as printed and stop paid steps until they are done. `--provider <name>` pins a generator the person names. `--local-only` skips every network provider.
 
 ## Looks on real footage
 
@@ -55,6 +55,7 @@ When you build or review a piece, scan once for concrete gaps (on-screen text wi
 | Cut, reframe or transform media; HeyGen recipes | `references/operations.md` |
 | Treatments, realtime effects, overlays, reveals | `references/media-treatments.md` |
 | Install, sign-in, providers, RAM ladders | `references/setup-providers.md` |
+| HeyGen generation, transcription, video analysis, prices | `references/heygen.md` |
 | Fades, gain, ducking, automation, effects, buses on placed tracks | `references/mixing.md` |
 | Local commands: grade, cutout, loudness, beats | `references/local.md` |
 | Remembered preferences | `references/memory.md` |

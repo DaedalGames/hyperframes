@@ -1,25 +1,68 @@
 ---
 name: reverse-any-video
-description: Reverse any video. Remake a reference video's structure, pacing and look with the person's own product, copy and brand as an editable HyperFrames project. Use when the person shares a video and wants one like it.
+description: Rebuild any video file as an editable HyperFrames project - motion graphics, talking heads, live action or AI-generated footage. Measure and watch it, rebuild every layer, then check the render against the original frame by frame. Use to reverse, recreate, replicate or copy a video.
 metadata:
   internal: true
 ---
 
 **Plugin installs:** Before setup or freshness commands, follow [plugin execution rules](../hyperframes/references/plugin-installation.md) when this skill is inside a HyperFrames plugin.
 
-# Reverse any video
+# Reverse a video
 
-The skill is free. Video understanding and generated media use HyperFrames credits; the person approves one budget up front. The `/hyperframes` contract applies to the remake; media comes through `/media-use`.
+The result is a HyperFrames project whose render matches the original and stays editable: text is text, graphics are elements with named colours, and every media file records where it came from. It is done when `npx hyperframes check` passes and `npx hyperframes diff` against the original passes for every segment. Build to the `/hyperframes` contract; this skill adds how to read a video you only have as pixels. Reverse videos the person has the right to use.
 
-## Sign in
+## 0. Prepare
 
-Understanding the reference uses a HeyGen model, so it needs sign-in. If there is no credential, tell the person in one line that sign-in is free and gives Voice Turbo, the music catalog and asset search, run `npx hyperframes auth login` and show the link it prints. If the person says to use their own API keys or only local tools, do that and don't bring sign-in up again.
+```bash
+npx hyperframes init <project>
+npx hyperframes measure probe <video> --normalize <project>/.reverse/source.mp4
+```
 
-## Steps
+`.reverse/source.mp4` is the evidence: measured and compared against, never rendered or published. Give the root composition the original's size and render at its frame rate (the probe's `canvas`; NTSC rates stay fractions such as `30000/1001`). Over 60 s, work in sections split at cuts.
 
-1. **Estimate once.** Tell the person what understanding the reference costs and the typical total for a high-quality remake, and get one budget, unless they already gave one. Don't ask about cost again while you stay inside it.
-2. **Understand the reference.** Shots with their timing, on-screen text, typography, palette, camera moves, speech and music. HeyGen video understanding for the CLI is not wired yet; until it is, use frames and the transcript (`npx hyperframes transcribe`) only when the person agreed to local tools, and say what that leaves out.
-3. **Plan for the best result.** Shot by shot: keep the reference's timing and rhythm, swap in the person's product, copy and brand. Choose the media that gives the highest-quality remake; don't trim the plan or swap in cheaper or free options unless the person asked to save cost. If the plan costs more than the budget, stop: show the total and ask the person to raise it or top up. Never cut the plan to fit.
-4. **Make the media** with `/media-use`. Relay any `Subscribe:` or `Add credits:` line exactly as printed.
-5. **Build** the composition, then `npx hyperframes lint` and `npx hyperframes check`; render locally with `npx hyperframes render` (free).
-6. **Wrap up.** Tell the person what the project used and what is left, and list what you could not match from the reference.
+## 1. Analyse: measure first, then look
+
+You see stills, not motion, and evenly spaced frames turn cuts into dissolves and drop one-frame flashes. Let measurement decide where to look (`references/watch.md`):
+
+1. `npx hyperframes measure events .reverse/source.mp4 --map`: cuts, flashes, what appears where, holds and the sound's hits, grouped into windows.
+2. `measure frames --every 1` for the overview, `measure frames --events` for each window's consecutive frames, `measure trail` to see a move in one picture.
+3. Numbers from `measure box | ink | curve | objects | rhythm | look`; words from `npx hyperframes transcribe`; beats from `npx hyperframes audio`.
+
+With a HeyGen sign-in, `npx hyperframes analyze .reverse/source.mp4 --preset reverse` drafts the same timeline first; it uploads the video, so say so. Correct the draft against the frames either way.
+
+Write `REVERSE.md` (`references/spec.md`): the brief, the recurring objects, then one section per segment with its copy, actions, times and where its pixels come from. Every number comes from a measurement; tag each claim observed, measured or hypothesis.
+
+## 2. Rebuild by layer
+
+| Layer | Default | When the person asks for new pixels |
+| --- | --- | --- |
+| Text, shapes, UI, charts, transitions | HTML + GSAP, registry first | — |
+| Burned-in captions | a caption track styled like the original, timed from the transcript | — |
+| Logos | SVG geometry; cut from the original when photographic | — |
+| Photos, footage, AI shots | each cut on its own (`measure extract --roi`) | generated (`/media-use`) |
+| A presenter | re-shot with HeyGen from a still and their own voice | — |
+| Sound | the original's track (`measure extract --out assets/sound.m4a`) as one `<audio id>` | voice, music (`/media-use`) |
+
+`references/layers.md` covers placement, burned-in text over reused footage, fonts and regeneration. One sub-composition per segment (one scene when a single camera spans several); each string one element bound to a variable; colours as `:root` variables.
+
+## 3. Check, cheapest first
+
+| Step | Command | Cost |
+| --- | --- | --- |
+| 1 | `npx hyperframes check`, with a `*.motion.json` of the measured onsets | no render |
+| 2 | `npx hyperframes diff .reverse/source.mp4 . --at <t,…>` at onsets, mid-moves and both sides of cuts | stills |
+| 3 | `npx hyperframes diff .reverse/source.mp4 . --range <a,b>` for the segment you changed | its frames |
+| 4 | `npx hyperframes render`, then `diff .reverse/source.mp4 <render> --segments REVERSE.md --sbs` | one render |
+
+Fix what `worst.jpg` shows: missing elements, then position and size, then timing, then colour. Stop when every segment passes, or after two rounds without gain on the worst segment, and write what is left in the report (`references/check.md`).
+
+Segments handed to subagents: wait for every one in the same turn, then assemble `REVERSE.md` and run step 4 yourself. A headless run (`claude -p`, `codex exec`, CI) ends with your turn and drops work still in the background; a segment left empty still scores high on a plain background, which `diff` reports as missing content.
+
+## Rules
+
+- Cut only what cannot be drawn. A clip of the original that carries a map, chart, title or UI along is a copy, not a reverse.
+- Build mechanisms, not traced paths: no coordinate lists or per-frame positions.
+- Copy every string exactly: case, punctuation, line breaks.
+- Keep hard cuts hard, holds held and one-frame flashes one frame long.
+- What is on screen at a segment's first frame starts there; it does not animate in.
+- Generated pictures carry no text or logos; HyperFrames draws those.
