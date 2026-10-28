@@ -49,9 +49,7 @@ const round = (t: number) => Math.round(t * 1000) / 1000;
 const EDGE_CONTEXT_SECONDS = 0.1;
 const KIND_SAMPLE_RATE = 16_000;
 const KIND_DECODE_BYTES = 256 * 1024 * 1024;
-/** Rhythm is measured at 22.05 kHz (audioRhythm ANALYSIS_RATE), so a whole clip need not be decoded finer. */
 const RHYTHM_SAMPLE_RATE = 22_050;
-/** Beats, bars, tempo and sections depend on the music around a window, so a window reads them off the whole clip. */
 const RHYTHM: readonly AudioCapability[] = ["beats", "downbeats", "bpm", "sections"];
 
 /** A file the film does not play yet, placed where the caller would put it. */
@@ -198,7 +196,6 @@ async function clipKind(
   return analysis;
 }
 
-/** The kind of the whole clip, from its cache when it has one; the window's own when the clip cannot be read. */
 async function wholeClipKind(
   target: AudioTarget,
   signal: AudioSignal,
@@ -235,37 +232,42 @@ function beatsBetween(value: MarkedBeats, from: number, to: number): MarkedBeats
   return {
     ...value,
     times: value.times.filter((_, i) => keep[i]),
-    silent: value.silent.filter((_, i) => keep[i]),
+    unheard: value.unheard.filter((_, i) => keep[i]),
   };
 }
+
+/** One heard onset is not a pulse: a window answers beats only when two of its beats are heard. */
+const PULSE_BEATS = 2;
+
+const heardTimes = (beats: MarkedBeats) => beats.times.filter((_, i) => !beats.unheard[i]);
 
 interface RhythmWindow {
   from: number;
   to: number;
-  /** The whole clip's beats inside the window, which the window's tempo is read from. */
   beats: MarkedBeats | null;
+  pulse: boolean;
 }
 
-function tempoBetween(whole: Tempo, { from, to, beats }: RhythmWindow): Tempo {
-  const own = beats ? tempoOf(beats.times) : null;
-  return {
-    value: own?.value ?? whole.value,
-    curve: whole.curve.filter((point) => between(from, to)(point.t)),
-  };
-}
-
-/** How each rhythm answer is cut to a window: its beats and bars there, their tempo, and the sections it overlaps. */
 const CUTS: Partial<Record<AudioCapability, (value: unknown, window: RhythmWindow) => unknown>> = {
-  beats: (_value, window) => window.beats,
-  downbeats: (value, { from, to }) => beatsBetween(value as MarkedBeats, from, to),
-  bpm: (value, window) => tempoBetween(value as Tempo, window),
+  beats: (_value, { beats, pulse }) =>
+    pulse ? beats : { times: [], unheard: [], confidence: 0, reason: "no steady beat" },
+  downbeats: (value, { from, to, pulse }) =>
+    pulse
+      ? beatsBetween(value as MarkedBeats, from, to)
+      : { times: [], unheard: [], meter: null, confidence: "low" },
+  bpm: (value, { from, to, beats, pulse }): Tempo =>
+    pulse && beats
+      ? {
+          value: tempoOf(heardTimes(beats)).value,
+          curve: (value as Tempo).curve.filter((point) => between(from, to)(point.t)),
+        }
+      : { value: null, curve: [] },
   sections: (value, { from, to }) => {
     const sections = value as { spans: Section[] };
     return { ...sections, spans: sections.spans.filter((s) => s.end > from && s.start < to) };
   },
 };
 
-/** The whole clip's rhythm answers cut to the window. */
 function rhythmBetween(
   values: Analysis["values"],
   asked: readonly AudioCapability[],
@@ -273,7 +275,7 @@ function rhythmBetween(
   to: number,
 ): Analysis["values"] {
   const beats = values.beats ? beatsBetween(values.beats as MarkedBeats, from, to) : null;
-  const window = { from, to, beats };
+  const window = { from, to, beats, pulse: !!beats && heardTimes(beats).length >= PULSE_BEATS };
   return Object.fromEntries(
     asked.map((capability) => {
       const value = values[capability];
@@ -294,9 +296,8 @@ async function wholeClipRhythm(
     const rate = Math.min(stream.sampleRate, RHYTHM_SAMPLE_RATE);
     const clip = await clipKindSignal(target, stream, rate, undefined, "rhythm");
     if (!clip) throw new Error("no audio stream");
-    // bpm in the window is the tempo of the window's beats, so the beats are measured even when only bpm is asked.
-    const measure =
-      asked.includes("bpm") && !asked.includes("beats") ? [...asked, "beats" as const] : asked;
+    const needsBeats = asked.some((c) => c === "bpm" || c === "downbeats");
+    const measure = needsBeats && !asked.includes("beats") ? [...asked, "beats" as const] : asked;
     const whole = await analyzeSignal(clip, {
       ...request,
       capabilities: measure,
@@ -315,10 +316,7 @@ async function wholeClipRhythm(
   }
 }
 
-/**
- * Analyzes the window, except what the window alone would misjudge, which comes from the whole clip: its kind, and
- * when the window is only part of the clip, its rhythm.
- */
+/** Analyzes the window, except a kind and a rhythm the window would misjudge, which come from the whole clip. */
 async function analyzeWindow(
   target: AudioTarget,
   signal: AudioSignal,

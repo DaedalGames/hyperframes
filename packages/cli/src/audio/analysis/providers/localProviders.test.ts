@@ -76,7 +76,7 @@ describe.skipIf(process.platform === "win32")("beatThisProvider", () => {
       bpm: "beat-this",
     });
     expect(analysis.values.downbeats).toMatchObject({ times: [0.5, 2.5, 4.5], meter: 4 });
-    expect((analysis.values.downbeats as { silent: boolean[] }).silent).toHaveLength(3);
+    expect((analysis.values.downbeats as { unheard: boolean[] }).unheard).toHaveLength(3);
     expect(analysis.values.bpm).toMatchObject({ value: 120 });
   });
 

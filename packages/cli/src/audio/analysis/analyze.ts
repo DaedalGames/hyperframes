@@ -1,5 +1,6 @@
 import {
   medianInterval,
+  onsets,
   rhythm,
   runLadder,
   signalDuration,
@@ -165,40 +166,44 @@ function serviceHint(
     : [];
 }
 
-/** Beats and downbeats as any provider answers them, once they are on the signal's own beats and marked where it is silent. */
 export interface MarkedBeats {
   times: number[];
-  /** True for each beat that falls where the audio is silent: the grid runs on, but nothing sounds there. */
-  silent: boolean[];
+  /** True where nothing rhythmic sounds at the beat (silence, hiss, a held note): the grid runs on there. */
+  unheard: boolean[];
   meter?: number | null;
   snap?: SnapReport;
 }
 
+/** The tracker places a beat within a frame or two of the onset it follows; 50 ms allows a provider's offset. */
+const NEAR_ONSET_SECONDS = 0.05;
+
 const roundTime = (t: number) => Math.round(t * 1000) / 1000;
 
-/**
- * One step after every ladder, so no provider is trusted on its own clock: a provider's beats and downbeats move onto
- * the beats the signal measures when one is within a quarter beat, and every beat says whether it falls in silence.
- */
+/** Every provider's beats move onto the signal's own within a quarter beat, and each says whether it is heard. */
 function settled(
   capability: AudioCapability,
   result: LadderResult,
   signal: AudioSignal,
 ): LadderResult {
   if (capability !== "beats" && capability !== "downbeats") return result;
-  const value = result.value as Omit<MarkedBeats, "silent"> | null;
+  const value = result.value as Omit<MarkedBeats, "unheard"> | null;
   if (!value?.times) return result;
   const onSignal =
     result.provenance === "signal" ? value : snappedToSignal(capability, value, signal);
   const quiet = silence(signal);
-  const silent = onSignal.times.map((t) => quiet.some((span) => t >= span.start && t < span.end));
-  return { ...result, value: { ...onSignal, silent } };
+  const hits = onsets(signal).events.map((event) => event.t);
+  const unheard = onSignal.times.map(
+    (t) =>
+      quiet.some((span) => t >= span.start && t < span.end) ||
+      !hits.some((hit) => Math.abs(hit - t) <= NEAR_ONSET_SECONDS),
+  );
+  return { ...result, value: { ...onSignal, unheard } };
 }
 
 /** The beat is the answer's own beat interval, or its bar over its meter; the signal's when neither is known. */
 function snappedToSignal(
   capability: "beats" | "downbeats",
-  value: Omit<MarkedBeats, "silent">,
+  value: Omit<MarkedBeats, "unheard">,
   signal: AudioSignal,
 ) {
   const measured = rhythm(signal).beats.times;

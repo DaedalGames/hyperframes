@@ -221,12 +221,32 @@ describe.skipIf(!ffmpeg)("analyzeTargets", () => {
     expect(beatsOf(alone).times).toEqual([]);
     expect(beatsOf(windowed).times.length).toBeGreaterThanOrEqual(5);
     expect(beatsOf(windowed).times).toEqual(beatsOf(whole).times.filter(inWindow));
-    expect(beatsOf(windowed).silent).toEqual(beatsOf(windowed).times.map(() => false));
+    expect(beatsOf(windowed).unheard).toEqual(beatsOf(windowed).times.map(() => false));
     expect((windowed.items[0]!.downbeats as MarkedBeats).times).toEqual(
       (whole.items[0]!.downbeats as MarkedBeats).times.filter(inWindow),
     );
     expect((windowed.items[0]!.bpm as { value: number }).value).toBeCloseTo(120, 0);
     expect(windowed.items[0]!.window).toEqual({ from: 6, to: 9 });
+  });
+
+  it("answers no steady beat, and no tempo, for a window where only noise plays", async () => {
+    const path = wav("hiss-gap.wav", 24, (t) =>
+      t >= 8 && t < 16 ? 0.05 * noise() : hit(0)(t % 0.5),
+    );
+    const target = {
+      path,
+      file: "hiss-gap.wav",
+      ref: "#bed",
+      kind: "audio" as const,
+      placement: null,
+      window: { from: 10, seconds: 4 },
+      clip: { from: 0, seconds: 24 },
+    };
+    const [item] = (await analyzeTargets([target], { capabilities: ["beats", "downbeats", "bpm"] }))
+      .items;
+    expect(item!.beats).toMatchObject({ times: [], reason: "no steady beat" });
+    expect((item!.downbeats as MarkedBeats).times).toEqual([]);
+    expect(item!.bpm).toEqual({ value: null, curve: [] });
   });
 
   it.each([

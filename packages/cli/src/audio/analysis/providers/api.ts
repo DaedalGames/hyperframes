@@ -231,10 +231,6 @@ function snappedSections(signal: AudioSignal, body: AudioApiResponse) {
   return { spans, snap: onBeat.report() };
 }
 
-/**
- * The answer for one capability. Section boundaries move onto the signal's beats here; beats and downbeats move in
- * the step every provider's answer passes through (analyze.ts `settled`).
- */
 function measured(capability: AudioApiCapability, signal: AudioSignal, body: AudioApiResponse) {
   const value =
     capability === "beats"

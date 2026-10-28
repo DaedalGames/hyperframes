@@ -140,7 +140,7 @@ describe("analyzeSignal beats, from any provider", () => {
     expect(beats.snap).toBeUndefined();
   });
 
-  it("marks every beat that falls in silence, from any provider, and keeps it in the grid", async () => {
+  it("marks every beat that falls in silence as unheard, from any provider, and keeps it in the grid", async () => {
     const signal = clicks(12, 4, 6);
     const quiet = silence(signal);
     const inQuiet = (t: number) => quiet.some((s) => t >= s.start && t < s.end);
@@ -150,16 +150,36 @@ describe("analyzeSignal beats, from any provider", () => {
         provider,
       ]);
       const beats = analysis.values.beats as MarkedBeats;
-      expect(beats.silent).toHaveLength(beats.times.length);
-      expect(beats.silent).toEqual(beats.times.map((t) => inQuiet(t - 1)));
+      expect(beats.unheard).toHaveLength(beats.times.length);
+      expect(beats.unheard).toEqual(beats.times.map((t) => inQuiet(t - 1)));
     }
     const grid24 = (
       await analyzeSignal(signal, { capabilities: ["beats"] }, [answering("grid", grid)])
     ).values.beats as MarkedBeats;
     expect(grid24.times).toHaveLength(24);
     // the four grid beats in the rest, each moved onto the signal's own grid there
-    const resting = grid24.times.filter((_, k) => grid24.silent[k]);
+    const resting = grid24.times.filter((_, k) => grid24.unheard[k]);
     expect(resting.map((t) => Math.round(t * 4) / 4)).toEqual([4.25, 4.75, 5.25, 5.75]);
+  });
+
+  it("marks beats unheard where noise plays with no pulse, though it is far from silence", async () => {
+    const signal = clicks(12, 4, 8);
+    let state = 11;
+    const samples = signal.channels[0]!;
+    for (let i = 4 * RATE; i < 8 * RATE; i++) {
+      state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
+      samples[i] = 0.05 * ((state / 2_147_483_648) * 2 - 1);
+    }
+    expect(silence(signal).some((s) => s.start < 8 && s.end > 4)).toBe(false);
+    const grid = Array.from({ length: 24 }, (_, k) => 0.25 + k * 0.5);
+    const beats = (
+      await analyzeSignal(signal, { capabilities: ["beats"] }, [answering("grid", grid)])
+    ).values.beats as MarkedBeats;
+    const inHiss = beats.times.map((t) => t > 4.1 && t < 8);
+    expect(beats.unheard.filter((_, k) => inHiss[k]).every(Boolean)).toBe(true);
+    expect(beats.unheard.filter((_, k) => !inHiss[k] && beats.times[k]! < 11.5).some(Boolean)).toBe(
+      false,
+    );
   });
 
   it("marks downbeats the same way, and moves them by the bar's own beat", async () => {
@@ -174,9 +194,9 @@ describe("analyzeSignal beats, from any provider", () => {
     const downbeats = (await analyzeSignal(signal, { capabilities: ["downbeats"] }, [bars])).values
       .downbeats as MarkedBeats;
     expect(downbeats.snap?.toleranceMs).toBe(125);
-    expect(downbeats.silent).toEqual([false, false, true, false, false, false]);
+    expect(downbeats.unheard).toEqual([false, false, true, false, false, false]);
     expect(
-      downbeats.times.filter((_, k) => !downbeats.silent[k]).every((t) => measured.includes(t)),
+      downbeats.times.filter((_, k) => !downbeats.unheard[k]).every((t) => measured.includes(t)),
     ).toBe(true);
   });
 });
