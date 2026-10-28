@@ -16,6 +16,7 @@ import {
   retiredSkillNotice,
   type SkillDiff,
   type SkillsCheckResult,
+  skillsRef,
 } from "../utils/skillsManifest.js";
 import { mirrorGlobalSkills } from "../utils/skillsMirror.js";
 import { invalidateSkillsCache } from "../utils/skillsUpdateCheck.js";
@@ -150,7 +151,15 @@ const PLAIN_SKILL_NAME = /^[a-z0-9][a-z0-9._-]*$/i;
 // freshness comes from --full-depth (see GLOBAL_INSTALL_ARGS_TAIL), which clones the
 // repo at latest `main`; the URL just names what to clone. Our freshness check
 // resolves "latest" straight from GitHub too, so install and check agree.
-const SOURCES = [{ name: "HyperFrames", url: "https://github.com/heygen-com/hyperframes" }];
+const SOURCES = [
+  {
+    name: "HyperFrames",
+    url:
+      skillsRef() === "main"
+        ? "https://github.com/heygen-com/hyperframes"
+        : `https://github.com/heygen-com/hyperframes#${skillsRef()}`,
+  },
+];
 
 // Fan HyperFrames' own skills out to every other installed agent. Scope by the
 // lock's source attribution (the same attribution the foreign check uses) — NOT by listing

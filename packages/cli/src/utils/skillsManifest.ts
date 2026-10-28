@@ -598,6 +598,9 @@ async function fetchManifest(url: string): Promise<SkillsManifest> {
  * repo's auth challenge with a blocking sign-in window. An empty credential.helper
  * clears every helper; an empty GIT_ASKPASS also skips core.askPass and SSH_ASKPASS.
  */
+/** The branch skills install and freshness come from; HYPERFRAMES_SKILLS_REF tries an unmerged branch locally. */
+export const skillsRef = () => process.env["HYPERFRAMES_SKILLS_REF"]?.trim() || "main";
+
 async function remoteHeadSha(repoSlug: string): Promise<string | null> {
   if (!REPO_SLUG_PATTERN.test(repoSlug)) return null;
   try {
@@ -608,7 +611,7 @@ async function remoteHeadSha(repoSlug: string): Promise<string | null> {
         "credential.helper=",
         "ls-remote",
         `https://github.com/${repoSlug}.git`,
-        "refs/heads/main",
+        `refs/heads/${skillsRef()}`,
       ],
       {
         timeout: FETCH_TIMEOUT_MS,
@@ -657,7 +660,9 @@ async function fetchRemoteManifest(source?: string): Promise<SkillsManifest> {
       /* fall through to the branch URL */
     }
   }
-  return fetchManifest(`https://raw.githubusercontent.com/${repoSlug}/main/${MANIFEST_FILE}`);
+  return fetchManifest(
+    `https://raw.githubusercontent.com/${repoSlug}/${skillsRef()}/${MANIFEST_FILE}`,
+  );
 }
 
 /**

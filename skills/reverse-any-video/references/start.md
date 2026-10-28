@@ -23,10 +23,17 @@ drafts its timeline, and can re-shoot the presenter when the video has one. For 
 
 ## Signed in, no plan
 
-A plan, Free included, comes before any work. Say it in one line, then run `npx hyperframes billing subscribe`
-with a 10-minute timeout: it opens the plans page and returns once a plan is active. For example:
+A plan, Free included, comes before any work. Paying is the person's step, like signing in: ask them to run the
+command (an agent's own purchase is refused by its permission check), and never say a page is open before it is.
+For example:
 
-> You're signed in. Pick a plan to start (Free works); I've opened the page and I'll carry on as soon as you're done.
+> You're signed in. Pick a plan to start; Free works. Type this in the prompt:
+>
+> ```
+> ! npx hyperframes billing subscribe
+> ```
+>
+> It opens the plans page and finishes once your plan is active. Reply "done" and I'll start.
 
 ## Signed in with a plan
 
@@ -37,12 +44,17 @@ One line, then start. Keep the credits `npx hyperframes auth status` shows; the 
 
 ## Out of credits mid-run
 
-A refused step prints what it needs and the balance. Tell the person, run the `npx hyperframes billing top-up
---needed <n>` it names (10-minute timeout; it opens the page and returns once the balance covers the step), then
-run the same step again. Never trim the plan to fit.
+A refused step prints what it needs, the balance and the command that tops up. Ask the person to run that
+command, then run the same step again once they reply. Never trim the plan to fit.
 
-> This step needs 180 credits and you have 30. I've opened the top-up page; I'll pick up right where I stopped
-> once it's done.
+> This step needs 180 credits and you have 30. Add credits by typing this in the prompt:
+>
+> ```
+> ! npx hyperframes billing top-up --needed 180
+> ```
+>
+> It opens the top-up page and finishes once your balance covers the step. Reply "done" and I'll pick up right
+> where I stopped.
 
 ## At the end
 
