@@ -133,6 +133,8 @@ export {
   writeCapturedFrame,
   discardWarmupCapture,
   getCompositionDuration,
+  getCompositionLengthSource,
+  type CompositionLengthSource,
   getCapturePerfSummary,
   percentileOf,
   prepareCaptureSessionForReuse,
@@ -377,6 +379,7 @@ export {
 } from "./utils/notMediaPayload.js";
 
 export {
+  _setDownloadFetchForTests,
   assertPublicHttpsUrl,
   isBlockedNetworkHost,
   downloadToTemp,

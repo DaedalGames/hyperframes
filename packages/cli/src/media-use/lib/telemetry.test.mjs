@@ -186,7 +186,10 @@ test("track identifies a signed-in HeyGen account once and still sends events", 
     mkdirSync(join(home, ".hyperframes"), { recursive: true });
     writeFileSync(
       join(home, ".hyperframes/credentials"),
-      JSON.stringify({ user: { email: "alice@example.com", username: "alice" } }),
+      JSON.stringify({
+        api_key: "hg_test",
+        user: { email: "alice@example.com", username: "alice" },
+      }),
     );
 
     await track("media_use_resolve", { type: "bgm", source: "search" });
@@ -195,9 +198,19 @@ test("track identifies a signed-in HeyGen account once and still sends events", 
     const batch = parseFetchBodies(calls);
     const identify = batch.filter((item) => item.event === "$identify");
     assert.equal(identify.length, 1);
-    assert.equal(identify[0].distinct_id, "alice@example.com");
+    // heygenUserId("alice"): the same id the CLI's own login identify uses.
+    assert.equal(identify[0].distinct_id, "2bd806c9-7f0e-50af-9a1f-c3328fa763a9");
     assert.equal(identify[0].properties.$anon_distinct_id, "anon-1");
-    assert.equal(batch.filter((item) => item.event === "media_use_resolve").length, 2);
+    assert.deepEqual(identify[0].properties.$set, {
+      email: "alice@example.com",
+      heygen_username: "alice",
+    });
+    const resolves = batch.filter((item) => item.event === "media_use_resolve");
+    assert.equal(resolves.length, 2);
+    assert.ok(resolves.every((item) => item.properties.heygen_username === "alice"));
+    assert.ok(
+      resolves.every((item) => item.distinct_id === "2bd806c9-7f0e-50af-9a1f-c3328fa763a9"),
+    );
   } finally {
     globalThis.fetch = originalFetch;
     restoreEnv(savedEnv);
@@ -226,12 +239,21 @@ test("track uses the selected dev HyperFrames account instead of a HeyGen or pro
       [join(process.env.HYPERFRAMES_CONFIG_DIR, "dev"), "dev@example.com"],
     ]) {
       mkdirSync(dir, { recursive: true });
-      writeFileSync(join(dir, "credentials"), JSON.stringify({ user: { email } }));
+      writeFileSync(
+        join(dir, "credentials"),
+        JSON.stringify({
+          oauth: { access_token: "test-access" },
+          user: { email, username: email },
+        }),
+      );
     }
     await track("media_use_resolve", { type: "voice" });
     const identify = parseFetchBodies(calls).filter((item) => item.event === "$identify");
     assert.equal(identify.length, 1);
-    assert.equal(identify[0].distinct_id, "dev@example.com");
+    assert.equal(identify[0].properties.$set.heygen_username, "dev@example.com");
+    const event = parseFetchBodies(calls).find((item) => item.event === "media_use_resolve");
+    assert.equal(event.properties.heygen_username, "dev@example.com");
+    assert.equal(event.distinct_id, identify[0].distinct_id);
   } finally {
     globalThis.fetch = originalFetch;
     restoreEnv(savedEnv);
@@ -240,7 +262,7 @@ test("track uses the selected dev HyperFrames account instead of a HeyGen or pro
   }
 });
 
-test("track identifies with a lowercased email regardless of stored casing", async () => {
+test("track falls back to a lowercased email when the account has no username", async () => {
   const savedEnv = { ...process.env };
   const originalFetch = globalThis.fetch;
   const { root, home } = sandbox();
@@ -259,7 +281,7 @@ test("track identifies with a lowercased email regardless of stored casing", asy
     mkdirSync(join(home, ".hyperframes"), { recursive: true });
     writeFileSync(
       join(home, ".hyperframes/credentials"),
-      JSON.stringify({ user: { email: "Alice@Example.com", username: "alice" } }),
+      JSON.stringify({ api_key: "hg_test", user: { email: "Alice@Example.com" } }),
     );
 
     await track("media_use_resolve", { type: "bgm", source: "search" });
@@ -305,6 +327,7 @@ test("track does not identify when signed out", async () => {
     );
     assert.equal(batch[0].event, "media_use_resolve");
     assert.equal(batch[0].distinct_id, "anon-2");
+    assert.equal(batch[0].properties.heygen_username, undefined);
   } finally {
     globalThis.fetch = originalFetch;
     restoreEnv(savedEnv);
