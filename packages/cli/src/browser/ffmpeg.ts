@@ -96,9 +96,13 @@ export function getFFmpegInstallCommand(): string | undefined {
 }
 
 export function getFFmpegInstallHint(): string {
-  const skipped = getSkippedX86Binary();
-  const base = installHint();
-  return skipped ? `${base} (ignored ${skipped}: x86_64 only, it cannot run on this Mac)` : base;
+  // Only a binary that is still missing: one that was found needs no explanation.
+  const ignored = (["ffmpeg", "ffprobe"] as const)
+    .filter((name) => !findFfBinary(name, { configuredMustExist: true }))
+    .map(getSkippedX86Binary)
+    .filter((path) => path !== undefined);
+  const note = ignored.map((path) => ` (ignored ${path}: x86_64 only, it cannot run on this Mac)`);
+  return installHint() + note.join("");
 }
 
 function installHint(): string {
