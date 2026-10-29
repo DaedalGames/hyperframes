@@ -550,6 +550,8 @@ export function initSandboxRuntimeModular(): void {
   ensureColorGroupInertStyle(document);
   const exportRenderFps = resolveExportRenderFps();
   state.canonicalFps = exportRenderFps.fps ?? compositionFps() ?? state.canonicalFps;
+  const renderFps =
+    exportRenderFps.fps ?? (window.__HF_REPLAY_SKIPPED_FRAMES ? state.canonicalFps : undefined);
   setRuntimeProtocolFps(state.canonicalFps);
   if (window.__HF_EXPORT_RENDER_SEEK_CONFIG) {
     const fpsDetail = JSON.stringify({
@@ -5084,7 +5086,7 @@ export function initSandboxRuntimeModular(): void {
       const suppressEvents = options?.suppressEvents === true;
       // Guarded: a partial timeline without pause() must still get its seek.
       pauseTimelineIfPossible(timeline);
-      seekGsapTimeline(timeline, timeSeconds, suppressEvents, gsapStructureOf(timeline));
+      seekGsapTimeline(timeline, timeSeconds, suppressEvents, gsapStructureOf(timeline), renderFps);
     } catch (err) {
       // The scene's own callback threw. A warning, not a script error: it must not turn a
       // timed-out timeline wait into a script failure.
@@ -5315,7 +5317,7 @@ export function initSandboxRuntimeModular(): void {
       try {
         if (typeof tl.totalTime === "function") {
           const structure = gsapStructureOf(tl);
-          const redrawn = seekGsapTimeline(tl, tlSeekTime, suppressEvents, structure);
+          const redrawn = seekGsapTimeline(tl, tlSeekTime, suppressEvents, structure, renderFps);
           if (!redrawn && !suppressEvents && !hasZeroDurationCallbackTween(tl, structure)) {
             // The first seek is the only eventful one; the re-render only refreshes styles.
             rerenderGsapTimelineAt(

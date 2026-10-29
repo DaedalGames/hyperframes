@@ -1567,6 +1567,28 @@ describe("check pipeline", () => {
     expect(report.contrast).toMatchObject({ ok: true, errorCount: 0, findings: [] });
   });
 
+  it("says in plain words that a lint error is why the browser pass was skipped", async () => {
+    const lint = lintWith(
+      "error",
+      "root_missing_composition_id",
+      "Root needs data-composition-id.",
+    );
+    const { report } = await runScenario(fakeDriver(), {}, { lint });
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const command = createCheckCommand({
+      resolveProject: () => PROJECT,
+      runPipeline: vi.fn(async () => report),
+      prepareMedia: vi.fn(async () => []),
+      withMeta: (value) => value,
+    });
+
+    await runViaCli(command, { rawArgs: [] });
+
+    const said = log.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(said).toContain("Browser validation skipped because of the lint error above");
+    expect(said).not.toContain("Browser session never ran");
+  });
+
   it("marks browserSkipped true when the linter itself crashes", async () => {
     const { deps } = dependencies(fakeDriver());
     deps.lintProject = vi.fn(async () => {
@@ -2262,6 +2284,42 @@ describe("check pipeline", () => {
         "while running the overlap pass (overlap probes from 0s).",
       );
       expect(failure?.message).toContain("checking samples 0.0, running the overlap pass 120.0.");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a check given a long --timeout is not ended as idle after 120 s of waiting for its page", async () => {
+    vi.useFakeTimers();
+    try {
+      let aborted!: AbortSignal;
+      const driver = fakeDriver({
+        collectOverlapGrid: vi.fn(
+          () =>
+            new Promise<never>((_, reject) =>
+              aborted.addEventListener("abort", () => reject(aborted.reason)),
+            ),
+        ),
+      });
+      const { deps } = dependencies(driver);
+      deps.runBrowserCheck = async (_project, options, motion, deadline) => {
+        aborted = deadline!.signal;
+        deadline!.start();
+        return runAuditGrid(driver, options, motion, undefined, deadline!.enter);
+      };
+      const pending = runCheckPipeline(
+        PROJECT,
+        { ...DEFAULT_CHECK_OPTIONS, timeout: 400_000 },
+        deps,
+      );
+      await vi.advanceTimersByTimeAsync(300_000);
+      expect(aborted.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(110_000);
+      const report = await pending;
+      const failure = report.runtime.findings.find(
+        (finding) => finding.code === "check_runtime_failure",
+      );
+      expect(failure?.message).toContain("no progress for 410 s");
     } finally {
       vi.useRealTimers();
     }
