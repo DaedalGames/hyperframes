@@ -7,6 +7,8 @@ export interface Plan {
   mock?: boolean;
 }
 
+const UNPAID = new Set(["incomplete", "incomplete_expired"]);
+
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
@@ -30,15 +32,23 @@ export async function readPlan(): Promise<Plan | null> {
     const data = isRecord(body) && isRecord(body.data) ? body.data : body;
     if (!res.ok || !isRecord(data)) return mockPlan();
     const usage = isRecord(data.usage) ? data.usage : {};
-    const plan = String(data.plan ?? data.tier ?? "none") || "none";
-    return { plan, credits: Number(usage.remaining_units ?? data.credits ?? 0) || 0 };
+    // Shaped as studio-contracts' BillingSubscription: `subscription` is null on Free, and an unpaid placeholder
+    // carries its plan's name before the first invoice funds it.
+    const sub = isRecord(data.subscription) ? data.subscription : null;
+    const paid = !!sub && !UNPAID.has(String(sub.status));
+    return {
+      plan: paid ? String(sub.plan_name ?? "paid") : "none",
+      credits: Number(usage.remaining_units ?? 0) || 0,
+    };
   } catch {
     return mockPlan();
   }
 }
 
-export const plansUrl = () => process.env["HYPERFRAMES_PLANS_URL"] || "https://hyperframes.studio/";
-export const creditsUrl = () => process.env["HYPERFRAMES_CREDITS_URL"] || plansUrl();
+export const plansUrl = () =>
+  process.env["HYPERFRAMES_PLANS_URL"] || "https://hyperframes.studio/pricing";
+export const creditsUrl = () =>
+  process.env["HYPERFRAMES_CREDITS_URL"] || "https://hyperframes.studio/account/plan";
 
 /** A plans or credits page link carrying the fields the web side reads (source, needed credits, the waiting step). */
 export function pageUrl(

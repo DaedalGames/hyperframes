@@ -250,7 +250,7 @@ function collectStatusRows(s: VerifiedStatus): [string, string][] {
     rows.push([
       "HyperFrames:",
       plan.plan === "none"
-        ? `no plan · Subscribe: ${pageUrl("plans")}${tag}`
+        ? `Free · Upgrade to Pro: ${pageUrl("plans")}${tag}`
         : `${plan.plan} plan, ${plan.credits.toLocaleString("en-US")} credits${tag}`,
     ]);
   }

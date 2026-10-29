@@ -5,9 +5,7 @@ import { failCommand } from "../utils/commandResult.js";
 import { defineCommand } from "../utils/defineCommand.js";
 
 const describe = (p: Plan | null) =>
-  p && p.plan !== "none"
-    ? `${p.plan} plan, ${p.credits.toLocaleString("en-US")} credits`
-    : "no plan";
+  p && p.plan !== "none" ? `${p.plan} plan, ${p.credits.toLocaleString("en-US")} credits` : "Free";
 
 /** Opens the plans or credits page, then waits until the account shows the change, so the run continues on its own. */
 export default defineCommand({

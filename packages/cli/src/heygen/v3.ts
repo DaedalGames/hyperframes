@@ -38,7 +38,7 @@ function refusal(status: number, body: unknown): Fix {
   // The fix is the one line the agent relays as printed; the problem says how to wait for the person.
   if (/hf_subscription_required/i.test(code))
     return new Fix(
-      `this needs a HyperFrames plan; nothing was charged. Run \`npx hyperframes billing subscribe\`: it opens the page and waits`,
+      `this is a HyperFrames Pro feature; nothing was charged. Run \`npx hyperframes billing subscribe\`: it opens the page and waits`,
       `Subscribe: ${url ?? pageUrl("plans", { needed })}`,
     );
   if (/hf_usage_exhausted/i.test(code))
