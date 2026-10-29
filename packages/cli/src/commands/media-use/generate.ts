@@ -147,7 +147,7 @@ export default defineCommand({
           out: request.out,
           price,
           credits,
-          next: "after the person agrees to this price, run the same command without --plan",
+          next: "run the same command without --plan to make it",
         };
       }
       checkLimit(credits, num(args["max-credits"], "--max-credits"));
