@@ -10,7 +10,7 @@ import {
   type GenerateRequest,
   type GenerateType,
 } from "../../heygen/generate.js";
-import { priceOf } from "../../heygen/pricing.js";
+import { checkLimit, creditsOf, priceOf } from "../../heygen/pricing.js";
 
 export const examples: Example[] = [
   [
@@ -99,6 +99,11 @@ export default defineCommand({
       description: "music: allow singing (default instrumental)",
       default: false,
     },
+    "max-credits": {
+      type: "string",
+      description:
+        "The person's credit limit, less what earlier calls used: make nothing when this call would cost more",
+    },
     plan: {
       type: "boolean",
       description: "Print the price and what would be sent; make nothing",
@@ -133,6 +138,7 @@ export default defineCommand({
         instrumental: !args.vocals,
       };
       const price = priceOf(request);
+      const credits = creditsOf(price);
       if (args.plan) {
         checkGuide(request);
         return {
@@ -140,11 +146,13 @@ export default defineCommand({
           type,
           out: request.out,
           price,
+          credits,
           next: "after the person agrees to this price, run the same command without --plan",
         };
       }
+      checkLimit(credits, num(args["max-credits"], "--max-credits"));
       const made = await generate(request, (status) => console.error(`generate: ${status}…`));
-      return { ...made, price };
+      return { ...made, price, credits };
     });
   },
 });

@@ -15,6 +15,8 @@ Every person on screen, speaking or not, is re-shot with HeyGen so the original'
 
    `--motion` is the original shot itself, cut at its cut times: HeyGen follows its body and camera motion and takes the face from the plate. It also copies text burned into the guide, so give one `--mask` per drawn box in that shot (the clip's pixels and seconds). Mask the text's own box, never a full-width band: a gesture under a mask is lost. A person who does not speak gets no `--audio`.
 
+   A credit limit the person named: price every shot first with `--plan`, keep the people that fit, pass what is left as `--max-credits`, and ask before cutting a person to stay under it.
+
 4. **Check each shot as it arrives:** no cut inside it (generate prints `cuts_inside`, and refuses a guide with a cut), none of the original's text, the face box within 5% of the original's (`npx hyperframes measure face`). Regenerate a failing shot once; then trim it to its good part.
 5. **Frame it:** scale and move each shot so its face box sits on the original's at the shot's start and end (`npx hyperframes measure face <shot> --against <video> --from a --to b` prints the `scale`, `x`, `y` to set), tweening between them only where the original's camera moves. The framing jumps at cuts and nowhere else.
 6. **Text behind the person:** where the original's text passes behind them, cut them out of the shot (`npx hyperframes remove-background <shot> -o <cutout>.webm`) and stack shot, text, cutout.
