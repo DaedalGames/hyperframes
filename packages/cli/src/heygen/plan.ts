@@ -21,10 +21,13 @@ function mockPlan(): Plan | null {
   return { plan, credits: Number(credits) || 0, mock: true };
 }
 
+// Payment routes live on api2, beside the OAuth ones; the v3 generation routes stay on api.
+const billingBaseUrl = () => resolveCloudBaseUrl().replace("://api.", "://api2.");
+
 /** The plan from `/v1/payment/hyperframes/subscription`, else the mock, else null. */
 export async function readPlan(): Promise<Plan | null> {
   try {
-    const res = await fetch(`${resolveCloudBaseUrl()}/v1/payment/hyperframes/subscription`, {
+    const res = await fetch(`${billingBaseUrl()}/v1/payment/hyperframes/subscription`, {
       headers: { ...(await resolveCloudAuthHeaders()), accept: "application/json" },
       signal: AbortSignal.timeout(15_000),
     });
