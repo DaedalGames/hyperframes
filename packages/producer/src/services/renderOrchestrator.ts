@@ -177,9 +177,9 @@ import { formatCaptureFrameName } from "../utils/paths.js";
 import { findRenderHdrAutoPromotionTrigger, resolveEffectiveHdrMode } from "./render/hdrMode.js";
 import {
   buildRenderPerfSummary,
-  capturedBeyondViewport,
   pushWorkerDedupPerfs,
   pushWorkerPageErrors,
+  withCapturedBeyondViewport,
   roundDb,
   worstSubTimelineWaitOutcome,
 } from "./render/perfSummary.js";
@@ -5151,12 +5151,10 @@ async function executeRenderPipeline(input: {
           deDrainStats = streamingRes.deDrainStats;
           workerCount = streamingRes.workerCount;
           updateCaptureObservability({ workerCount });
-          const usedBeyondViewport = capturedBeyondViewport(
-            dedupPerfs,
-            streamingRes.captureBeyondViewport,
-          );
-          if (usedBeyondViewport !== undefined) {
-            updateCaptureObservability({ captureBeyondViewport: usedBeyondViewport });
+          if (streamingRes.captureBeyondViewport !== undefined) {
+            updateCaptureObservability({
+              captureBeyondViewport: streamingRes.captureBeyondViewport,
+            });
           }
           probeSession = streamingRes.probeSession;
           lastBrowserConsole = streamingRes.lastBrowserConsole;
@@ -5340,12 +5338,10 @@ async function executeRenderPipeline(input: {
         const captureFrameMs = Date.now() - captureFrameStart;
         workerCount = captureRes.workerCount;
         updateCaptureObservability({ workerCount });
-        const usedBeyondViewport = capturedBeyondViewport(
-          dedupPerfs,
-          captureRes.captureBeyondViewport,
-        );
-        if (usedBeyondViewport !== undefined) {
-          updateCaptureObservability({ captureBeyondViewport: usedBeyondViewport });
+        if (captureRes.captureBeyondViewport !== undefined) {
+          updateCaptureObservability({
+            captureBeyondViewport: captureRes.captureBeyondViewport,
+          });
         }
         probeSession = captureRes.probeSession;
         lastBrowserConsole = captureRes.lastBrowserConsole;
@@ -5449,7 +5445,7 @@ async function executeRenderPipeline(input: {
     observability.checkpoint("pipeline", "artifact validated", { totalElapsedMs: totalElapsed });
     const observabilitySummary = observability.summary({
       lastBrowserConsole,
-      capture: captureObservability,
+      capture: withCapturedBeyondViewport(captureObservability, dedupPerfs),
       initFallback: mergeWorkerInitObservability(dedupPerfs),
       extraction: extractionObservability,
       compositionHash,
@@ -5641,7 +5637,7 @@ async function executeRenderPipeline(input: {
     const failedStage = job.currentStage || "pipeline";
     const observabilitySummary = observability.summary({
       lastBrowserConsole,
-      capture: captureObservability,
+      capture: withCapturedBeyondViewport(captureObservability, dedupPerfs),
       initFallback: mergeWorkerInitObservability(dedupPerfs),
       extraction: extractionObservability,
       compositionHash,
