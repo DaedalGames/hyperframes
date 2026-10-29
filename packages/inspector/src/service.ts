@@ -31,7 +31,7 @@ import {
 import { closeServer } from "./pageServer";
 import { Sources, fingerprint } from "./sources";
 import type { InspectRequest, Snippet } from "./types";
-import { hyperframesCacheDir } from "@hyperframes/core/cache-dir";
+import { hyperframesCacheDir } from "../../core/src/cacheDir";
 
 const pageRunner = (page: Page): PageRunner => ({
   run: <A, R>(fn: (arg: A) => R, arg: A) =>
