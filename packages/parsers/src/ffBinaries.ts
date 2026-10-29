@@ -2,7 +2,6 @@ import { execFileSync } from "node:child_process";
 import { accessSync, closeSync, constants, existsSync, openSync, readSync } from "node:fs";
 import { createRequire } from "node:module";
 import { delimiter, dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 
 /**
  * Shared FFmpeg/FFprobe binary resolution for every package that shells out
@@ -67,7 +66,16 @@ function runsOnThisMac(candidate: string): boolean {
   if (process.platform !== "darwin" || process.arch !== "arm64" || existsSync(ROSETTA_RUNTIME)) {
     return true;
   }
-  return !isX86OnlyMachO(candidate);
+  if (!isX86OnlyMachO(candidate)) return true;
+  skippedX86Binary ??= candidate;
+  return false;
+}
+
+let skippedX86Binary: string | undefined;
+
+/** The first x86_64-only binary skipped on this Mac, for naming in the "not found" hint. */
+export function getSkippedX86Binary(): string | undefined {
+  return skippedX86Binary;
 }
 
 function isExecutablePathCandidate(candidate: string): boolean {
@@ -146,17 +154,10 @@ function tryResolve(fromFile: string, request: string): string | undefined {
   }
 }
 
-// An @ffmpeg-installer / @ffprobe-installer package reachable from the current folder or from
-// this package's own install (the CLI's optional dependencies), located but never loaded. The
-// platform package is resolved via the installer package first (pnpm layout).
+// An @ffmpeg-installer / @ffprobe-installer package reachable from the current folder, located
+// but never loaded. The platform package is resolved via the installer package first (pnpm layout).
 function findInInstallerPackage(name: FfBinaryName): string | undefined {
-  return (
-    findInInstallerPackageFrom(name, resolve("package.json")) ??
-    findInInstallerPackageFrom(name, fileURLToPath(import.meta.url))
-  );
-}
-
-function findInInstallerPackageFrom(name: FfBinaryName, project: string): string | undefined {
+  const project = resolve("package.json");
   const platformManifest = `@${name}-installer/${process.platform}-${process.arch}/package.json`;
   const installer = tryResolve(project, `@${name}-installer/${name}/package.json`);
   const manifest =
@@ -241,4 +242,5 @@ export function findFfBinary(
 export function clearFfBinaryLookupCache(): void {
   pathLookupCache.clear();
   lastMissAt.clear();
+  skippedX86Binary = undefined;
 }
