@@ -99,7 +99,6 @@ export class TransportClock {
   private _heldTimeWhenBehind(el: HTMLMediaElement, behind: number, spec: RateSpec): number | null {
     if (el.loop && behind > timeAtSourceTime(spec, el.duration) / 2) return null;
     const buffering = el.readyState < HAVE_FUTURE_DATA;
-    // Past the steer limit the sync seeks the audio onto the playhead, so the picture does not wait for it.
     return buffering || behind <= AUDIO_STEER_LIMIT_SECONDS ? this._lastNow : null;
   }
 
