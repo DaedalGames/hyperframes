@@ -11,7 +11,7 @@ const MEDIA_STEER_STEPS: readonly (readonly [lag: number, steer: number])[] = [
 const MEDIA_STEER_RELEASE_SECONDS = 0.01;
 // Audio never steers past 10%, where speech changes tempo; a lag held past 100 ms is seeked instead.
 const AUDIO_MAX_STEER = 0.1;
-const AUDIO_STEER_LIMIT_SECONDS = 0.1;
+export const AUDIO_STEER_LIMIT_SECONDS = 0.1;
 
 /** Direction (+1 fast, -1 slow) an element is being steered in; absent when it plays at its authored rate. */
 const steering = new WeakMap<HTMLMediaElement, number>();

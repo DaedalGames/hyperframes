@@ -1,5 +1,5 @@
 import { timeAtSourceTime, type RateSpec } from "../speedRamp.js";
-import { MEDIA_HARD_SYNC_SECONDS } from "./mediaSteer.js";
+import { AUDIO_STEER_LIMIT_SECONDS } from "./mediaSteer.js";
 import { playRangeHoldTime } from "./protocol.js";
 
 export type TransportClockSnapshot = {
@@ -99,7 +99,8 @@ export class TransportClock {
   private _heldTimeWhenBehind(el: HTMLMediaElement, behind: number, spec: RateSpec): number | null {
     if (el.loop && behind > timeAtSourceTime(spec, el.duration) / 2) return null;
     const buffering = el.readyState < HAVE_FUTURE_DATA;
-    return buffering || behind <= MEDIA_HARD_SYNC_SECONDS ? this._lastNow : null;
+    // Past the steer limit the sync seeks the audio onto the playhead, so the picture does not wait for it.
+    return buffering || behind <= AUDIO_STEER_LIMIT_SECONDS ? this._lastNow : null;
   }
 
   /** Folds a >500ms gap since the last read into `_playStartMs` so it's never reported as played time. */

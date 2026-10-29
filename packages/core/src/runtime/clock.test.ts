@@ -353,6 +353,32 @@ describe("TransportClock", () => {
       expect(clock.now()).toBeCloseTo(6.37, 5);
     });
 
+    it("runs the playhead past a just-started element frozen 300 ms behind it, as iOS leaves it", () => {
+      const { clock, advance } = createClock({ duration: 30 });
+      clock.play();
+      advancePolled(clock, advance, 6300);
+      const take = createMockAudioEl(0, false); // playing, its time frozen at its start
+      clock.attachAudioSource({ el: take, compositionStart: 6, mediaStart: 0 });
+      let previous = clock.now();
+      for (let i = 0; i < 20; i++) {
+        advance(16);
+        const now = clock.now();
+        expect(now).toBeGreaterThan(previous); // never held, though the element has not moved
+        previous = now;
+      }
+      expect(previous).toBeCloseTo(6.3 + 0.32, 1);
+    });
+
+    it("holds for an element no more than the steer limit behind, so a small lag is not seeked", () => {
+      const { clock, advance } = createClock({ duration: 30 });
+      clock.play();
+      advancePolled(clock, advance, 6300);
+      const take = createMockAudioEl(0, false); // 50 ms behind the playhead
+      clock.attachAudioSource({ el: take, compositionStart: 6.25, mediaStart: 0 });
+      advance(100);
+      expect(clock.now()).toBeCloseTo(6.3, 5);
+    });
+
     it("holds the playhead while its element seeks, even to a time ahead", () => {
       const { clock, advance } = createClock({ duration: 30 });
       clock.play();
@@ -400,7 +426,7 @@ describe("TransportClock", () => {
       clock.play();
       advancePolled(clock, advance, 2000);
       const bed = Object.assign(createMockAudioEl(0, false), { loop: true, duration: 8 });
-      clock.attachAudioSource({ el: bed, compositionStart: 1.9, mediaStart: 0 });
+      clock.attachAudioSource({ el: bed, compositionStart: 1.95, mediaStart: 0 });
       advance(16);
       expect(clock.now()).toBeCloseTo(2, 5);
     });
