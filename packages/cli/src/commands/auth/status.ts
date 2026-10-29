@@ -18,6 +18,7 @@ import { failCommand, setCommandExitCode } from "../../utils/commandResult.js";
 import { defineCommand } from "../../utils/defineCommand.js";
 import {
   ENV_CREDENTIAL_VAR,
+  credentialPath,
   AuthClient,
   isAuthError,
   loadUserInfo,
@@ -38,6 +39,17 @@ import {
   type OfflineEngineLine,
   type UnconfiguredContext,
 } from "./status-guidance.js";
+import { jsonFailure } from "../../utils/jsonError.js";
+import { defaultClientId, resolveClientId } from "../../auth/config.js";
+
+type BillingProduct = "hyperframes" | "heygen" | "unknown";
+
+function billingProduct(credential: ResolvedCredential): BillingProduct {
+  if (credential.type === "api_key") return "heygen";
+  if (isFileSource(credential.source) && resolveClientId() === defaultClientId())
+    return "hyperframes";
+  return "unknown";
+}
 
 interface VerifiedStatus {
   credential: ResolvedCredential;
@@ -54,7 +66,7 @@ interface VerifiedStatus {
   plan?: Plan | null;
 }
 
-/** True for credentials resolved from the shared file (not env). */
+/** True for credentials resolved from the HyperFrames store (not env). */
 function isFileSource(source: ResolvedCredential["source"]): boolean {
   return source === "file_json" || source === "file_legacy";
 }
@@ -138,7 +150,9 @@ function handleUnconfigured(asJson: boolean): never {
 function handleResolveError(err: unknown, asJson: boolean): never {
   if (!isAuthError(err)) throw err;
   if (asJson) {
-    console.log(JSON.stringify({ configured: false, error: err.message, hint: err.hint ?? null }));
+    console.log(
+      JSON.stringify({ configured: false, ...jsonFailure("auth_error", err.message, err.hint) }),
+    );
   } else {
     console.error(c.error(err.message));
     if (err.hint) console.error(c.dim(err.hint));
@@ -185,10 +199,12 @@ async function loadPersistedUser(credential: ResolvedCredential): Promise<Stored
 }
 
 function printJsonStatus(s: VerifiedStatus): void {
+  const product = billingProduct(s.credential);
   const payload: Record<string, unknown> = {
     configured: true,
     source: s.credential.source,
     type: s.credential.type,
+    billing_product: product,
     user: s.user,
     // The friendly-display block persisted at login (file-sourced creds
     // only). Strictly additive — the live `user` field above is
@@ -198,6 +214,11 @@ function printJsonStatus(s: VerifiedStatus): void {
     hyperframes: s.plan ?? null,
   };
   if (s.credential.type === "oauth") {
+    payload["hyperframes_balance"] = null;
+    payload["billing_notice"] =
+      product === "hyperframes"
+        ? "HyperFrames balance is unavailable here; user billing fields describe the HeyGen account."
+        : "OAuth billing product is not verified here; user billing fields describe the HeyGen account.";
     payload["expires_at"] = s.credential.expires_at?.toISOString() ?? null;
     payload["refreshable"] = s.credential.refreshable;
     payload["scope"] = s.credential.scope ?? null;
@@ -243,7 +264,7 @@ function collectStatusRows(s: VerifiedStatus): [string, string][] {
     if (cached) rows.push(["Account:", `${cached} ${c.dim("(cached)")}`]);
     return rows;
   }
-  if (s.user) rows.push(...identityRows(s.user));
+  if (s.user) rows.push(...identityRows(s.user, billingProduct(s.credential)));
   const plan = s.plan;
   if (plan) {
     const tag = plan.mock ? ` ${c.dim("(mock)")}` : "";
@@ -270,20 +291,35 @@ function oauthRows(credential: Extract<ResolvedCredential, { type: "oauth" }>): 
   return rows;
 }
 
-function identityRows(user: UserInfo): [string, string][] {
+function identityRows(user: UserInfo, product: BillingProduct): [string, string][] {
   const identity = user.email ?? user.username ?? "(unknown user)";
-  return [["Account:", identity], ...billingRows(user)];
+  const rows: [string, string][] = [["Account:", identity]];
+  if (product === "hyperframes")
+    return [
+      ...rows,
+      ["Billing:", "HyperFrames"],
+      ["Balance:", "HyperFrames balance unavailable here."],
+    ];
+  if (product === "unknown")
+    return [
+      ...rows,
+      [
+        "Billing:",
+        "OAuth product not verified; HeyGen account balances are not the active-payer balance.",
+      ],
+    ];
+  return [...rows, ...billingRows(user)];
 }
 
-const SOURCE_LABELS: Record<ResolvedCredential["source"], string> = {
+const SOURCE_LABELS = {
   env: `env (${ENV_CREDENTIAL_VAR.env})`,
   env_alias: `env (${ENV_CREDENTIAL_VAR.env_alias})`,
   env_oauth: `env (${ENV_CREDENTIAL_VAR.env_oauth})`,
-  file_legacy: "file (~/.heygen/credentials — legacy plaintext)",
-  file_json: "file (~/.heygen/credentials)",
 };
 
 function describeSource(source: ResolvedCredential["source"]): string {
+  if (source === "file_legacy") return `file (${credentialPath()} — legacy plaintext)`;
+  if (source === "file_json") return `file (${credentialPath()})`;
   return SOURCE_LABELS[source];
 }
 

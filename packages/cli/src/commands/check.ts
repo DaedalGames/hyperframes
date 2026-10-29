@@ -20,7 +20,7 @@ import { parseAt } from "./layout.js";
 import { c } from "../ui/colors.js";
 import { registerBrowserSessionCleanup } from "../browser/launch.js";
 import { normalizeErrorMessage } from "../utils/errorMessage.js";
-import { setCommandExitCode } from "../utils/commandResult.js";
+import { CliUsageError, failUsage, setCommandExitCode } from "../utils/commandResult.js";
 import { swallowedFlagUsageError } from "../utils/reject-unknown-flags.js";
 import { formatLayoutIssue } from "../utils/layoutAudit.js";
 import { resolveProject, type ProjectDir } from "../utils/project.js";
@@ -40,6 +40,7 @@ import type { CaptionZoneOptions, FrameCheckOptions, LayoutOptions } from "../ut
 import { resolveLocalBrowserGpuMode } from "../browser/gpuPolicy.js";
 import { preResolveHostileMediaProxies, type PreparedMediaFile } from "../utils/checkBrowser.js";
 import { parseTimeoutMs } from "../utils/timeoutArg.js";
+import { failureMessage, jsonFailure } from "../utils/jsonError.js";
 
 export const examples: Example[] = [
   ["Run the full verification gate", "hyperframes check"],
@@ -277,8 +278,8 @@ export function createCheckCommand(
 
       const reported = untilReported();
       try {
-        const project = dependencies.resolveProject(args.dir);
         const options = parseCheckOptions(args);
+        const project = dependencies.resolveProject(args.dir);
         if (!asJson) {
           console.log(`${c.accent("◆")}  Checking ${c.accent(project.name)}`);
         }
@@ -302,20 +303,29 @@ export function createCheckCommand(
         }
         setCommandExitCode(checkExitCode(report));
       } catch (error) {
-        const message = normalizeErrorMessage(error);
-        if (asJson) {
-          console.log(
-            JSON.stringify(dependencies.withMeta({ ok: false, error: message }), null, 2),
-          );
-        } else {
-          console.error(`${c.error("✗")} Check failed: ${message}`);
-        }
-        setCommandExitCode(1);
+        reportCheckFailure(error, asJson, (value) => dependencies.withMeta(value));
       } finally {
         reported.done();
       }
     },
   });
+}
+
+function reportCheckFailure(
+  error: unknown,
+  asJson: boolean,
+  addMeta: (value: object) => object,
+): void {
+  const message = failureMessage(error);
+  const usage = error instanceof CliUsageError;
+  if (asJson) {
+    const code = usage ? error.code : "runtime_error";
+    console.log(JSON.stringify(addMeta(jsonFailure(code, message)), null, 2));
+  } else {
+    console.error(`${c.error("✗")} Check failed: ${message}`);
+  }
+  if (usage) failUsage();
+  setCommandExitCode(1);
 }
 
 const REPORT_GRACE_MS = 5_000;
@@ -426,7 +436,7 @@ export function parseCheckRange(value: unknown): [number, number] | undefined {
     start < 0 ||
     end <= start
   )
-    throw new Error("Invalid --range: use non-negative start,end with end > start");
+    throw new CliUsageError("Invalid --range: use non-negative start,end with end > start");
   return [start, end];
 }
 
@@ -473,7 +483,7 @@ function parseFrameCheckTolerance(raw: string | undefined): number | undefined {
 }
 
 function frameCheckError(): Error {
-  return new Error(
+  return new CliUsageError(
     'Invalid --frame-check: use bare --frame-check or "severity=warning|error;seek=.25,.75;tol=4" (all fields optional)',
   );
 }
@@ -512,7 +522,7 @@ function parseProseCoverageFloor(raw: string | undefined): number | undefined {
 }
 
 function layoutError(): Error {
-  return new Error(
+  return new CliUsageError(
     'Invalid --layout: use "proseCoverageFloor=0.05" with a fraction from 0 to 1 (inclusive)',
   );
 }
@@ -614,7 +624,7 @@ function captionSeeks(
 }
 
 function captionZoneError(): Error {
-  return new Error(
+  return new CliUsageError(
     'Invalid --caption-zone; use "x0=0;y0=.82;x1=1;y1=1[;severity=warning|error][;seek=.5,1]" with fractions from 0 to 1.',
   );
 }
@@ -629,6 +639,13 @@ function nonNegativeNumber(value: unknown, fallback: number): number {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
+function browserSkippedLine(report: CheckReport): string {
+  const lintError = report.lint.findings.some((finding) => finding.severity === "error");
+  return lintError
+    ? "Browser validation skipped because of the lint error above: fix it and run check again. Layout, motion, and contrast were not checked, so this is not a clean pass."
+    : "Browser session never ran — layout, motion, and contrast below are empty placeholders, not a clean pass.";
+}
+
 function printHumanReport(report: CheckReport): void {
   if (report.scope) {
     console.log(
@@ -639,9 +656,7 @@ function printHumanReport(report: CheckReport): void {
   printSection("Lint", report.lint);
   if (report.browserSkipped) {
     console.log();
-    console.log(
-      `  ${c.warn("⚠")} Browser session never ran — layout, motion, and contrast below are empty placeholders, not a clean pass.`,
-    );
+    console.log(`  ${c.warn("⚠")} ${browserSkippedLine(report)}`);
   }
   printSection("Runtime", report.runtime);
   printLayoutSection("Layout", report.layout);

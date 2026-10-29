@@ -872,11 +872,15 @@ export function trackAuthLoginFailed(
 // install's anonymousId, so events recorded before sign-in stitch to the same
 // person instead of stranding as a separate anonymous profile. Routed through
 // trackEvent so it shares the opt-out gate and flush path — a no-op when
-// telemetry is disabled. `distinctId` is the account email (else username);
-// see the privacy notice in showTelemetryNotice and docs/packages/cli.mdx.
-export function identifyUser(distinctId: string): void {
+// telemetry is disabled. Identity comes from auth/telemetryIdentity.ts; see
+// showTelemetryNotice and docs/packages/cli.mdx.
+export function identifyUser(distinctId: string, traits: Record<string, string> = {}): void {
   if (!distinctId) return;
-  trackEvent("$identify", { $anon_distinct_id: readConfig().anonymousId }, distinctId);
+  trackEvent(
+    "$identify",
+    { $anon_distinct_id: readConfig().anonymousId, $set: traits },
+    distinctId,
+  );
 }
 
 // A render was rejected by the output-resolution/HDR pre-flight (P1-3)
@@ -1076,6 +1080,28 @@ export function trackCatalogSearchMiss(props: {
     query: props.query,
     ...(props.wanted ? { wanted: props.wanted } : {}),
     ...(props.tier ? { tier: props.tier } : {}),
+  });
+}
+
+// Where a snapshot's time went and how far its video frames sat from a keyframe, so the slow runs
+// split by cause. Low-cardinality only: counts, a stage name and a distance bucket.
+export function trackSnapshotRun(props: {
+  frames: number;
+  videoFrames: number;
+  decodePasses: number;
+  sharedFrames: number;
+  longestDecodeSeconds: number;
+  slowStage: "open" | "seek" | "video" | "capture";
+}): void {
+  const seconds = props.longestDecodeSeconds;
+  trackEvent("cli_snapshot_run", {
+    frames: props.frames,
+    video_frames: props.videoFrames,
+    decode_passes: props.decodePasses,
+    shared_frames: props.sharedFrames,
+    keyframe_distance:
+      seconds <= 2 ? "to_2s" : seconds <= 10 ? "to_10s" : seconds <= 60 ? "to_60s" : "over_60s",
+    slow_stage: props.slowStage,
   });
 }
 

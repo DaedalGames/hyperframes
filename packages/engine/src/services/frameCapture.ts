@@ -84,6 +84,7 @@ import {
   injectDrawElementCanvas,
   captureDrawElementFrame,
   resolveDrawElementCaptureMode,
+  forcePreservedDrawingBuffer,
   instrumentAcceleratedCanvases,
   initDrawElementWorkerEncode,
   cleanupDrawElementWorkerEncode,
@@ -121,6 +122,7 @@ import {
   type ChromePids,
 } from "./chromeMemorySampler.js";
 import { sampleProcessRss } from "../utils/processRss.js";
+import type { CompositionLengthSource } from "@hyperframes/core/runtime/composition-length";
 export { isMemoryExhaustionError, isTransientBrowserError } from "./captureFailure.js";
 
 export type { CaptureOptions, CaptureResult, CaptureBufferResult, CapturePerfSummary };
@@ -1639,6 +1641,7 @@ async function constructCaptureSession(
   // composites their live content via drawImage instead (see
   // instrumentAcceleratedCanvases). Must be registered before navigation.
   if (useDrawElement) {
+    await page.evaluateOnNewDocument(forcePreservedDrawingBuffer);
     await page.evaluateOnNewDocument(instrumentAcceleratedCanvases);
   }
   // The opacity → autoAlpha tween rewrite was RETIRED with the requestPaint
@@ -5341,6 +5344,16 @@ export async function getCompositionDuration(session: CaptureSession): Promise<n
   return session.page.evaluate(() => {
     return window.__hf?.duration ?? 0;
   });
+}
+
+export type { CompositionLengthSource };
+
+/** Which input set the composition's length, as the runtime published it; null when it did not. */
+export async function getCompositionLengthSource(
+  session: CaptureSession,
+): Promise<CompositionLengthSource | null> {
+  if (!session.isInitialized) throw new Error("[FrameCapture] Session not initialized");
+  return session.page.evaluate(() => window.__hf?.lengthSource ?? null);
 }
 
 /**

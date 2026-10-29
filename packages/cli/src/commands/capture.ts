@@ -7,6 +7,7 @@ import { normalizeErrorMessage } from "../utils/errorMessage.js";
 import { diag } from "../ui/diagnostics.js";
 import type { CapturePhaseProgress } from "../capture/types.js";
 import { parseCaptureDeadline } from "../capture/captureWatchdog.js";
+import { jsonFailure } from "../utils/jsonError.js";
 
 const CAPTURE_PHASE_PREFIX = "HYPERFRAMES_CAPTURE_PHASE ";
 
@@ -23,7 +24,7 @@ function parsePositiveInteger(
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed <= 0) {
     console.error(`${flag} must be a positive integer${unit}.`);
-    failCommand();
+    failUsage();
   }
   return parsed;
 }
@@ -151,7 +152,7 @@ export default defineCommand({
     if (localFile !== undefined) {
       if (url) {
         console.error("Pass either a URL or --local-file, not both.");
-        failCommand();
+        failUsage();
       }
       const { resolveLocalCaptureTarget } = await import("../capture/localPage.js");
       try {
@@ -175,7 +176,7 @@ export default defineCommand({
         new URL(url);
       } catch {
         console.error(`Invalid URL: ${url}`);
-        failCommand();
+        failUsage();
       }
     }
 
@@ -347,7 +348,7 @@ export default defineCommand({
         /* best-effort */
       }
       if (isJson) {
-        console.log(JSON.stringify({ ok: false, error: errMsg }));
+        console.log(JSON.stringify(jsonFailure("runtime_error", errMsg)));
       } else {
         console.error(`\n  ✗ Capture failed: ${errMsg}\n`);
       }

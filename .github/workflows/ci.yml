@@ -238,6 +238,7 @@ jobs:
               - "packages/cli/src/{background-removal,registry,telemetry}/**"
               - "packages/cli/src/capture/{captureCompositionFrame,captureTimeout,navigateForCapture,readBoundedResponse}.ts"
               - "packages/cli/src/media-use/lib/config-lock.mjs"
+              - "packages/cli/src/auth/{config,errors,paths,telemetryIdentity}.ts"
               - "packages/cli/scripts/**"
               - "packages/core/stubs/**"
               - "packages/engine/src/**"
@@ -841,6 +842,8 @@ jobs:
       - name: Install dependencies
         if: runner.os == 'Windows'
         run: bun install --frozen-lockfile --ignore-scripts --linker=hoisted
+      - run: bun run --filter '@hyperframes/{parsers,lint,studio-server}' build
+      - run: bun run --cwd packages/core build
       - run: bun run --cwd packages/cli test src/utils/npxCommand.test.ts src/commands/skills.test.ts
 
   sdk-tests:

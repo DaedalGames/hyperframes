@@ -413,6 +413,73 @@ describe.runIf(executablePath)("layout audit in Chromium", () => {
     expect(codes.includes("content_overlap")).toBe(overlap);
   });
 
+  it.each([
+    { name: "closed", open: "", overlap: false },
+    { name: "open", open: " open", overlap: true },
+  ])("judges text inside a $name details element by what it renders", async ({ open, overlap }) => {
+    const codes = await auditCodes(`
+      <div data-composition-id="main" data-width="1920" data-height="1080" style="position:relative;width:1920px;height:1080px">
+        <button style="position:absolute;left:100px;top:100px;width:400px;height:100px;font:48px Arial">Continue</button>
+        <details${open} style="position:absolute;left:900px;top:600px"><summary>More</summary>
+          <p style="position:absolute;left:-780px;top:-480px;margin:0;font:48px Arial">Hidden words</p>
+        </details>
+      </div>`);
+    expect(codes.includes("content_overlap")).toBe(overlap);
+  });
+
+  it.each([
+    { name: "transparent", fill: "", css: "", covered: false },
+    {
+      name: "opaque",
+      fill: "ctx.fillStyle='#123';ctx.fillRect(0,0,1920,1080);",
+      css: "",
+      covered: true,
+    },
+    {
+      name: "glyph-only with an opaque CSS background",
+      fill: "",
+      css: "background:#112233;",
+      covered: true,
+    },
+  ])(
+    "judges a full-frame $name canvas over a caption by what it draws",
+    async ({ fill, css, covered }) => {
+      const codes = await auditCodes(`
+      <div data-composition-id="main" data-width="1920" data-height="1080" style="position:relative;width:1920px;height:1080px">
+        <div style="position:absolute;inset:0;background:#0b0d12"></div>
+        <p style="position:absolute;left:100px;top:100px;margin:0;font:64px Arial;color:#fff">Caption</p>
+        <canvas id="c" width="1920" height="1080" style="position:absolute;inset:0;width:1920px;height:1080px;z-index:2;${css}"></canvas>
+        <script>const ctx=document.getElementById("c").getContext("2d");${fill}ctx.fillStyle="#fff";ctx.font="64px Arial";ctx.fillText("Drawn",900,900);</script>
+      </div>`);
+      expect(codes.includes("canvas_covered")).toBe(covered);
+    },
+  );
+
+  it.each([
+    {
+      name: "outline text (transparent fill, visible stroke)",
+      style: "color:transparent;-webkit-text-stroke:4px #fff",
+      flagged: false,
+    },
+    { name: "transparent text with no stroke", style: "color:transparent", flagged: true },
+    {
+      name: "transparent text with an invisible stroke",
+      style: "color:transparent;-webkit-text-stroke:4px transparent",
+      flagged: true,
+    },
+    {
+      name: "transparent text with a zero-width stroke",
+      style: "color:transparent;-webkit-text-stroke:0 #fff",
+      flagged: true,
+    },
+  ])("judges $name by what it paints", async ({ style, flagged }) => {
+    const codes = await auditCodes(`
+      <div data-composition-id="main" data-width="1920" data-height="1080" style="position:relative;width:1920px;height:1080px;background:#000">
+        <h1 style="position:absolute;left:120px;top:300px;margin:0;font:700 220px Arial;${style}">OUTLINE</h1>
+      </div>`);
+    expect(codes.includes("text_not_painted")).toBe(flagged);
+  });
+
   describe("craft sampling", () => {
     async function sample(body: string) {
       const page = await browser.newPage();
