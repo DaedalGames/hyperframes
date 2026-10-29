@@ -47,7 +47,7 @@ describe("runJob", () => {
       reply(402, { error: { code: "hf_subscription_required", message: "no plan" } }),
     );
     await expect(runJob("/v3/x", {}, "k", (id) => id)).rejects.toMatchObject({
-      fix: "Subscribe: https://hyperframes.studio/?source=cli",
+      fix: "Subscribe: https://hyperframes.studio/pricing?source=cli",
     });
     vi.stubGlobal("fetch", async () =>
       reply(402, { code: "hf_usage_exhausted", url: "https://pay.test/credits" }),

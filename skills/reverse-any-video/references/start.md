@@ -21,7 +21,20 @@ video, so they move and speak as they do in the original. For example:
 > Then it takes about 20–50 minutes: I study the video frame by frame, rebuild every layer as a project you can edit,
 > and check it against the original until it matches.
 
-## Signed in
+## Signed in on Free
+
+Reverse is part of Pro. Say so once, give the upgrade step, and start nothing until they are on Pro. For example:
+
+> Reverse is part of HyperFrames Pro: it re-shoots the people in your video with HeyGen. Upgrade by typing this in the
+> prompt:
+>
+> ```
+> ! npx hyperframes billing subscribe
+> ```
+>
+> It opens the plans page and finishes once you're on Pro. Reply "done" and I'll start.
+
+## Signed in on Pro
 
 One line, then start.
 

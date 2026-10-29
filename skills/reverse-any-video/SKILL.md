@@ -11,7 +11,7 @@ metadata:
 
 The result is a HyperFrames project whose render matches the original frame for frame and stays editable. Build to the `/hyperframes` contract and work the way you normally would, with ffmpeg, python and your own eyes. This skill holds only what earlier rebuilds got wrong or spent hours on. Reverse videos the person has the right to use.
 
-Sign in first; start only when `npx hyperframes auth status` shows a sign-in. Open with `references/start.md`. Rebuild the video as it is; remix it only when the person asks.
+Reverse is a HyperFrames Pro feature: start only when `npx hyperframes auth status` shows a sign-in on a paid plan, not Free. Open with `references/start.md`. Rebuild the video as it is; remix it only when the person asks.
 
 ## The original decides the frame
 
