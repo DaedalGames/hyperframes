@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { hyperframesCacheDir } from "./cacheDir.js";
@@ -14,10 +14,9 @@ describe("hyperframesCacheDir", () => {
   });
 
   it("follows HYPERFRAMES_CACHE_DIR, read on each call, a relative one resolved", () => {
-    vi.stubEnv("HYPERFRAMES_CACHE_DIR", "/elsewhere/cache");
-    expect(hyperframesCacheDir("whisper", "models")).toBe(
-      join("/elsewhere/cache", "whisper", "models"),
-    );
+    const elsewhere = join(tmpdir(), "elsewhere-cache");
+    vi.stubEnv("HYPERFRAMES_CACHE_DIR", elsewhere);
+    expect(hyperframesCacheDir("whisper", "models")).toBe(join(elsewhere, "whisper", "models"));
     vi.stubEnv("HYPERFRAMES_CACHE_DIR", "rel/cache");
     expect(hyperframesCacheDir("tts")).toBe(join(resolve("rel/cache"), "tts"));
   });
