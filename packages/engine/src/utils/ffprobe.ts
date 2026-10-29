@@ -527,7 +527,6 @@ export function ffmpegSeekSeconds(
   return mediaTime - (metadata.mediaTimeOffsetSeconds ?? 0);
 }
 
-/** Where the video's last frame ends on the browser's media timeline, which starts at timestamp 0. */
 export function resolvePlayableVideoDuration(metadata: VideoMetadata): number {
   return Number.isFinite(metadata.videoStreamDurationSeconds) &&
     metadata.videoStreamDurationSeconds > 0
@@ -1018,15 +1017,15 @@ export async function extractMediaMetadata(filePath: string): Promise<VideoMetad
       videoStreamLeadSeconds: streamLeadSeconds(output, videoStream),
       mediaTimeOffsetSeconds: mediaTimeOffsetSeconds(output),
     };
-    // ffprobe's durations do not all run from the first frame (Matroska, fragmented MP4), so a
-    // video that starts late is measured to the end of its last packet. If that read fails,
-    // ffprobe's duration stands.
-    if (videoStartOnMediaTimeline(startOffsets) > 0) {
-      const last = await extractFinalPacket(filePath, {
+    const startsLate = videoStartOnMediaTimeline(startOffsets) > 0;
+    if (startsLate) {
+      const lastPacket = await extractFinalPacket(filePath, {
         videoStreamStartSeconds: streamStart,
         videoStreamDurationSeconds: effectiveStreamDuration,
       }).catch(() => undefined);
-      if (last) effectiveStreamDuration = last.ptsSeconds + last.durationSeconds - streamStart;
+      if (lastPacket) {
+        effectiveStreamDuration = lastPacket.ptsSeconds + lastPacket.durationSeconds - streamStart;
+      }
     }
 
     return {
