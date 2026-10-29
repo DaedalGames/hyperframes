@@ -128,15 +128,15 @@ export function applyCachedSourceDurations<
 
 /**
  * Probe (header-only, cheap) any media elements still missing sourceDuration
- * after the cache pass, applying each resolved duration via `apply(key, secs)`.
- * Skips already-cached srcs.
+ * after the cache pass, handing the resolved durations to `apply` as `key -> secs`. Clips sharing a
+ * source resolve together, so each source is one `apply` call, not one per clip. Skips already-cached srcs.
  */
 export async function probeMissingSourceDurations<
   T extends { src?: string; tag: string; sourceDuration?: number; key?: string; id: string },
 >(
   elements: T[],
   projectId: string | null,
-  apply: (key: string, durationSeconds: number) => void,
+  apply: (durations: ReadonlyMap<string, number>) => void,
 ): Promise<void> {
   const needs = elements.flatMap((el) => {
     if (
@@ -152,10 +152,18 @@ export async function probeMissingSourceDurations<
       : [];
   });
   if (needs.length === 0) return;
+  let resolved = new Map<string, number>();
+  const flush = () => {
+    const batch = resolved;
+    resolved = new Map();
+    apply(batch);
+  };
   await Promise.allSettled(
     needs.map(async ({ el, source }) => {
       const result = await probeMediaUrl(source);
-      if (result) apply(el.key ?? el.id, result.duration);
+      if (!result) return;
+      if (resolved.size === 0) queueMicrotask(flush);
+      resolved.set(el.key ?? el.id, result.duration);
     }),
   );
 }

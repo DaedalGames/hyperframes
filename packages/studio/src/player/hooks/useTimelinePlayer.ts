@@ -131,13 +131,17 @@ export function useTimelinePlayer({
       void probeMissingSourceDurations(
         mergedElements,
         state.timelineProjectId,
-        (key, durationSeconds) => {
+        (durations) => {
           usePlayerStore.setState((state) => {
-            const idx = state.elements.findIndex((e) => (e.key ?? e.id) === key);
-            if (idx === -1 || state.elements[idx].sourceDuration != null) return {};
-            const patched = state.elements.slice();
-            patched[idx] = { ...state.elements[idx], sourceDuration: durationSeconds };
-            return { elements: patched };
+            let patched: typeof state.elements | undefined;
+            state.elements.forEach((element, index) => {
+              const seconds = durations.get(element.key ?? element.id);
+              if (seconds === undefined || element.sourceDuration != null) return;
+              patched ??= state.elements.slice();
+              patched[index] = { ...element, sourceDuration: seconds };
+            });
+            // The same state back is no publish: a clip that already has its duration wakes no subscriber.
+            return patched ? { elements: patched } : state;
           });
         },
       );

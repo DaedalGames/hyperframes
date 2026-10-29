@@ -138,7 +138,7 @@ describe("media probe registry", () => {
     expect(requestedSources).toEqual([
       `${window.location.origin}/api/projects/project-a/preview/assets/clip.mp4`,
     ]);
-    expect(apply).toHaveBeenCalledWith("clip", 5);
+    expect(apply).toHaveBeenCalledWith(new Map([["clip", 5]]));
     expect(
       applyCachedSourceDurations(
         [
@@ -171,5 +171,21 @@ describe("media probe registry", () => {
       apply,
     );
     expect(requestedSources).toHaveLength(1);
+  });
+
+  it("hands the durations of clips sharing a source over in one call", async () => {
+    const apply = vi.fn();
+    const clips = ["a", "b", "c"].map((id) => ({ id, tag: "audio", src: "assets/music.wav" }));
+
+    await probeMissingSourceDurations(clips, "project-a", apply);
+
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(apply).toHaveBeenCalledWith(
+      new Map([
+        ["a", 5],
+        ["b", 5],
+        ["c", 5],
+      ]),
+    );
   });
 });
