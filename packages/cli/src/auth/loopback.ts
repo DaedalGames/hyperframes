@@ -45,7 +45,7 @@ export interface LoopbackHandle {
 }
 
 const CALLBACK_PATH = "/oauth/callback";
-const DEFAULT_TIMEOUT_MS = 120_000;
+const DEFAULT_TIMEOUT_MS = 300_000;
 
 export async function startLoopback(opts: LoopbackOptions): Promise<LoopbackHandle> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;

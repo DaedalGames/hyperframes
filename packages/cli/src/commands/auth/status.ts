@@ -31,6 +31,7 @@ import {
 } from "../../auth/index.js";
 import { getSystemMeta } from "../../telemetry/system.js";
 import { c } from "../../ui/colors.js";
+import { pageUrl, readPlan, type Plan } from "../../heygen/plan.js";
 import { resolveMusic, resolveVoice } from "../../audio/providers.js";
 import {
   buildUnconfiguredJson,
@@ -61,6 +62,8 @@ interface VerifiedStatus {
    */
   persistedUser: StoredUserInfo | null;
   apiError: string | null;
+  /** The HyperFrames plan and credits, when the server (or the mock) answers. */
+  plan?: Plan | null;
 }
 
 /** True for credentials resolved from the HyperFrames store (not env). */
@@ -106,7 +109,10 @@ export default defineCommand({
  */
 function detectUnconfiguredContext(): UnconfiguredContext {
   const sys = getSystemMeta();
-  return { interactive: !sys.is_ci && (sys.is_tty || sys.agent_runtime !== null) };
+  return {
+    interactive: !sys.is_ci && (sys.is_tty || sys.agent_runtime !== null),
+    agent: !sys.is_ci && sys.agent_runtime !== null,
+  };
 }
 
 /**
@@ -164,7 +170,7 @@ async function verify(credential: ResolvedCredential): Promise<VerifiedStatus> {
   const persistedUser = await loadPersistedUser(credential);
   try {
     const user = await client.getCurrentUser(credential);
-    return { credential, user, persistedUser, apiError: null };
+    return { credential, user, persistedUser, apiError: null, plan: await readPlan() };
   } catch (err) {
     if (!isAuthError(err)) throw err;
     return {
@@ -205,6 +211,7 @@ function printJsonStatus(s: VerifiedStatus): void {
     // unchanged. Lets callers read identity offline / on an API blip.
     persisted_user: persistedUserJson(s.persistedUser),
     api_error: s.apiError,
+    hyperframes: s.plan ?? null,
   };
   if (s.credential.type === "oauth") {
     payload["hyperframes_balance"] = null;
@@ -258,6 +265,16 @@ function collectStatusRows(s: VerifiedStatus): [string, string][] {
     return rows;
   }
   if (s.user) rows.push(...identityRows(s.user, billingProduct(s.credential)));
+  const plan = s.plan;
+  if (plan) {
+    const tag = plan.mock ? ` ${c.dim("(mock)")}` : "";
+    rows.push([
+      "HyperFrames:",
+      plan.plan === "none"
+        ? `Free · Upgrade to Pro: ${pageUrl("plans")}${tag}`
+        : `${plan.plan} plan, ${plan.credits.toLocaleString("en-US")} credits${tag}`,
+    ]);
+  }
   return rows;
 }
 
