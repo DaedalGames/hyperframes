@@ -1,10 +1,12 @@
-import { defineCommand } from "../../utils/defineCommand.js";
+import { defineCommand } from "citty";
 import type { Example } from "../_examples.js";
 import { jsonArg, num, runMeasure } from "../../measure/command.js";
 import { Fix } from "../../measure/media.js";
 import {
   GENERATE_TYPES,
+  checkGuide,
   generate,
+  parseMask,
   type GenerateRequest,
   type GenerateType,
 } from "../../heygen/generate.js";
@@ -21,7 +23,7 @@ export const examples: Example[] = [
   ],
   [
     "The original's presenter re-shot clean, saying an 8 s stretch of the original voice",
-    'hyperframes media-use generate --type video --reference assets/presenter-clean.png --audio assets/s02-voice.m4a --motion assets/s02-original.mp4 --prompt "the woman talks to camera, seated, soft daylight" --seconds 8 --aspect 9:16 --out assets/s02-presenter.mp4',
+    'hyperframes media-use generate --type video --reference assets/presenter-clean.png --audio assets/s02-voice.m4a --motion assets/s02-original.mp4 --mask 110,615,390,165 --prompt "the woman talks to camera, seated, soft daylight" --seconds 8 --aspect 9:16 --out assets/s02-presenter.mp4',
   ],
   [
     "The person in a photo saying a script in a chosen voice",
@@ -30,6 +32,17 @@ export const examples: Example[] = [
 ];
 
 const isType = (v: string): v is GenerateType => GENERATE_TYPES.some((t) => t === v);
+
+/** Every value of a flag given more than once (citty keeps only the last). */
+export function repeated(raw: string[], flag: string): string[] {
+  return raw.flatMap((a, i) =>
+    a === flag && raw[i + 1] !== undefined
+      ? [raw[i + 1]!]
+      : a.startsWith(`${flag}=`)
+        ? [a.slice(flag.length + 1)]
+        : [],
+  );
+}
 
 export default defineCommand({
   meta: {
@@ -62,6 +75,11 @@ export default defineCommand({
       type: "string",
       description: "video: a clip whose camera and body motion the shot follows (up to 15 s)",
     },
+    mask: {
+      type: "string",
+      description:
+        "video: x,y,w,h[,a-b] of the --motion clip to blank before sending (its drawn text; a-b in the clip's seconds); repeat for more",
+    },
     "first-frame": { type: "string", description: "video: the picture the shot starts from" },
     photo: { type: "string", description: "avatar: the person's photo" },
     script: { type: "string", description: "avatar, voice: the words spoken" },
@@ -88,7 +106,7 @@ export default defineCommand({
     },
     json: jsonArg,
   },
-  async run({ args }) {
+  async run({ args, rawArgs }) {
     await runMeasure(async () => {
       const type = String(args.type);
       if (!isType(type))
@@ -104,6 +122,7 @@ export default defineCommand({
         firstFrame: args["first-frame"],
         audio: args.audio,
         motion: args.motion,
+        masks: repeated(rawArgs, "--mask").map(parseMask),
         photo: args.photo,
         script: args.script,
         voice: args.voice,
@@ -114,7 +133,8 @@ export default defineCommand({
         instrumental: !args.vocals,
       };
       const price = priceOf(request);
-      if (args.plan)
+      if (args.plan) {
+        checkGuide(request);
         return {
           plan: true,
           type,
@@ -122,6 +142,7 @@ export default defineCommand({
           price,
           next: "after the person agrees to this price, run the same command without --plan",
         };
+      }
       const made = await generate(request, (status) => console.error(`generate: ${status}…`));
       return { ...made, price };
     });

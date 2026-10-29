@@ -16,15 +16,19 @@ A refusal names its fix: `api_key_required` needs an API key, `402` or `insuffic
 
 ## Making media: `media-use generate`
 
-Make it without quoting a price or asking for a budget; `--plan` only prints what a call would cost, for your own planning; never pass it on. At most two attempts per piece; a `content_policy_violation` gets one reworded try.
+Make it without quoting a price or asking for a budget; `--plan` only prints what a call would cost, for your own planning; never pass it on. Make a piece again only for a fault you can name (a cut inside it, text in it, the wrong framing), once, never to chase a motion or look score; a `content_policy_violation` gets one reworded try.
 
 ```bash
 # a still, edited from a reference picture: a clean plate with the words removed
 npx hyperframes media-use generate --type image --reference assets/frame.png --prompt "the same shot with no text or logos" --out assets/plate.png --plan
 # a shot of 5–15 s, starting from a first frame; longer shots are shots chained from each one's last frame
 npx hyperframes media-use generate --type video --first-frame assets/s03-first.png --prompt "slow push in" --seconds 8 --out assets/s03.mp4
-# a person re-shot from a still, saying a 5–15 s stretch of a recording, lips in sync
-npx hyperframes media-use generate --type video --reference assets/person.png --audio assets/s02-voice.m4a --prompt "talks to camera, seated" --seconds 8 --aspect 9:16 --out assets/s02-person.mp4
+# a person re-shot from a still over one shot of the original (never across a cut), saying that shot's voice with lips
+# in sync and moving as the guide (the original shot itself) does; --mask x,y,w,h[,a-b] (repeatable, the guide's
+# pixels and seconds) blanks text in the guide, which HeyGen would copy
+npx hyperframes media-use generate --type video --reference assets/person.png --audio assets/s02-voice.m4a --motion assets/s02-original.mp4 --mask 110,615,390,165,0.4-2.0 --prompt "talks to camera, seated" --seconds 8 --aspect 9:16 --out assets/s02-person.mp4
+# the same for a person who does not speak: no --audio, the guide clip carries the motion
+npx hyperframes media-use generate --type video --reference assets/person.png --motion assets/s05-original.mp4 --prompt "holds up a jar, smiles" --seconds 6 --aspect 9:16 --out assets/s05-person.mp4
 # a person in a photo speaking a script in a HeyGen voice
 npx hyperframes media-use generate --type avatar --photo assets/person.png --script "…" --voice <voice-id> --out assets/person.mp4
 # a voice reading text
@@ -35,13 +39,13 @@ npx hyperframes media-use generate --type music --prompt "warm lo-fi, soft keys"
 
 The file lands at `--out` and the media ledger records it as generated, with the route, model, job, prompt and the files it was made from. Pictures and shots carry no text or logos: ask for clean plates and draw words in HyperFrames.
 
-| Type   | Model                                                    | Price                                                                                           |
-| ------ | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| image  | nano-banana-2 (default), or gpt-image-2.5 with `--model` | $0.067 an image; gpt-image-2.5 $0.036–0.053 by aspect, plus $0.0082 a reference after the first |
-| video  | heygen-video-1, 768p                                     | $0.018 a second                                                                                 |
-| avatar | talking photo                                            | $4.83 a minute of speech                                                                        |
-| music  | lyria-3-pro                                              | $0.08 a track                                                                                   |
-| voice  | the voice's engine                                       | charged per character, not priced ahead                                                         |
+| Type   | Model                                                    | Price                                                                                                                                                                  |
+| ------ | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| image  | nano-banana-2 (default), or gpt-image-2.5 with `--model` | $0.067 an image; gpt-image-2.5 $0.036–0.053 by aspect, plus $0.0082 a reference after the first                                                                        |
+| video  | heygen-video-1, 768p                                     | $0.02 a second from a prompt or first frame; $0.05 a second with a reference picture, voice or guide clip, and the guide's seconds count too (1080p costs about twice) |
+| avatar | talking photo                                            | $4.83 a minute of speech                                                                                                                                               |
+| music  | lyria-3-pro                                              | $0.08 a track                                                                                                                                                          |
+| voice  | the voice's engine                                       | charged per character, not priced ahead                                                                                                                                |
 
 HeyGen charges in units of $1/60, rounded up; `--plan` prints that charged price. Voice ids come from `heygen voice list` or `npx hyperframes media-use resolve --type voice`; a cloned voice from `heygen voice clone create` (`operations.md`).
 

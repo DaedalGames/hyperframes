@@ -48,8 +48,12 @@ export interface VideoInfo {
   /** The frame rate as ffmpeg writes it, e.g. 30000/1001. */
   fpsText: string;
   duration: number;
+  /** The picture's length: the container's can run on with a longer sound track. */
+  pictureDuration: number;
   frames: number;
   audio: boolean;
+  /** Seconds the sound starts after the picture (0 when it starts with it or there is none). */
+  audioStart: number;
   /** Frames over seconds, which a variable-rate video's nominal rate does not tell. */
   avgFps: number;
   /** The container's frame rate and the stream's average differ: frames are not evenly spaced. */
@@ -67,6 +71,7 @@ interface ProbeStream {
   avg_frame_rate?: string;
   nb_frames?: string;
   duration?: string;
+  start_time?: string;
   color_transfer?: string;
   side_data_list?: { rotation?: number }[];
   tags?: { rotate?: string };
@@ -108,6 +113,8 @@ export function probeVideo(path: string): VideoInfo {
   const avg = rate(video.avg_frame_rate);
   const duration = Number(json.format?.duration ?? video.duration ?? 0);
   const counted = Number(video.nb_frames ?? 0);
+  const sound = streams.find((s) => s.codec_type === "audio");
+  const frames = counted > 0 ? counted : Math.round(duration * fps);
   return {
     path,
     width: (turned ? video.height : video.width) ?? 0,
@@ -115,8 +122,10 @@ export function probeVideo(path: string): VideoInfo {
     fps,
     fpsText: fpsText.endsWith("/1") ? fpsText.slice(0, -2) : fpsText,
     duration,
-    frames: counted > 0 ? counted : Math.round(duration * fps),
-    audio: streams.some((s) => s.codec_type === "audio"),
+    pictureDuration: Number(video.duration ?? 0) || frames / (avg || fps),
+    frames,
+    audio: Boolean(sound),
+    audioStart: Math.max(0, Number(sound?.start_time ?? 0) - Number(video.start_time ?? 0) || 0),
     avgFps: avg || fps,
     vfr: avg > 0 && Math.abs(avg - fps) / fps > 0.01,
     hdr: /smpte2084|arib-std-b67/.test(video.color_transfer ?? ""),

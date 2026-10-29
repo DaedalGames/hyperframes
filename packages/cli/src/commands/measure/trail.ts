@@ -2,7 +2,7 @@
 // onion skin (earliest faintest), the moving part's path with numbered points, and a heat map of where the picture
 // changed. One look tells a slide from a scale from a mask reveal; `keyframes --shot` does the same for a project.
 import { join } from "node:path";
-import { defineCommand } from "../../utils/defineCommand.js";
+import { defineCommand } from "citty";
 import type { Example } from "../_examples.js";
 import {
   jsonArg,

@@ -1,4 +1,4 @@
-import { defineCommand } from "../../utils/defineCommand.js";
+import { defineCommand } from "citty";
 import type { Example } from "../_examples.js";
 import { jsonArg, runMeasure, videoArg, window } from "../../measure/command.js";
 import { findCuts, signatures } from "../../measure/cuts.js";

@@ -1,7 +1,8 @@
 // Prices before a paid call, from the HyperFrames app's creation pricing (hyperframes-internal
 // packages/desktop/shared/creationPricing.mjs, 2026-10-22). HeyGen charges in units of $1/60, rounded up; the label
 // rounds up to the cent. Routes HeyGen does not price ahead say so instead of guessing.
-import type { GenerateRequest } from "./generate.js";
+import { probeVideo, round } from "../measure/media.js";
+import { GUIDE_MAX_S, type GenerateRequest } from "./generate.js";
 
 export interface Price {
   usd: number | null;
@@ -21,6 +22,9 @@ const GPT_IMAGE: Record<string, number> = {
 };
 const NANO_IMAGE = 0.067;
 const VIDEO_768P_PER_S = 0.018;
+// A reference shot (pictures, voice or guide clip) bills more, and its guide clip's seconds bill too: measured
+// 2026-10-23 from the wallet, 5 s with a picture $0.25, 10 s $0.50, 5 s with a 1 s guide $0.30, with a 3 s guide $0.40.
+const VIDEO_REF_768P_PER_S = 0.05;
 const MUSIC_PER_TRACK = 0.08;
 const AVATAR_IV_PER_MIN = 4.83;
 // An avatar's length is estimated from its script, as the app does.
@@ -40,6 +44,13 @@ export function priceOf(r: GenerateRequest): Price {
     }
     case "video": {
       const seconds = Math.min(15, Math.max(5, Math.round(r.seconds ?? 5)));
+      if (r.audio || r.references?.length || r.motion) {
+        const guide = r.motion ? Math.min(GUIDE_MAX_S, probeVideo(r.motion).pictureDuration) : 0;
+        return {
+          usd: cents((seconds + guide) * VIDEO_REF_768P_PER_S),
+          basis: `heygen-video-1 reference shot at 768p, ${seconds} s${guide ? ` and the ${round(guide, 2)} s guide` : ""} at $0.05 a second`,
+        };
+      }
       return {
         usd: cents(seconds * VIDEO_768P_PER_S),
         basis: `heygen-video-1 at 768p, ${seconds} s at $0.018 a second`,

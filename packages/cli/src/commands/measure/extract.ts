@@ -4,7 +4,7 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
-import { defineCommand } from "../../utils/defineCommand.js";
+import { defineCommand } from "citty";
 import type { Example } from "../_examples.js";
 import { jsonArg, num, roiArg, runMeasure, videoAndRoi, videoArg } from "../../measure/command.js";
 import { Fix, frameAt, round, runFfmpeg, type Roi, type VideoInfo } from "../../measure/media.js";

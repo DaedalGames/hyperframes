@@ -9,62 +9,30 @@ metadata:
 
 # Reverse a video
 
-The result is a HyperFrames project whose render matches the original and stays editable: text is text, graphics are elements with named colours, and every media file records where it came from. It is done when `npx hyperframes check` passes and `diff` against the original passes every segment. Build to the `/hyperframes` contract; this skill adds how to read a video you only have as pixels. Reverse videos the person has the right to use.
+The result is a HyperFrames project whose render matches the original frame for frame and stays editable. Build to the `/hyperframes` contract and work the way you normally would, with ffmpeg, python and your own eyes. This skill holds only what earlier rebuilds got wrong or spent hours on. Reverse videos the person has the right to use.
 
-## 0. Prepare
+Sign in first; start only when `npx hyperframes auth status` shows a sign-in. Open with `references/start.md`. Rebuild the video as it is; remix it only when the person asks.
 
-Sign in first; start only when `npx hyperframes auth status` shows a sign-in. Open with `references/start.md`.
+## The original decides the frame
 
-```bash
-npx hyperframes init <project>
-npx hyperframes measure probe <video> --normalize <project>/.reverse/source.mp4
-```
+1. `npx hyperframes measure probe <video>`: the root composition is that size exactly, `data-fps` is its rate (NTSC stays a fraction: `30000/1001`) and its duration is the video's frames ÷ fps, not the audio's length. `init`'s default canvas is wrong for most videos.
+2. `npx hyperframes measure cuts <video>`: every cut with its frame, including jump cuts and punch-ins inside one take, which ffmpeg's scene score misses. Every shot starts at its listed time. Write times as frame ÷ fps rounded down (frame 83 at 30 fps is `2.766666`): `2.767` lands a frame late.
+3. The sound is the original's: copy the video into the project and play it as one `<audio src="original.mp4">` over the whole film (no extracted or re-encoded track); every clip is muted.
+4. Read consecutive frames wherever something changes: each cut, entrance, exit and transition, a few frames either side (`npx hyperframes measure frames --range a,b --roi x,y,w,h`). Sheets a second or a quarter apart miss 1–3-frame timing, which way things enter and leave, blurs and dissolves at cuts, and one-frame flashes.
 
-`.reverse/source.mp4` is the evidence: measured and compared, never published. Give the root composition the original's size and render at its frame rate (the probe's `canvas`; NTSC rates stay fractions such as `30000/1001`). Over 60 s, work in sections split at cuts.
+## Every layer
 
-## 1. Analyse: measure first, then look
+- **A component** (text, captions, stickers, cards, UI and screen recordings, charts, maps) is rebuilt in HTML.
+- **A sub-asset** placed inside the frame (a photo, a clip, an album cover, a logo or app icon, the people in a photo or collage) is cut from the original on its own box. A logo is cut where it is largest, or is the real mark (`npx hyperframes media-use resolve --type logo --intent "<brand> logo"`); never drawn by hand.
+- **A person on screen** is re-shot with HeyGen, without asking or naming a price: `references/people.md`.
+- Never play the original's whole frame.
 
-You see stills, not motion; evenly spaced frames blur cuts and drop flashes. Let measurement decide where to look (`references/watch.md`):
+What decides whether drawn things match, in `references/match.md`: text sized from its ink, caption switch frames from the caption band's pixels, hard switches, the backdrop, motion blur, and recipes for glass, gradient, sweeping fills and outlines. Look at every large word through its whole life before you build it.
 
-1. `npx hyperframes measure events .reverse/source.mp4 --map`: cuts, flashes, what appears where, holds and the sound's hits, grouped into windows.
-2. `measure frames --every 1` for the overview, `measure frames --events` for each window's consecutive frames, `measure trail` to see a move in one picture.
-3. Numbers from `measure box | ink | curve | objects | rhythm | look`; words from `npx hyperframes transcribe`; beats from `npx hyperframes audio`.
+## Check once, at the end
 
-Start with `npx hyperframes analyze .reverse/source.mp4 --preset reverse`: HeyGen drafts the same timeline; correct it against the frames.
+1. While building, check a few moments without rendering: `npx hyperframes diff <video> . --at t,t,…` (the original beside yours, scored).
+2. When every shot has content: `npx hyperframes check`, fix its errors, then `npx hyperframes render` in the foreground with a 10-minute timeout (a longer render: start it detached, `setsid nohup npx hyperframes render -o <out> > render.log 2>&1 &`, and wait on the log in the foreground), then `npx hyperframes diff <video> <render>`. It lists the original's cuts that yours misses and the extra ones, the duration, the sound's offset, stretches where content is missing, and the worst moments with the failing cell beside the original's.
+3. Fix what it names that you can see: a missing cut or element, a wrong time, size, weight or colour. Render and diff once more, then stop. Small score differences are not worth another round.
 
-Write `REVERSE.md` (`references/spec.md`): the brief, the recurring objects, then one section per segment with its copy, actions, times and where its pixels come from. Every number comes from a measurement; tag each claim observed, measured or hypothesis.
-
-## 2. Rebuild by layer
-
-| Layer | Signed in (default) | Offline, or asked local only |
-| --- | --- | --- |
-| Text, shapes, UI, charts, transitions | HTML + GSAP, registry first | — |
-| Burned-in captions | a caption track styled like the original, timed from the transcript | — |
-| Logos | SVG geometry; cut from the original when photographic | — |
-| Photos, footage, AI shots | generated from its frame (`/media-use`) | cut on its own (`measure extract --roi`) |
-| A presenter | re-shot with HeyGen from a still and their voice | cut from the original |
-| Sound | original voice (`measure extract --out assets/sound.m4a`), generated music | the original's track |
-
-`references/layers.md` covers placement, burned-in text over reused footage, fonts and regeneration. One sub-composition per segment (one scene when a single camera spans several); each string one element bound to a variable; colours as `:root` variables.
-
-## 3. Check, cheapest first
-
-| Step | Command | Cost |
-| --- | --- | --- |
-| 1 | `npx hyperframes check`, with a `*.motion.json` of the measured onsets | no render |
-| 2 | `npx hyperframes diff .reverse/source.mp4 . --at <t,…>` at onsets, mid-moves and both sides of cuts | stills |
-| 3 | `npx hyperframes diff .reverse/source.mp4 . --range <a,b>` for the segment you changed | its frames |
-| 4 | `npx hyperframes render`, then `diff .reverse/source.mp4 <render> --segments REVERSE.md --sbs` | one render |
-
-Fix what `worst.jpg` shows: missing elements, then position and size, then timing, then colour. Stop when every segment passes, or after two rounds without gain on the worst segment, and write what is left in the report (`references/check.md`).
-
-Segments handed to subagents: wait for every one in the same turn, then assemble `REVERSE.md` and run step 4 yourself. A headless run (`claude -p`) ends with your turn and drops background work; a segment left empty still scores high on a plain background, which `diff` flags as missing content.
-
-## Rules
-
-- What cannot be drawn is generated with HeyGen when signed in, without asking or a price; cut only offline. A clip carrying a chart, title or UI is a copy, not a reverse.
-- Build mechanisms, not traced paths: no coordinate lists or per-frame positions.
-- Copy every string exactly: case, punctuation, line breaks.
-- Keep hard cuts hard, holds held and one-frame flashes one frame long.
-- What is on screen at a segment's first frame starts there; it does not animate in.
-- Generated pictures carry no text or logos; HyperFrames draws those.
+Work alone: one agent holding the whole film beats subagents that each re-read and re-watch it and wait on each other. Write a short `REVERSE.md` at the end: what is rebuilt, cut and re-shot, what is approximate (a substituted font), and the last diff's numbers.

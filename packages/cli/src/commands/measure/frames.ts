@@ -1,6 +1,6 @@
 import { mkdtempSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { defineCommand } from "../../utils/defineCommand.js";
+import { defineCommand } from "citty";
 import type { Example } from "../_examples.js";
 import {
   jsonArg,

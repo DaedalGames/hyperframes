@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { defineCommand } from "../../utils/defineCommand.js";
+import { defineCommand } from "citty";
 import type { Example } from "../_examples.js";
 import { jsonArg, num, outArg, runMeasure, videoArg } from "../../measure/command.js";
 import { Fix, outDir, parseRoi, probeVideo, round, runFfmpeg } from "../../measure/media.js";

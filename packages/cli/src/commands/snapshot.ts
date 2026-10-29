@@ -706,7 +706,6 @@ export async function captureSnapshots(
     review?: boolean;
     /** Progress lines; `--json` sends them to stderr so stdout stays one envelope. */
     log?: (message: string) => void;
-    /** False for working frames another command reads and discards: nothing enters project history. */
     record?: boolean;
   },
 ): Promise<CapturedSnapshots> {

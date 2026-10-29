@@ -4,7 +4,8 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, extname, join, relative, resolve } from "node:path";
-import { Fix, runFfmpeg } from "../measure/media.js";
+import { findCuts, signatures } from "../measure/cuts.js";
+import { Fix, probeVideo, round, runFfmpeg, videoClip } from "../measure/media.js";
 import { idempotencyKey, runJob, type Job } from "./v3.js";
 
 export type GenerateType = "image" | "video" | "avatar" | "voice" | "music";
@@ -26,6 +27,8 @@ export interface GenerateRequest {
   audio?: string;
   /** video: a clip whose camera and body motion the shot follows (the original's same stretch, up to 15 s). */
   motion?: string;
+  /** video: regions of the motion clip blanked before it is sent (its drawn text), so the shot does not copy them. */
+  masks?: Mask[];
   /** video: the shot starts from this picture. */
   firstFrame?: string;
   /** avatar: the photo of the person who speaks. */
@@ -38,6 +41,38 @@ export interface GenerateRequest {
   model?: string;
   instrumental?: boolean;
   bpm?: number;
+}
+
+/** A region of the motion clip in its pixels, and optionally the seconds of the clip it covers. */
+export interface Mask {
+  box: [number, number, number, number];
+  window?: [number, number];
+}
+
+/** `x,y,w,h` or `x,y,w,h,a-b` (seconds of the motion clip). */
+export function parseMask(text: string): Mask {
+  const m =
+    /^\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*)?$/.exec(
+      text,
+    );
+  if (!m || Number(m[3]) <= 0 || Number(m[4]) <= 0)
+    throw new Fix(`--mask ${text} is not x,y,w,h[,a-b]`, "--mask 190,405,700,175,1.0-2.7");
+  const box: Mask["box"] = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])];
+  return m[5] ? { box, window: [Number(m[5]), Number(m[6])] } : { box };
+}
+
+/**
+ * Filters that fill each mask's region from the pixels around it (ffmpeg delogo), so no letter survives and the
+ * motion around it stays. delogo needs a pixel of picture on every side, so boxes are kept 1 px inside the frame.
+ */
+export function maskFilters(masks: Mask[], width: number, height: number): string[] {
+  return masks.flatMap(({ box: [x, y, w, h], window }) => {
+    const [x0, y0] = [Math.max(1, x), Math.max(1, y)];
+    const [x1, y1] = [Math.min(width - 2, x + w), Math.min(height - 2, y + h)];
+    if (x1 - x0 < 1 || y1 - y0 < 1) return [];
+    const when = window ? `:enable='between(t,${window[0]},${window[1]})'` : "";
+    return [`delogo=x=${x0}:y=${y0}:w=${x1 - x0}:h=${y1 - y0}${when}`];
+  });
 }
 
 interface Route {
@@ -56,6 +91,9 @@ type Media = (
 ) => { type: "base64"; media_type: string; data: string };
 
 const DEFAULTS = { image: "nano-banana-2", video: "heygen-video-1", music: "lyria-3-pro" } as const;
+export const VIDEO_RESOLUTION = "768p";
+/** HeyGen follows at most this many seconds of a guide clip; the rest is not sent. */
+export const GUIDE_MAX_S = 15;
 const MUSIC_LENGTHS = [30, 60, 120, 180];
 
 const need = <T>(value: T | undefined, flag: string, example: string): T => {
@@ -97,7 +135,9 @@ export const ROUTES: Record<GenerateType, Route> = {
         mode: spoken ? "reference_to_video" : r.firstFrame ? "image_to_video" : "text_to_video",
         prompt: need(r.prompt, "--prompt", '--prompt "slow push in on the desk"'),
         duration: Math.min(15, Math.max(5, Math.round(r.seconds ?? 5))),
-        resolution: "768p",
+        // 1080p bills about twice 768p (2026-10-23, 5 s 9:16 jobs: text $0.10 vs $0.20, a reference picture $0.25
+        // vs $0.45, a 1 s guide clip $0.30 vs $0.55), so every shot stays at 768p whatever the source's size.
+        resolution: VIDEO_RESOLUTION,
         ...(r.firstFrame ? { image: media(r.firstFrame, "image") } : {}),
         ...(r.firstFrame ? {} : { aspect_ratio: r.aspect ?? "16:9" }),
         ...(r.references?.length
@@ -172,8 +212,11 @@ export function urlOf(job: Job, paths: string[]): string | null {
   return null;
 }
 
-/** A picture or a sound as the routes take it inline, pictures shrunk to 2048 px so the body stays small. */
-function inline(work: string): Media {
+/**
+ * A picture or a sound as the routes take it inline, pictures shrunk to 2048 px so the body stays small, a motion
+ * clip with its masks blanked.
+ */
+function inline(work: string, masks: Mask[] = []): Media {
   return (path, kind) => {
     if (!existsSync(path))
       throw new Fix(`no file at ${path}`, "pass a picture or sound from the project");
@@ -197,18 +240,59 @@ function inline(work: string): Media {
     else if (kind === "audio")
       runFfmpeg(["-y", "-i", path, "-vn", "-ac", "1", "-c:a", "libmp3lame", "-b:a", "128k", out]);
     // A guide clip only needs its motion: 720 px on the long side, no sound, at most 15 s.
-    else
-      runFfmpeg([
-        ...["-y", "-i", path, "-t", "15", "-an", "-vf"],
+    else {
+      const { width, height } = masks.length ? probeVideo(path) : { width: 0, height: 0 };
+      const filters = [
+        ...maskFilters(masks, width, height),
         "scale='if(gt(iw,ih),min(720,iw),-2)':'if(gt(iw,ih),-2,min(720,ih))'",
+      ];
+      runFfmpeg([
+        ...["-y", "-i", path, "-t", "15", "-an", "-vf", filters.join(",")],
         ...["-c:v", "libx264", "-crf", "28", "-preset", "veryfast", "-pix_fmt", "yuv420p", out],
       ]);
+    }
     return {
       type: "base64",
       media_type: { image: "image/jpeg", audio: "audio/mpeg", video: "video/mp4" }[kind],
       data: readFileSync(out).toString("base64"),
     };
   };
+}
+
+/**
+ * The seconds where a new shot starts in a video's first `seconds`, and the length read. A cut within a frame of
+ * either end leaves a stray frame, not a second shot, and does not count.
+ */
+export function cutsInside(path: string, seconds?: number): { cuts: number[]; length: number } {
+  const info = probeVideo(path);
+  const clip = videoClip(info.path, 0, seconds, info);
+  const { frames } = signatures(clip.input, clip.filters);
+  const cuts = findCuts(frames)
+    .filter((c) => c.frame > 1 && c.frame < frames.length - 1)
+    .map((c) => round(c.frame / info.fps, 3));
+  return { cuts, length: round(frames.length / info.fps, 3) };
+}
+
+const COUNT = ["", "one", "two", "three", "four", "five", "six"];
+
+/**
+ * Refuses a --motion clip holding more than one shot before anything is sent: HeyGen follows the guide's cut into
+ * a cut of its own, so each shot is its own generation.
+ */
+export function checkGuide(r: Pick<GenerateRequest, "motion">): void {
+  if (!r.motion) return;
+  const { cuts, length } = cutsInside(r.motion, GUIDE_MAX_S);
+  if (!cuts.length) return;
+  const s = (t: number) => t.toFixed(2);
+  const and = (items: string[]) => `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+  const at =
+    cuts.length > 1 ? `cuts at ${and(cuts.map((t) => `${s(t)} s`))}` : `a cut at ${s(cuts[0]!)} s`;
+  const edges = [0, ...cuts, length];
+  const shots = edges.slice(1).map((e, i) => `${i ? s(edges[i]!) : "0"}–${s(e)} s`);
+  throw new Fix(
+    `--motion ${r.motion} has ${at}`,
+    `guide has ${at}: generate ${and(shots)} as ${COUNT[shots.length] ?? shots.length} shots, each with its own --motion clip`,
+  );
 }
 
 /** The nearest folder at or above `from` holding index.html. */
@@ -225,6 +309,8 @@ export interface Generated {
   job: string;
   route: string;
   ledger?: string;
+  /** video: seconds where HeyGen cut inside the returned shot; null when the file could not be read. */
+  cuts_inside?: number[] | null;
 }
 
 export async function generate(
@@ -239,7 +325,10 @@ export async function generate(
   const project = projectOf(dirname(out));
   const work = mkdtempSync(join(tmpdir(), "hf-generate-"));
   try {
-    const body = route.body(r, inline(work));
+    if (r.masks?.length && !r.motion)
+      throw new Fix("--mask blanks regions of the --motion clip", "pass --motion with --mask");
+    checkGuide(r);
+    const body = route.body(r, inline(work, r.masks));
     const key = idempotencyKey(route.path, [JSON.stringify(body)]);
     const job = await runJob(route.path, body, key, (id) => route.poll(encodeURIComponent(id)), {
       log: {
@@ -262,6 +351,14 @@ export async function generate(
         "run the same command again; it re-reads the job",
       );
     writeFileSync(out, Buffer.from(await res.arrayBuffer()));
+    // HeyGen sometimes cuts inside a shot on its own; the shot is paid for and kept, the cuts are reported.
+    let cuts: number[] | null | undefined;
+    if (r.type === "video")
+      try {
+        cuts = cutsInside(out).cuts;
+      } catch {
+        cuts = null;
+      }
     let ledger: string | undefined;
     if (project) {
       const { recordInPlace } = await import("../media-use/lib/manifest.mjs");
@@ -284,12 +381,23 @@ export async function generate(
           ...(r.photo ? { photo: describe(r.photo) } : {}),
           ...(r.audio ? { audio: describe(r.audio) } : {}),
           ...(r.motion ? { motion: describe(r.motion) } : {}),
+          ...(r.masks?.length
+            ? { motion_masks: r.masks.map((m) => [...m.box, ...(m.window ?? [])]) }
+            : {}),
           ...(r.voice ? { voice: r.voice } : {}),
+          ...(cuts !== undefined ? { cuts_inside: cuts } : {}),
         },
       }).id;
       regenerateIndex(project);
     }
-    return { out, type: r.type, job: job.id, route: route.path, ...(ledger ? { ledger } : {}) };
+    return {
+      out,
+      type: r.type,
+      job: job.id,
+      route: route.path,
+      ...(ledger ? { ledger } : {}),
+      ...(cuts !== undefined ? { cuts_inside: cuts } : {}),
+    };
   } finally {
     rmSync(work, { recursive: true, force: true });
   }

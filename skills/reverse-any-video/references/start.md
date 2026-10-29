@@ -6,11 +6,11 @@ block they can copy.
 
 ## Not signed in yet
 
-Say why HeyGen matters before asking: signing in is what gets the best remake. HeyGen watches the whole video and
-drafts its timeline, and can re-shoot the presenter when the video has one. For example:
+Say why HeyGen matters before asking: signing in is what gets the best remake. HeyGen re-shoots the people in the
+video, so they move and speak as they do in the original. For example:
 
-> To rebuild this video at its best, I'll work with HeyGen: it watches the whole video, drafts the timeline, and can
-> re-shoot the presenter. Sign in once by typing this in the prompt:
+> To rebuild this video at its best, I'll work with HeyGen: it re-shoots the people in it, so they move and speak just
+> like the original. Sign in once by typing this in the prompt:
 >
 > ```
 > ! npx hyperframes auth login
@@ -18,7 +18,7 @@ drafts its timeline, and can re-shoot the presenter when the video has one. For 
 >
 > Your browser opens the HeyGen sign-in. Once you're in, reply "done".
 >
-> Then it takes about 20–50 minutes: I study the video shot by shot, rebuild every layer as a project you can edit,
+> Then it takes about 20–50 minutes: I study the video frame by frame, rebuild every layer as a project you can edit,
 > and check it against the original until it matches.
 
 ## Signed in

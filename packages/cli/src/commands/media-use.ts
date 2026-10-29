@@ -96,7 +96,6 @@ function subcommand(name: MediaUseVerb, invoke: InvokeMediaUse) {
 export function createMediaUseCommand(invoke: InvokeMediaUse = invokeEngine) {
   const subCommands = {
     ...Object.fromEntries(MEDIA_USE_VERBS.map((name) => [name, () => subcommand(name, invoke)])),
-    // Made on HeyGen through the hyperframes sign-in, not the resolve engine.
     generate: () => import("./media-use/generate.js").then((m) => m.default),
   };
   return defineCommand({

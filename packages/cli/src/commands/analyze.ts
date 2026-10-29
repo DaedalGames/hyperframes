@@ -12,10 +12,10 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
-import { defineCommand } from "../utils/defineCommand.js";
+import { defineCommand } from "citty";
 import type { Example } from "./_examples.js";
 import { tryResolveCredential } from "../auth/resolver.js";
-import { idempotencyKey, runJob } from "../heygen/v3.js";
+import { idempotencyKey, runJob, type Job } from "../heygen/v3.js";
 import {
   DESCRIBE_SCHEMA,
   mergeDrafts,
@@ -39,8 +39,8 @@ export const examples: Example[] = [
 ];
 
 const ROUTE = "/v3/video-analyses";
-const MODEL = "gemini-4-argon";
-const HEYGEN_FPS = 2;
+export const MODEL = "gemini-4-argon";
+export const HEYGEN_FPS = 2;
 const HEYGEN_MAX_S = 90;
 const PART_S = 30;
 const INLINE_BYTES = 16 * 1024 * 1024;
@@ -65,23 +65,90 @@ export function partsOf(duration: number, cuts: number[]): [number, number][] {
 export const slowBy = (fps: number, seconds: number) =>
   Math.max(1, Math.min(fps / HEYGEN_FPS, HEYGEN_MAX_S / seconds));
 
-/** One part as HeyGen reads it: slowed, 720 px on its long side, silent when slowed, under the inline cap. */
-function prepare(info: VideoInfo, [a, b]: [number, number], slow: number, dir: string): Buffer {
-  const fit = info.width >= info.height ? "scale=720:-2" : "scale=-2:720";
+/** The first of a few qualities that fits HeyGen's inline cap; `args` are ffmpeg's for that quality and output. */
+export function underInlineCap(
+  dir: string,
+  name: string,
+  args: (crf: number, out: string) => string[],
+  seconds: number,
+): Buffer {
   for (const crf of [23, 30, 36]) {
-    const out = join(dir, `part-${a}-${crf}.mp4`);
-    runFfmpeg([
-      ...["-y", "-ss", String(a), "-i", info.path, "-t", String(b - a)],
-      ...["-vf", `${fit},setsar=1,setpts=${slow}*PTS`, "-r", String(HEYGEN_FPS * 2)],
-      ...(slow === 1 && info.audio ? ["-c:a", "aac", "-b:a", "96k"] : ["-an"]),
-      ...["-c:v", "libx264", "-crf", String(crf), "-pix_fmt", "yuv420p", out],
-    ]);
+    const out = join(dir, `${name}-${crf}.mp4`);
+    runFfmpeg(args(crf, out));
     if (statSync(out).size <= INLINE_BYTES) return readFileSync(out);
   }
   throw new Fix(
-    `a ${round(b - a, 1)} s part stays over HeyGen's 16 MB inline cap`,
+    `a ${round(seconds, 1)} s part stays over HeyGen's 16 MB inline cap`,
     "analyze a shorter window with --start/--end",
   );
+}
+
+/** One part as HeyGen reads it: slowed, 720 px on its long side, silent when slowed, under the inline cap. */
+export function prepare(
+  info: VideoInfo,
+  [a, b]: [number, number],
+  slow: number,
+  dir: string,
+): Buffer {
+  const fit = info.width >= info.height ? "scale=720:-2" : "scale=-2:720";
+  return underInlineCap(
+    dir,
+    `part-${a}`,
+    (crf, out) => [
+      // -t bounds the slowed output: the part times the slow-down, or the model sees only the first 1/slow of it.
+      ...["-y", "-ss", String(a), "-i", info.path, "-t", String((b - a) * slow)],
+      ...["-vf", `${fit},setsar=1,setpts=${slow}*PTS`, "-r", String(HEYGEN_FPS * 2)],
+      ...(slow === 1 && info.audio ? ["-c:a", "aac", "-b:a", "96k"] : ["-an"]),
+      ...["-c:v", "libx264", "-crf", String(crf), "-pix_fmt", "yuv420p", out],
+    ],
+    b - a,
+  );
+}
+
+export interface Asked {
+  answer: unknown;
+  job: string;
+  usage: unknown;
+}
+
+/** One clip and one question to HeyGen's video model; the same request picks up the same job. */
+export async function askVideo(
+  video: Buffer,
+  prompt: string,
+  schema: unknown,
+  opts: {
+    model?: string;
+    oauth?: boolean;
+    what: string;
+    project?: string;
+    onWait?: (job: Job) => void;
+  },
+): Promise<Asked> {
+  const body = {
+    model: opts.model ?? MODEL,
+    video: { type: "base64", media_type: "video/mp4", data: video.toString("base64") },
+    prompt,
+    response_schema: schema,
+    max_output_tokens: 32768,
+  };
+  const job = await runJob(
+    ROUTE,
+    body,
+    idempotencyKey(ROUTE, [video, prompt, JSON.stringify(schema), body.model]),
+    (id) => `${ROUTE}/${encodeURIComponent(id)}`,
+    { log: { projectDir: opts.project, what: opts.what }, onWait: opts.onWait },
+  ).catch((err: unknown) => {
+    if (err instanceof Fix && /refused the credential/.test(err.message) && opts.oauth)
+      throw new Fix(
+        "HeyGen's video analysis is not available with this sign-in yet",
+        "continue without analyze: measure the video and look at its frames",
+      );
+    throw err;
+  });
+  const output = job.output;
+  const answer =
+    typeof output === "object" && output !== null && "json" in output ? output.json : output;
+  return { answer, job: job.id, usage: job.usage ?? null };
 }
 
 function defaultOut(video: string): string {
@@ -92,7 +159,7 @@ function defaultOut(video: string): string {
 }
 
 /** The project a job log belongs to: the nearest folder up from here with index.html. */
-function projectHere(): string | undefined {
+export function projectHere(): string | undefined {
   for (let dir = resolve("."); ; dir = dirname(dir)) {
     if (existsSync(join(dir, "index.html"))) return dir;
     if (dirname(dir) === dir) return undefined;
@@ -172,52 +239,23 @@ export default defineCommand({
             `Video: ${info.width}x${info.height}.`,
           ];
           const prompt = [question, ...notes].join("\n\n");
-          const body = {
-            model: String(args.model ?? MODEL),
-            video: { type: "base64", media_type: "video/mp4", data: video.toString("base64") },
-            prompt,
-            response_schema: schema,
-            max_output_tokens: 32768,
-          };
           console.error(
             `analyze: part ${i + 1}/${parts.length}, ${round(part[0], 2)}–${round(part[1], 2)} s, slowed ${round(slow, 2)}x`,
           );
-          const job = await runJob(
-            ROUTE,
-            body,
-            idempotencyKey(ROUTE, [video, prompt, JSON.stringify(schema), body.model]),
-            (id) => `${ROUTE}/${encodeURIComponent(id)}`,
-            {
-              log: {
-                projectDir: project,
-                what: `analyze ${basename(info.path)} ${round(part[0], 2)}-${round(part[1], 2)}s`,
-              },
-              onWait: (j) => console.error(`analyze: part ${i + 1} ${j.status}…`),
-            },
-          ).catch((err: unknown) => {
-            if (
-              err instanceof Fix &&
-              /refused the credential/.test(err.message) &&
-              credential.type === "oauth"
-            )
-              throw new Fix(
-                "HeyGen's video analysis is not available with this sign-in yet",
-                "continue without analyze: measure the video and look at its frames",
-              );
-            throw err;
+          const asked = await askVideo(video, prompt, schema, {
+            model: args.model === undefined ? undefined : String(args.model),
+            oauth: credential.type === "oauth",
+            project,
+            what: `analyze ${basename(info.path)} ${round(part[0], 2)}-${round(part[1], 2)}s`,
+            onWait: (j) => console.error(`analyze: part ${i + 1} ${j.status}…`),
           });
-          const output = job.output;
-          const answer =
-            typeof output === "object" && output !== null && "json" in output
-              ? output.json
-              : output;
-          answers.push(toFilmTime(answer, slow, part[0]));
+          answers.push(toFilmTime(asked.answer, slow, part[0]));
           done.push({
             start: round(part[0], 3),
             end: round(part[1], 3),
             slow: round(slow, 2),
-            job: job.id,
-            usage: job.usage ?? null,
+            job: asked.job,
+            usage: asked.usage,
           });
         }
       } finally {
