@@ -134,13 +134,6 @@ it("publishes resolved metadata only for clips that still need it", async () => 
     expect(getMediaProbeDiagnostics()).toEqual({ cached: 30, failed: 0, inflight: 0 });
     expect(elements.slice(0, 20).every((element) => element.sourceDuration === 99)).toBe(true);
     expect(elements.slice(20).every((element) => element.sourceDuration === 12)).toBe(true);
-    console.log({
-      changed,
-      unchanged,
-      other,
-      metadataSources: requested.size,
-      clips: elements.length,
-    });
     expect(changed).toBe(560);
     expect(unchanged).toBe(0);
     expect(other).toBe(0);
