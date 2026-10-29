@@ -1,7 +1,7 @@
 // Prices before a paid call, from the HyperFrames app's creation pricing (hyperframes-internal
 // packages/desktop/shared/creationPricing.mjs, 2026-10-22). HeyGen charges in units of $1/60, rounded up; the label
 // rounds up to the cent. Routes HeyGen does not price ahead say so instead of guessing.
-import { probeVideo, round } from "../measure/media.js";
+import { Fix, probeVideo, round } from "../measure/media.js";
 import { GUIDE_MAX_S, type GenerateRequest } from "./generate.js";
 
 export interface Price {
@@ -72,4 +72,28 @@ export function priceOf(r: GenerateRequest): Price {
         basis: "HeyGen does not price catalog speech ahead; it is charged per character",
       };
   }
+}
+
+// HyperFrames price rows are written at 1,000 credits per dollar of list price (experiment-framework
+// heygen/services/payments/hyperframes/catalog.py, HF_CREDITS_PER_USD), so this is an estimate, not the price book.
+const HF_CREDITS_PER_USD = 1000;
+
+export const creditsOf = (p: Price): number | null =>
+  p.usd === null ? null : Math.ceil(p.usd * HF_CREDITS_PER_USD - 1e-9);
+
+/** Refuses, before anything is sent, a call that would not fit what is left of the person's credit limit. */
+export function checkLimit(credits: number | null, limit: number | undefined): void {
+  if (limit === undefined) return;
+  const fix =
+    "tell the person what their limit leaves out, then ask whether to raise it or make the video without this piece";
+  if (credits === null)
+    throw new Fix(
+      `this call cannot be priced ahead, so it cannot be kept under --max-credits ${limit}; nothing was made`,
+      fix,
+    );
+  if (credits > limit)
+    throw new Fix(
+      `this call is about ${credits} credits, over --max-credits ${limit}; nothing was made or charged`,
+      fix,
+    );
 }
