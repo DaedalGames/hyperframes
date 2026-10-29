@@ -6,12 +6,19 @@ import { GUIDE_MAX_S, type GenerateRequest } from "./generate.js";
 
 export interface Price {
   usd: number | null;
+  /** The list price before HeyGen's unit rounding: what a HyperFrames plan charges credits on. */
+  list: number | null;
   basis: string;
 }
 
 const UNIT = 1 / 60;
 const charged = (usd: number) => Math.ceil(usd / UNIT - 1e-9) * UNIT;
 const cents = (usd: number) => Math.ceil(charged(usd) * 100 - 1e-9) / 100;
+const at = (list: number, basis: string): Price => ({
+  usd: cents(list),
+  list,
+  basis,
+});
 
 const GPT_IMAGE: Record<string, number> = {
   "1:1": 0.05268,
@@ -35,54 +42,62 @@ export function priceOf(r: GenerateRequest): Price {
     case "image": {
       const refs = r.references?.length ?? 0;
       if ((r.model ?? "nano-banana-2") === "nano-banana-2")
-        return { usd: cents(NANO_IMAGE), basis: "nano-banana-2, $0.067 an image" };
+        return at(NANO_IMAGE, "nano-banana-2, $0.067 an image");
       const each = GPT_IMAGE[r.aspect ?? "16:9"] ?? GPT_IMAGE["16:9"]!;
-      return {
-        usd: cents(each + Math.max(0, refs - 1) * 0.0082),
-        basis: `gpt-image-2.5 at ${r.aspect ?? "16:9"}, $0.0082 a reference after the first`,
-      };
+      return at(
+        each + Math.max(0, refs - 1) * 0.0082,
+        `gpt-image-2.5 at ${r.aspect ?? "16:9"}, $0.0082 a reference after the first`,
+      );
     }
     case "video": {
       const seconds = Math.min(15, Math.max(5, Math.round(r.seconds ?? 5)));
       if (r.audio || r.references?.length || r.motion) {
-        const guide = r.motion ? Math.min(GUIDE_MAX_S, probeVideo(r.motion).pictureDuration) : 0;
-        return {
-          usd: cents((seconds + guide) * VIDEO_REF_768P_PER_S),
-          basis: `heygen-video-1 reference shot at 768p, ${seconds} s${guide ? ` and the ${round(guide, 2)} s guide` : ""} at $0.05 a second`,
-        };
+        const guide = r.motion
+          ? Math.min(GUIDE_MAX_S, probeVideo(r.motion).pictureDuration)
+          : 0;
+        return at(
+          (seconds + guide) * VIDEO_REF_768P_PER_S,
+          `heygen-video-1 reference shot at 768p, ${seconds} s${guide ? ` and the ${round(guide, 2)} s guide` : ""} at $0.05 a second`,
+        );
       }
-      return {
-        usd: cents(seconds * VIDEO_768P_PER_S),
-        basis: `heygen-video-1 at 768p, ${seconds} s at $0.018 a second`,
-      };
+      return at(
+        seconds * VIDEO_768P_PER_S,
+        `heygen-video-1 at 768p, ${seconds} s at $0.018 a second`,
+      );
     }
     case "avatar": {
       const words = (r.script ?? "").split(/\s+/).filter(Boolean).length;
       const seconds = Math.max(1, Math.floor(words / WORDS_PER_S));
-      return {
-        usd: cents(Math.ceil(seconds * AVATAR_IV_PER_MIN) / 60),
-        basis: `avatar video, about ${seconds} s from ${words} words at $4.83 a minute`,
-      };
+      return at(
+        Math.ceil(seconds * AVATAR_IV_PER_MIN) / 60,
+        `avatar video, about ${seconds} s from ${words} words at $4.83 a minute`,
+      );
     }
     case "music":
-      return { usd: cents(MUSIC_PER_TRACK), basis: "lyria-3-pro, $0.08 a track" };
+      return at(MUSIC_PER_TRACK, "lyria-3-pro, $0.08 a track");
     case "voice":
       return {
         usd: null,
-        basis: "HeyGen does not price catalog speech ahead; it is charged per character",
+        list: null,
+        basis:
+          "HeyGen does not price catalog speech ahead; it is charged per character",
       };
   }
 }
 
-// HyperFrames price rows are written at 1,000 credits per dollar of list price (experiment-framework
-// heygen/services/payments/hyperframes/catalog.py, HF_CREDITS_PER_USD), so this is an estimate, not the price book.
+// HyperFrames price rows are written at 1,000 credits per dollar of list price, with no unit rounding
+// (experiment-framework heygen/services/payments/hyperframes/catalog.py, HF_CREDITS_PER_USD): a $0.067 image is
+// charged 67 credits, measured on dev 2026-10-29. Still an estimate, not the price book.
 const HF_CREDITS_PER_USD = 1000;
 
 export const creditsOf = (p: Price): number | null =>
-  p.usd === null ? null : Math.ceil(p.usd * HF_CREDITS_PER_USD - 1e-9);
+  p.list === null ? null : Math.ceil(p.list * HF_CREDITS_PER_USD - 1e-9);
 
 /** Refuses, before anything is sent, a call that would not fit what is left of the person's credit limit. */
-export function checkLimit(credits: number | null, limit: number | undefined): void {
+export function checkLimit(
+  credits: number | null,
+  limit: number | undefined,
+): void {
   if (limit === undefined) return;
   const fix =
     "tell the person what their limit leaves out, then ask whether to raise it or make the video without this piece";

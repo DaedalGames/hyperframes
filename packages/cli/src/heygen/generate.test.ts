@@ -334,9 +334,10 @@ describe("generate", () => {
 
   it("keeps a call under the person's credit limit, or refuses it before sending", () => {
     const shot = creditsOf(priceOf({ type: "video", out: "a.mp4", seconds: 6 }));
-    expect(shot).toBe(120);
-    expect(() => checkLimit(shot, 120)).not.toThrow();
-    expect(() => checkLimit(shot, 30)).toThrow("about 120 credits, over --max-credits 30");
+    expect(shot).toBe(108);
+    expect(creditsOf(priceOf({ type: "image", out: "a.png" }))).toBe(67);
+    expect(() => checkLimit(shot, 108)).not.toThrow();
+    expect(() => checkLimit(shot, 30)).toThrow("about 108 credits, over --max-credits 30");
     expect(() => checkLimit(null, 30)).toThrow("cannot be priced ahead");
     expect(() => checkLimit(null, undefined)).not.toThrow();
   });
