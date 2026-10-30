@@ -39,10 +39,12 @@ const VIDEO_REF_768P_PER_S = 0.05;
 // A reference shot's first two pictures are included; each one after them bills on its own line.
 const VIDEO_INCLUDED_IMAGES = 2;
 const VIDEO_EXTRA_IMAGE = 0.02;
-// The price book's HyperFrames video rows at 768p (experiment-framework price_book rules.json, 2026-10-28).
+// The price book's HyperFrames rows (experiment-framework price_book rules.json, 2026-10-28): video at 768p, and an
+// avatar's two charges, Avatar IV from a photo and the general avatar video row the backend admits it on.
 const HF_VIDEO_768P_PER_S = 12;
 const HF_VIDEO_REF_768P_PER_S = 100 / 3;
 const HF_VIDEO_EXTRA_IMAGE = 40 / 3;
+const HF_AVATAR_PER_S = (800 + 150) / 60;
 const MUSIC_PER_TRACK = 0.08;
 const AVATAR_IV_PER_MIN = 4.83;
 const SCRIPT_WORDS_PER_S = 2;
@@ -84,6 +86,7 @@ export function priceOf(r: GenerateRequest): Price {
       return at(
         Math.ceil(seconds * AVATAR_IV_PER_MIN) / 60,
         `avatar video, about ${seconds} s from ${words} words at $4.83 a minute`,
+        seconds * HF_AVATAR_PER_S,
       );
     }
     case "music":
