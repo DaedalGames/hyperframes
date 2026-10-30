@@ -24,8 +24,8 @@ export const TEMPLATES: Record<string, TemplatePack> = {
   },
   "kurzgesagt-science-explainer": {
     id: "M9003",
-    sha256: "5ee494f259a828b1486223c91db9e29c9b9c945d431974256f3cc8b67b82a228",
-    bytes: 25563100,
+    sha256: "0cb12b7d0ef1414903d07bbaf1edde9369ee8bc51f2cb5f22fb08f1dff2d1f65",
+    bytes: 25563149,
   },
   "vox-america-explained": {
     id: "M9001",
@@ -34,8 +34,8 @@ export const TEMPLATES: Record<string, TemplatePack> = {
   },
   "xiaolin-yikouqi": {
     id: "M9002",
-    sha256: "fef73ec778550fe844237365d19ae12d5387d4e692b9d72fca41beb4370a6c01",
-    bytes: 152166009,
+    sha256: "de82d9ca119b062602d129a8199f3fa95cccc2f02f1f7722c54a1980587fae5d",
+    bytes: 152166700,
   },
 };
 

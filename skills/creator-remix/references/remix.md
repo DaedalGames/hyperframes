@@ -22,7 +22,7 @@ Order: `read → settle the voice → say what's coming → ask (only what is op
 The person's message carries what it carries. Ask once, together, only what is still open: the topic, the length, the voice and, for a presented series, the face.
 
 - **Only the person's own voice and face.** Never a HeyGen stock voice or presenter, never the creator's face, voice, footage, wordmark or show name. A presented series with no face answered: ask for it once, and make nothing paid until it is answered.
-- **A presented series' host step needs the `heygen` CLI signed in** (`heygen auth status`). It is a direct `heygen` recipe, so it bills that login, not the HyperFrames plan. Not set up: give the link in `media-use`, ask them to type an exclamation mark and `heygen auth login` in the prompt, and say which account it bills, with no numbers.
+- **A presenter runs on the plan by default.** Recommend the person's own HeyGen avatar once, in one line: it looks best, goes through the `heygen` CLI and bills that login, not the plan. It is only a recommendation. No avatar, no `heygen` or they'd rather not: say in one line that you'll make the presenter with HeyGen Video 1 on their plan, from their photo, and go on.
 - **Settle the voice before any research.** A HeyGen voice id the person gave is the voice: use it and ask nothing. Anything else: with `heygen` signed in, look in `heygen voice list`. One clone: use it. Several: ask which. None, or no `heygen`: ask once for their voice id, for a clone they make in HeyGen from 30 s to 3 min of their own reading, or for their own recorded narration. Nothing else starts until this is settled.
 - **Then say what's coming** in one short message that is not a question, and go on without waiting: the working title and hook, the length, and roughly how long it takes. No prices.
 - **The length is the person's, and it beats the template's runtime.** Offer about 1 minute first: the cold open, the title beat and one chapter, the end card short. 2 to 4 minutes: REMIX.md's short cut. A full episode: the series' own runtime. Their own words ("90 seconds", "5 min"): that length. No length answered and none in the topic: about 1 minute, and offer the longer cut in the reply. Scale everything to it: script words (the template's script stats at that runtime), facts, sections, music cues, review rounds (one for a minute, two for a full episode); never pad or trim to reach the series' runtime instead.
@@ -38,7 +38,7 @@ The person's message carries what it carries. Ask once, together, only what is s
 
 - Voice: the person's voice id, through the kit's voice tool, as REMIX.md says. Then the kit's timing and pause tools. The voice is final before any presenter.
 - **Audition before the whole script:** one paragraph (the kit's voice tool, as REMIX.md says), measure speech-only words a minute, and set the speed that lands on the series' rate. An instant clone takes no speed: change the words. Voice the script once; re-voice only the paragraphs that changed.
-- Face (presented series): REMIX.md's host step, with the person's own avatar, on the final voice. Their own takes: cut them per editing.md's presenter rules.
+- Face (presented series): REMIX.md's host step, on the final voice: their own avatar, or HeyGen Video 1 from their photo. Their own takes: cut them per editing.md's presenter rules.
 - A changed line after the presenter take exists means the whole take is made again, or the lips drift.
 
 ## 6. Footage, shot plan, build
