@@ -161,12 +161,8 @@ function bestLag(a: number[], b: number[]): { lag: number; r: number } {
   return best;
 }
 
-/**
- * Each generated clip placed on the film. Its own start (where HeyGen's shot begins) is the ledger's window when it
- * records one, else where the clip's sound (the original's voice it was made from) lines up with the original's.
- * Where the film shows it comes from the project's timeline (`uses`, by the clip's path), else its whole window.
- * Files resolve against the project.
- */
+/** Each generated clip on the film: it starts at the ledger's window, else where its sound lines up with the original,
+ * and shows where the timeline's `uses` place it (by path), else over its whole window. Paths resolve in the project */
 export function placeClips(
   clips: GeneratedClip[],
   project: string | undefined,
@@ -353,11 +349,8 @@ function stillBox(path: string, box: Roi, w: number, h: number): Uint8Array | un
   }
 }
 
-/**
- * Whether a generated clip carries the original's text inside a drawn element's box over its window: the clip
- * alone, against the original there. A clean clip shows the person and the place behind the letters; a clip made
- * from a motion guide with words on it shows those words.
- */
+/** Whether a generated clip alone carries the original's text inside a drawn element's box over its window: a clean
+ * clip shows the person and place behind the letters, one made from a motion guide with words on it shows the words. */
 function carriedText(
   ref: VideoInfo,
   yours: VideoInfo,
@@ -430,11 +423,8 @@ function shotsIn(window: [number, number], cuts: number[]): [number, number][] {
   return edges.slice(1).map((e, i) => [edges[i]!, e]);
 }
 
-/**
- * One shot's framing from both sides' faces, sampled at the same moments (boxes as shares of a frame `aspect` wide
- * per unit high): per moment, the original's subject (its largest face) against yours' face nearest it; the shot's
- * medians decide, so one stray detection (a photo, a hand) does not.
- */
+/** One shot's framing from both sides' faces at the same moments (boxes as shares of an `aspect`-wide frame): the
+ * original's largest face against yours' nearest, by the shot's medians, so one stray detection (a photo) can't. */
 export function shotFraming(
   window: [number, number],
   original: { t: number; boxes: number[][] }[],
