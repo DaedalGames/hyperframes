@@ -956,6 +956,40 @@ describe("painting", () => {
     expect(flipped).toBe(false);
   });
 
+  // Both scans find the same mover and the same changing elements; only the mover's box differs.
+  it("reads poses with callbacks on when a callback pans a mover's tweened ancestor", () => {
+    installHtmlInCanvas();
+    const { root, el, h } = movingHost({
+      "data-motion-blur": "on",
+      "data-motion-blur-events": "on",
+    });
+    const rig = document.createElement("div");
+    root.append(rig);
+    rig.append(el);
+    const pan = () => Number(/,\s*([-\d.]+),\s*0\)$/.exec(rig.style.transform)?.[1] ?? 0);
+    const own = el.getBoundingClientRect.bind(el);
+    el.getBoundingClientRect = () => {
+      const b = own();
+      return { ...b, left: b.left + pan(), right: b.right + pan() } as DOMRect;
+    };
+    rig.getBoundingClientRect = () =>
+      ({ left: pan(), top: 0, right: pan() + 10, bottom: 10, width: 10, height: 10 }) as DOMRect;
+    const slide = h.seek;
+    const seek = vi.fn((t: number, suppress: boolean) => {
+      slide(t, suppress);
+      rig.style.opacity = String(1 - t / 2);
+      if (!suppress) rig.style.transform = `matrix(1, 0, 0, 1, ${-30 * t}, 0)`;
+    });
+    initCaptureMotionBlur({ ...h, seek });
+    win.__hfMotionBlur?.probe();
+    expect(win.__hfMotionBlur?.report().movers).toBe(1);
+    seek.mockClear();
+    void paintCaptureMotionBlur(0.5, PLAY);
+    const reads = seek.mock.calls.filter(([t]) => t > 0);
+    expect(reads.length).toBeGreaterThan(0);
+    expect(reads.every(([, suppress]) => suppress === false)).toBe(true);
+  });
+
   it("reads poses with callbacks on when a callback moves a mover", () => {
     installHtmlInCanvas();
     const { h } = callbackHost();

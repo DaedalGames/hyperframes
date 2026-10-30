@@ -38,6 +38,7 @@ export interface DiscoverOptions {
   /** Seek the composition (timeline + adapters) to a time. */
   seek: (t: number) => void;
   onStep?: (i: number, steps: number) => void;
+  onStepBoxes?: (i: number, boxes: ReadonlyArray<DOMRect | undefined>) => void;
 }
 
 export interface Discovery {
@@ -187,6 +188,7 @@ export function discoverMovers({
   fps,
   seek,
   onStep,
+  onStepBoxes,
 }: DiscoverOptions): Discovery {
   seek(0);
   const all = [...scene.querySelectorAll("*")].filter(isHtmlElement);
@@ -230,6 +232,7 @@ export function discoverMovers({
       dynamic.add(el);
       rects[j] = el.getBoundingClientRect();
     });
+    onStepBoxes?.(i, rects);
     const away = fresh.filter(
       (j) => edgeShift(baseRects[j], rects[j]) / framesPerStep >= MIN_SPEED,
     );
@@ -276,13 +279,20 @@ export interface ScanOptions extends Omit<DiscoverOptions, "seek"> {
   events: boolean;
 }
 
-const sameMembers = (a: Iterable<Element>, b: Iterable<Element>): boolean => {
-  const x = new Set(a);
-  const y = new Set(b);
-  return x.size === y.size && [...x].every((el) => y.has(el));
-};
+/** Every changing element's box, at 1/64 px, as one number per step. */
+function boxesKey(boxes: ReadonlyArray<DOMRect | undefined>): number {
+  let h = 0x811c9dc5;
+  const mix = (v: number): void => {
+    h = Math.imul(h ^ v, 0x01000193);
+  };
+  boxes.forEach((b, j) => {
+    if (!b) return;
+    for (const v of [j, b.left, b.top, b.width, b.height]) mix(Math.round(v * 64));
+  });
+  return h;
+}
 
-/** Discovery, and whether pose reads need callbacks: only when a callback moves a mover. */
+/** Discovery, and whether pose reads need callbacks: only when a callback moves any box. */
 export function scanMovers({
   seek,
   events,
@@ -292,9 +302,22 @@ export function scanMovers({
   const quiet = (t: number): void => seek(t, true);
   if (!events) return { ...discoverMovers({ ...scan, seek: quiet, onStep }), readEvents: false };
   // Loud first: run after the silent scan, it starts at the end and fires a one-off call once more.
-  const found = discoverMovers({ ...scan, seek: (t) => seek(t, false), onStep });
-  const without = discoverMovers({ ...scan, seek: quiet });
-  const same =
-    sameMembers(without.movers, found.movers) && sameMembers(without.dynamic, found.dynamic);
-  return { ...found, readEvents: !same };
+  const loud: number[] = [];
+  const found = discoverMovers({
+    ...scan,
+    seek: (t) => seek(t, false),
+    onStep,
+    onStepBoxes: (i, boxes) => {
+      loud[i] = boxesKey(boxes);
+    },
+  });
+  let differs = false;
+  discoverMovers({
+    ...scan,
+    seek: quiet,
+    onStepBoxes: (i, boxes) => {
+      differs ||= boxesKey(boxes) !== loud[i];
+    },
+  });
+  return { ...found, readEvents: differs };
 }
