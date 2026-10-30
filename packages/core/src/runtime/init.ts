@@ -5163,7 +5163,6 @@ export function initSandboxRuntimeModular(): void {
       return false;
     }
   };
-  // Registered timelines other than the root composition's: each scene's own clock.
   const sceneTimelines = () => {
     const timelines = (window.__timelines ?? {}) as Record<string, RuntimeTimelineLike | undefined>;
     const rootCompositionId =
@@ -5296,8 +5295,7 @@ export function initSandboxRuntimeModular(): void {
     // Only clips holding a tween that renders for the first time on this seek need their authored style read.
     const firstRendered =
       firstRenders && tl ? clipsFirstRenderedIn(tl, tweensRenderedThrough.time, t) : null;
-    // An empty set means no tween draws for the first time, and a page with no timeline has no tween:
-    // nothing to show, so no page-wide query.
+    // An empty set, or a page with no timeline, means no tween draws for the first time: no page-wide query.
     const hideClipsAgain =
       firstRenders && firstRendered?.size !== 0 && (tl || sceneTimelines().length > 0)
         ? showHiddenClips(firstRendered ? (el) => firstRendered.has(el) : undefined)
