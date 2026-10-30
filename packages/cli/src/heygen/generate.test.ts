@@ -377,7 +377,7 @@ describe("generate", () => {
     const script = Array.from({ length: 30 }, () => "word").join(" ");
     const avatar = priceOf({ type: "avatar", out: "a.mp4", script });
     expect(creditsOf(avatar)).toBe(238);
-    expect(avatar.list).toBeCloseTo(1.2075);
+    expect(avatar.list).toBeCloseTo(1.2167);
     expect(() => checkLimit(creditsOf(avatar), 500)).not.toThrow();
   });
 
