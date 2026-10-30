@@ -626,10 +626,14 @@ export const coreRules: Array<(ctx: LintContext) => HyperframeLintFinding[]> = [
     }
     if (/(?:^|\s)data-no-timeline(?=[\s=/]|$)/i.test(rootTag?.attrs || "")) return [];
     const findings: HyperframeLintFinding[] = [];
+    const registered = [source, ...(options.externalScripts ?? []).map((script) => script.content)];
     if (
-      !TIMELINE_REGISTRY_INIT_PATTERN.test(source) &&
-      !TIMELINE_REGISTRY_ASSIGN_PATTERN.test(source) &&
-      !TIMELINE_REGISTRY_OBJECT_LITERAL_PATTERN.test(source)
+      !registered.some(
+        (text) =>
+          TIMELINE_REGISTRY_INIT_PATTERN.test(text) ||
+          TIMELINE_REGISTRY_ASSIGN_PATTERN.test(text) ||
+          TIMELINE_REGISTRY_OBJECT_LITERAL_PATTERN.test(text),
+      )
     ) {
       findings.push({
         code: "missing_timeline_registry",

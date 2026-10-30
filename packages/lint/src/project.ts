@@ -155,6 +155,38 @@ export function collectExternalStyles(
   return styles;
 }
 
+const MAX_EXTERNAL_SCRIPT_BYTES = 1_000_000;
+
+function collectExternalScripts(
+  projectDir: string,
+  html: string,
+  compSrcPath?: string,
+): NonNullable<HyperframeLinterOptions["externalScripts"]> {
+  const scripts: NonNullable<HyperframeLinterOptions["externalScripts"]> = [];
+  const { document } = parseHTML(html);
+  for (const element of querySelectorAllIncludingTemplates(document, "script[src]")) {
+    const src = element.getAttribute("src") ?? "";
+    if (!isLocalStylesheetHref(src) || /\.min\.m?js(?:[?#]|$)/i.test(src)) continue;
+    const path = src.split(/[?#]/)[0] ?? src;
+    const besideFile = compSrcPath ? join(dirname(compSrcPath), path) : path;
+    const script =
+      resolveExistingLocalAsset(projectDir, besideFile) ??
+      (compSrcPath && staysInsideProjectRoot(path)
+        ? resolveExistingLocalAsset(projectDir, path)
+        : null);
+    if (!script) continue;
+    const read = readProjectFile(script.resolved);
+    if (read.kind !== "file" || read.text.length > MAX_EXTERNAL_SCRIPT_BYTES) continue;
+    scripts.push({
+      src,
+      content: read.text,
+      file: join(projectDir, script.rootRelativePath),
+      rootRelativePath: script.rootRelativePath,
+    });
+  }
+  return scripts;
+}
+
 function collectCssSources(projectDir: string, html: string, compSrcPath?: string): CssSource[] {
   const sources: CssSource[] = [];
   const { document } = parseHTML(html);
@@ -268,6 +300,7 @@ export async function lintProject(
     compSrcPath: rootFile,
     externalStyles: collectExternalStyles(projectDir, rootHtml, rootCompSrcPath),
     projectFontFamilies,
+    externalScripts: collectExternalScripts(projectDir, rootHtml, rootCompSrcPath),
   });
   results.push({ file: rootFile, result: rootResult, contentHash: contentDigest(rootHtml) });
   totalErrors += rootResult.errorCount;
@@ -311,6 +344,7 @@ export async function lintProject(
         compSrcPath,
         externalStyles: collectExternalStyles(projectDir, html, compSrcPath),
         projectFontFamilies,
+        externalScripts: collectExternalScripts(projectDir, html, compSrcPath),
       });
       results.push({
         file: `compositions/${file}`,

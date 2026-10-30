@@ -566,6 +566,32 @@ describe("template shell style sources", () => {
   });
 });
 
+describe("local script files", () => {
+  const registryFindings = async (project: string) =>
+    (await lintProject(project)).results
+      .flatMap((entry) => entry.result.findings)
+      .filter((finding) => finding.code === "missing_timeline_registry");
+
+  function projectWithScript(script: string): string {
+    const project = makeProject(
+      `<html><body>
+  <div data-composition-id="main" data-width="1920" data-height="1080" data-start="0" data-duration="10"></div>
+  <script src="animation.js"></script>
+</body></html>`,
+    );
+    writeFileSync(join(project, "animation.js"), script);
+    return project;
+  }
+
+  it("counts a timeline registered in a local script file", async () => {
+    const registered = projectWithScript(
+      'window.__timelines = window.__timelines || {};\nwindow.__timelines["main"] = gsap.timeline({ paused: true });',
+    );
+    expect(await registryFindings(registered)).toEqual([]);
+    expect(await registryFindings(projectWithScript("console.log('no timeline')"))).toHaveLength(1);
+  });
+});
+
 describe("sub-composition stylesheet links", () => {
   function projectWithSharedFonts(compDir: string, href: string): string {
     const project = makeProject(validHtml());
