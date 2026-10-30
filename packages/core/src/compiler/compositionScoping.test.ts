@@ -1043,6 +1043,27 @@ window.__afterTimeline = window.__timelines.scene;
     );
   });
 
+  it("treats an authored root id compounded with its own composition id as the authored root", () => {
+    const scope = '[data-composition-id="scene__hf1"]';
+    const bare = scopeCssToComposition("#root { color: red; }", "scene", scope, "root");
+    for (const selector of [
+      '#root[data-composition-id="scene"]',
+      '[data-composition-id="scene"]#root',
+    ]) {
+      expect(scopeCssToComposition(`${selector} { color: red; }`, "scene", scope, "root")).toBe(
+        bare,
+      );
+    }
+    expect(
+      scopeCssToComposition(
+        '#root[data-composition-id="scene"] .title { x: 1; }',
+        "scene",
+        scope,
+        "root",
+      ),
+    ).toBe(scopeCssToComposition("#root .title { x: 1; }", "scene", scope, "root"));
+  });
+
   it("still uses descendant selector for non-root selectors with authoredRootId", () => {
     const scoped = scopeCssToComposition(
       ".child-element { color: red; }",

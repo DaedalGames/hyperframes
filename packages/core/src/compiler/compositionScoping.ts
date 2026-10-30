@@ -48,6 +48,19 @@ function compositionBoxSelector(scope: string): string {
   return `${scope}:not(:has([${INNER_ROOT_ATTR}])), ${scope} > [${INNER_ROOT_ATTR}]`;
 }
 
+function dropRootCompositionIdAttr(
+  selector: string,
+  authoredRootId: string | null | undefined,
+  compositionId: string,
+): string {
+  const trimmed = authoredRootId?.trim();
+  if (!trimmed) return selector;
+  const authored = escapeRegExp(`[${AUTHORED_ROOT_ID_ATTR}="${escapeCssAttributeValue(trimmed)}"]`);
+  const quotedCompId = escapeRegExp(compositionId);
+  const comp = String.raw`\[\s*data-composition-id\s*=\s*(?:"${quotedCompId}"|'${quotedCompId}')\s*\]`;
+  return selector.replace(new RegExp(`(${authored})${comp}|${comp}(${authored})`, "g"), "$1$2");
+}
+
 function scopeSelector(
   selector: string,
   scope: string,
@@ -56,7 +69,11 @@ function scopeSelector(
   compoundAuthoredRoot?: boolean,
   scopeRootSelectors?: boolean,
 ): string {
-  const selectorWithoutAuthoredRootId = normalizeAuthoredRootIdSelector(selector, authoredRootId);
+  const selectorWithoutAuthoredRootId = dropRootCompositionIdAttr(
+    normalizeAuthoredRootIdSelector(selector, authoredRootId),
+    authoredRootId,
+    compositionId,
+  );
   const selectorWithoutRootTiming = normalizeCompositionRootSelector(
     selectorWithoutAuthoredRootId,
     scope,
