@@ -222,7 +222,8 @@
   }
 
   // Pixel-only media motion (canvas repaint, playing video, same-size <img> swap) is invisible to DOM channels,
-  // so fold in a downsample fine enough to see a small sprite move. Unreadable media hashes to a constant; iframe media is a separate document.
+  // so fold in a downsample fine enough to see a small sprite move. Unreadable media hashes to a constant;
+  // iframe media is a separate document.
   // fallow-ignore-next-line complexity
   function mediaPixelChannel(element) {
     if (!MEDIA_TAGS.has(element.tagName)) return "";
