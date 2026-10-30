@@ -6,6 +6,7 @@
 (function () {
   const IGNORE_TAGS = new Set(["SCRIPT", "STYLE", "TEMPLATE", "NOSCRIPT", "META", "LINK"]);
   const MEDIA_TAGS = new Set(["CANVAS", "VIDEO", "IMG"]);
+  const MEDIA_SAMPLE_SIDE = 32;
   const FNV_OFFSET_BASIS = 2166136261;
   const FNV_PRIME = 16777619;
   const LIVENESS_POSITION_BUCKET_PX = 2;
@@ -221,7 +222,7 @@
   }
 
   // Pixel-only media motion (canvas repaint, playing video, same-size <img> swap) is invisible to DOM channels,
-  // so fold in an 8x8 downsample. Unreadable media hashes to a constant; iframe media is a separate document.
+  // so fold in a downsample fine enough to see a small sprite move. Unreadable media hashes to a constant; iframe media is a separate document.
   // fallow-ignore-next-line complexity
   function mediaPixelChannel(element) {
     if (!MEDIA_TAGS.has(element.tagName)) return "";
@@ -231,12 +232,13 @@
       const sourceHeight = element.videoHeight || element.height || rect.height;
       if (!sourceWidth || !sourceHeight) return "x";
       const off = document.createElement("canvas");
-      off.width = 8;
-      off.height = 8;
+      off.width = MEDIA_SAMPLE_SIDE;
+      off.height = MEDIA_SAMPLE_SIDE;
       const ctx2d = off.getContext("2d");
       if (!ctx2d) return "x";
-      ctx2d.drawImage(element, 0, 0, 8, 8);
-      const data = ctx2d.getImageData(0, 0, 8, 8).data;
+      ctx2d.imageSmoothingQuality = "high";
+      ctx2d.drawImage(element, 0, 0, MEDIA_SAMPLE_SIDE, MEDIA_SAMPLE_SIDE);
+      const data = ctx2d.getImageData(0, 0, MEDIA_SAMPLE_SIDE, MEDIA_SAMPLE_SIDE).data;
       let hash = 0;
       for (let i = 0; i < data.length; i++) hash = (hash * 31 + data[i]) >>> 0;
       return String(hash);
