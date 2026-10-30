@@ -40,7 +40,10 @@ function isJsonScalar(text: string): boolean {
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 export function readJsonFlagText(value: string, partialIo: Partial<JsonFlagIO> = {}): string {
-  const io = { ...defaultIO, ...partialIo };
+  const io: JsonFlagIO = {
+    readFile: partialIo.readFile ?? defaultIO.readFile,
+    readStdin: partialIo.readStdin ?? defaultIO.readStdin,
+  };
   const trimmed = value.trim();
   if (trimmed.startsWith("{") || trimmed.startsWith("[") || isJsonScalar(trimmed)) return value;
   const source = trimmed === "-" ? "stdin" : value;
@@ -54,6 +57,9 @@ export function readJsonFlagText(value: string, partialIo: Partial<JsonFlagIO> =
 export const inlineJsonHint = (flag: string) =>
   `PowerShell strips the quotes from inline JSON; pass a file (${flag} payload.json) or pipe it (${flag} -)`;
 
+export const unreadableJsonHint = (flag: string, value: string) =>
+  value.includes(":") && !/^\s*[A-Za-z]:[\\/]/.test(value) ? ` (${inlineJsonHint(flag)})` : "";
+
 /** The parsed value of a JSON flag; an Error names the flag and, for inline JSON, the Windows fix. */
 export function readJsonFlag(flag: string, value: string, io?: Partial<JsonFlagIO>): unknown {
   let text: string;
@@ -61,7 +67,7 @@ export function readJsonFlag(flag: string, value: string, io?: Partial<JsonFlagI
     text = readJsonFlagText(value, io);
   } catch (error: unknown) {
     if (!(error instanceof JsonFlagReadError)) throw error;
-    throw new Error(`Could not read ${flag}: ${error.message}`);
+    throw new Error(`Could not read ${flag}: ${error.message}${unreadableJsonHint(flag, value)}`);
   }
   try {
     return JSON.parse(text);
