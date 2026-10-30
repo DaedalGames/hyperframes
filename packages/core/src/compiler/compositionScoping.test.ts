@@ -1043,25 +1043,16 @@ window.__afterTimeline = window.__timelines.scene;
     );
   });
 
-  it("treats an authored root id compounded with its own composition id as the authored root", () => {
+  it("scopes an authored root id compounded with its own composition id for both host shapes", () => {
     const scope = '[data-composition-id="scene__hf1"]';
-    const bare = scopeCssToComposition("#root { color: red; }", "scene", scope, "root");
-    for (const selector of [
-      '#root[data-composition-id="scene"]',
-      '[data-composition-id="scene"]#root',
-    ]) {
-      expect(scopeCssToComposition(`${selector} { color: red; }`, "scene", scope, "root")).toBe(
-        bare,
-      );
-    }
-    expect(
-      scopeCssToComposition(
-        '#root[data-composition-id="scene"] .title { x: 1; }',
-        "scene",
-        scope,
-        "root",
-      ),
-    ).toBe(scopeCssToComposition("#root .title { x: 1; }", "scene", scope, "root"));
+    const scoped = scopeCssToComposition(
+      '#root[data-composition-id="scene"] .title { x: 1; }',
+      "scene",
+      scope,
+      "root",
+    );
+    expect(scoped).toContain(`${scope} [data-hf-authored-id="root"] .title`);
+    expect(scoped).toContain(`[data-hf-authored-id="root"]${scope} .title`);
   });
 
   it("still uses descendant selector for non-root selectors with authoredRootId", () => {

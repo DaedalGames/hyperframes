@@ -69,11 +69,31 @@ function scopeSelector(
   compoundAuthoredRoot?: boolean,
   scopeRootSelectors?: boolean,
 ): string {
-  const selectorWithoutAuthoredRootId = dropRootCompositionIdAttr(
-    normalizeAuthoredRootIdSelector(selector, authoredRootId),
-    authoredRootId,
-    compositionId,
-  );
+  const authored = normalizeAuthoredRootIdSelector(selector, authoredRootId);
+  const wrapperAlone = dropRootCompositionIdAttr(authored, authoredRootId, compositionId);
+  const scopeOnce = (text: string) =>
+    scopeSelectorOnce(
+      text,
+      scope,
+      compositionId,
+      authoredRootId,
+      compoundAuthoredRoot,
+      scopeRootSelectors,
+    );
+  if (wrapperAlone === authored) return scopeOnce(selector);
+  // A named host carries the id, the preserved inner root the authored id; an anonymous host's wrapper carries both.
+  return `:is(${scopeOnce(authored).trim()}, ${scopeOnce(wrapperAlone).trim()})`;
+}
+
+function scopeSelectorOnce(
+  selector: string,
+  scope: string,
+  compositionId: string,
+  authoredRootId?: string | null,
+  compoundAuthoredRoot?: boolean,
+  scopeRootSelectors?: boolean,
+): string {
+  const selectorWithoutAuthoredRootId = normalizeAuthoredRootIdSelector(selector, authoredRootId);
   const selectorWithoutRootTiming = normalizeCompositionRootSelector(
     selectorWithoutAuthoredRootId,
     scope,
