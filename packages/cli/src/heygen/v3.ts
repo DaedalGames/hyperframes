@@ -97,7 +97,7 @@ function refusal(status: number, body: unknown, estimate?: number): Refused {
   const url = typeof err.url === "string" ? err.url : undefined;
   const given = Number(err.needed_credits) || undefined;
   const needed = given ?? (estimate || undefined);
-  const needs = given ? String(given) : needed ? `about ${needed}` : "more";
+  const needs = given ? `${given} in total` : needed ? `about ${needed} in total` : "more";
   const balance = err.balance === undefined ? "" : `, balance ${String(err.balance)}`;
   // The fix is the one line the agent relays as printed; the problem says how to wait for the person.
   if (/hf_subscription_required/i.test(code))

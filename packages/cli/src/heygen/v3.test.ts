@@ -79,7 +79,7 @@ describe("runJob", () => {
   it("names what an out-of-credits step needs, from the call's own price when HeyGen does not say", async () => {
     vi.stubGlobal("fetch", async () => reply(402, { error: { code: "hf_usage_exhausted" } }));
     await expect(runJob("/v3/x", {}, "k", (id) => id, { credits: 782 })).rejects.toMatchObject({
-      message: expect.stringContaining("this step needs about 782"),
+      message: expect.stringContaining("this step needs about 782 in total"),
     });
     await expect(runJob("/v3/x", {}, "k", (id) => id, { credits: 782 })).rejects.toMatchObject({
       message: expect.stringContaining("billing top-up --needed 782"),
@@ -89,7 +89,7 @@ describe("runJob", () => {
       reply(402, { error: { code: "hf_usage_exhausted", needed_credits: 180, balance: 30 } }),
     );
     await expect(runJob("/v3/x", {}, "k", (id) => id, { credits: 782 })).rejects.toMatchObject({
-      message: expect.stringContaining("this step needs 180, balance 30"),
+      message: expect.stringContaining("this step needs 180 in total, balance 30"),
     });
     vi.stubGlobal("fetch", async () => reply(402, { error: { code: "hf_usage_exhausted" } }));
     await expect(runJob("/v3/x", {}, "k", (id) => id)).rejects.toMatchObject({
