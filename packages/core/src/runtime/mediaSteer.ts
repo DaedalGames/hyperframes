@@ -32,7 +32,8 @@ export function steerMedia(
 ): { rate: number; seek: boolean } {
   const lag = Math.abs(offset);
   if (settled && lag <= MEDIA_SYNC_TOLERANCE_SECONDS) catchingUp.delete(el);
-  if (audioOnly && settled && lag > AUDIO_STEER_LIMIT_SECONDS && !catchingUp.has(el)) {
+  const seekable = !catchingUp.has(el) || lag > MEDIA_HARD_SYNC_SECONDS;
+  if (audioOnly && settled && lag > AUDIO_STEER_LIMIT_SECONDS && seekable) {
     steering.delete(el);
     catchingUp.add(el);
     return { rate: baseRate, seek: true };

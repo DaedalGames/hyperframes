@@ -69,7 +69,8 @@ function playAudioClock(seconds: number) {
   clock.play();
   for (ms = TICK_MS; ms < seconds * 1000; ms += TICK_MS) {
     audio.advance(TICK_MS);
-    if (!audio.el.paused) clock.attachAudioSource({ el: audio.el, compositionStart: 0, mediaStart: 0 });
+    if (!audio.el.paused)
+      clock.attachAudioSource({ el: audio.el, compositionStart: 0, mediaStart: 0 });
     syncRuntimeMedia({
       clips: [clip],
       timeSeconds: clock.now(),
