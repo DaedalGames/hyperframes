@@ -845,8 +845,7 @@ export const coreRules: Array<(ctx: LintContext) => HyperframeLintFinding[]> = [
     for (const script of scripts) {
       const tag = `<script ${script.attrs}>`;
       const type = readDecodedAttr(tag, "type")?.trim().toLowerCase() ?? "";
-      if (readDecodedAttr(tag, "src") !== null || SCRIPT_SYNTAX_EXEMPT_TYPES.has(type))
-        continue;
+      if (readDecodedAttr(tag, "src") !== null || SCRIPT_SYNTAX_EXEMPT_TYPES.has(type)) continue;
       const syntaxError = getInlineScriptSyntaxError(script.content);
       if (!syntaxError) continue;
       findings.push({
