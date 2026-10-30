@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { findFFmpeg, findFFprobe, getFFmpegInstallHint } from "../browser/ffmpeg.js";
 
 const MAX_BUFFER = 1 << 30;
-/** ffmpeg's own flags on every run. Inline before a spread, the ffprobe `--` contract test reads them as a probe wrapper. */
+/** ffmpeg's flags on every run. Inline before a spread, the ffprobe `--` contract test reads them as a probe wrapper. */
 const FFMPEG_QUIET = ["-nostdin", "-v", "error"];
 
 /** An error whose message says what to run instead; commands print `fix` as its own line. */

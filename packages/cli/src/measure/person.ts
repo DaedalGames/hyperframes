@@ -10,13 +10,9 @@ import { faceBoxes } from "./face.js";
 import { pearson, probeVideo, round, runFfmpeg, type Roi, type VideoInfo } from "./media.js";
 import { avSync, type SyncResult } from "./sync.js";
 
-/**
- * A shot's framing is clearly wrong when, over the shot, the face centre sits more than FRAMING_SHIFT face heights
- * from the original's or its height is outside FRAMING_SCALE of it (medians). Calibrated on the reverse bench (10-23,
- * faces at 4 a second, shots of a second or more): goat round 3's 8.0–10.0 s shot is 0.23 off and ×0.82, dan round 2
- * at most 0.16 and ×0.93–1.10, cindy round 3 0.02; dan round 3 misses its 35 s close-up at ×0.77 (and is 0.21–0.23
- * off at 3.6 s and 30 s, which face boxes cannot tell from goat). Shorter shots have too few faces to judge.
- */
+/** A shot's framing is clearly wrong when, by the shot's medians, the face centre sits over FRAMING_SHIFT face heights
+ * from the original's or its height is outside FRAMING_SCALE of it. Faces at FACE_RATE a second; shorter shots than
+ * FRAMING_MIN_S have too few faces to judge. */
 const FRAMING_SHIFT = 0.3;
 const FRAMING_SCALE: [number, number] = [0.8, 1.25];
 const FRAMING_MIN_S = 1;
@@ -26,14 +22,9 @@ const FACE_RATE = 4;
 const SYNC_MS: [number, number] = [-125, 45];
 const SYNC_MIN_S = 2;
 const SYNC_MIN_SPEECH = 0.3;
-/**
- * A generated clip carries a drawn element's text when it shows the original's letters inside the element's box:
- * of the original's sharp ink (contrast over TEXT_CONTRAST) where it differs from the clean still the clip was made
- * from and where yours draws over the clip (each by DRAWN_DIFF: the letters, not the place), the share the clip has
- * within two pixels as sharp ink of the same colour (TEXT_COLOUR). The clip shares the person and the place with the
- * original, so only carried letters match there. Calibrated on ig03 round 2 (10-23): t12's "Transparency", "a deep
- * understanding", "of this market" 0.30, 0.45, 0.56; every clean box 0.24 or less.
- */
+/** A clip carries a drawn element's text when, of the original's sharp ink (over TEXT_CONTRAST) that differs by
+ * DRAWN_DIFF from the clean still and where yours draws over the clip, the share the clip matches within two pixels in
+ * colour (TEXT_COLOUR) reaches CARRIED_TEXT; the clip shares person and place, so only carried letters match. */
 const CARRIED_TEXT = 0.35;
 const TEXT_CONTRAST = 140;
 const DRAWN_DIFF = 60;
