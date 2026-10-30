@@ -25,10 +25,14 @@ function run(args, env, cwd) {
       cwd, env, stdio: ["ignore", "pipe", "pipe"], timeout: 60_000,
     });
     let out = "";
-    child.stdout.on("data", (c) => (out += c));
+    let firstMs = -1;
+    child.stdout.on("data", (c) => {
+      if (firstMs < 0) firstMs = Math.round(performance.now() - start);
+      out += c;
+    });
     child.stderr.on("data", (c) => (out += c));
     child.on("close", (code, signal) =>
-      done({ cmd: args.join(" "), ms: Math.round(performance.now() - start), code, signal, usage: out.includes("USAGE") }));
+      done({ cmd: args.join(" "), ms: Math.round(performance.now() - start), firstMs, code, signal, usage: out.includes("USAGE") }));
   });
 }
 
@@ -37,21 +41,31 @@ function burn(n) {
   return Array.from({ length: n }, () => new Worker(src, { eval: true }));
 }
 
+let lagMax = 0;
+let lagLast = performance.now();
+setInterval(() => {
+  const now = performance.now();
+  lagMax = Math.max(lagMax, now - lagLast - 50);
+  lagLast = now;
+}, 50).unref();
+const VARIANTS = (process.env.VARIANTS ?? "test,system,nocache").split(",");
+const LOADS = (process.env.LOADS ?? "quiet,loaded").split(",");
 const results = [];
-for (const load of ["quiet", "loaded"]) {
+for (const load of LOADS) {
   const burners = load === "loaded" ? burn(cpus().length) : [];
   for (let round = 0; round < ROUNDS; round++) {
-    for (const variant of ["test", "system", "nocache"]) {
+    for (const variant of VARIANTS) {
+      lagMax = 0;
       const home = mkdtempSync(join(tmpdir(), "hf-probe-"));
       const env = envFor(variant, home);
       const t0 = performance.now();
       const batch = await Promise.all(FIRST.map((a) => run(a, env, home)));
       const second = await run(["render"], env, home);
-      const row = { load, round, variant, batchMs: Math.round(performance.now() - t0),
+      const row = { load, round, variant, lagMs: Math.round(lagMax), batchMs: Math.round(performance.now() - t0),
         maxMs: Math.max(...batch.map((r) => r.ms)), batch, warmRenderMs: second.ms };
       results.push(row);
-      console.log(`${load} r${round} ${variant} max=${row.maxMs} warm=${second.ms} ` +
-        batch.map((r) => `${r.cmd}:${r.ms}${r.code === 0 && r.usage ? "" : "!" + r.code + r.signal}`).join(" "));
+      console.log(`${load} r${round} ${variant} max=${row.maxMs} lag=${row.lagMs} warm=${second.ms} ` +
+        batch.map((r) => `${r.cmd}:${r.firstMs}/${r.ms}${r.code === 0 && r.usage ? "" : "!" + r.code + r.signal}`).join(" "));
       rmSync(home, { recursive: true, force: true });
     }
   }

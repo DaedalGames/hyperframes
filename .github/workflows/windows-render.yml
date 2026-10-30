@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [1, 2]
+        runner: [1, 2, 3, 4]
     steps:
       - name: Disable Windows Defender real-time monitoring
         shell: pwsh
@@ -41,7 +41,7 @@ jobs:
         run: |
           bun --version
           Get-CimInstance Win32_Processor | Select-Object NumberOfLogicalProcessors
-          $env:ROUNDS = "20"
+          $env:ROUNDS = "60"; $env:VARIANTS = "test,nocache"; $env:LOADS = "loaded"
           node scripts/agentmode-probe.mjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
