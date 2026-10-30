@@ -19,23 +19,23 @@ export interface TemplatePack {
 export const TEMPLATES: Record<string, TemplatePack> = {
   "fern-brand-explained": {
     id: "M9004",
-    sha256: "11baf11bf25cf2cf320d34aaeac9003d12e0f23061e57809e8b5409fa6c3b38d",
-    bytes: 20172129,
+    sha256: "bccf797d02ab310207c6900242564fcec6d77fbd3775b507d844d1c45def2e92",
+    bytes: 20171669,
   },
   "kurzgesagt-science-explainer": {
     id: "M9003",
-    sha256: "44c8432816ca8f529565a3d0a55ecb218d7f62403f6946a9495b4920a6c475e6",
-    bytes: 25564278,
+    sha256: "5ee494f259a828b1486223c91db9e29c9b9c945d431974256f3cc8b67b82a228",
+    bytes: 25563100,
   },
   "vox-america-explained": {
     id: "M9001",
-    sha256: "984d5bd27de053f5955daa7d87d5fe2ab48df7e9170bcd777115836ba7700523",
-    bytes: 36705888,
+    sha256: "f0a65863070ead51bc51bbbff1c4511fb254bab1943eb493ecc8b3ba74f12851",
+    bytes: 36704890,
   },
   "xiaolin-yikouqi": {
     id: "M9002",
-    sha256: "3e131225e253f8c213479423fa5883c8fae3fbeb805ceff1210030de1b72fd65",
-    bytes: 152167805,
+    sha256: "fef73ec778550fe844237365d19ae12d5387d4e692b9d72fca41beb4370a6c01",
+    bytes: 152166009,
   },
 };
 
@@ -129,7 +129,7 @@ export default defineCommand({
     action: { type: "positional", description: "pull", required: true },
     slug: {
       type: "positional",
-      description: "The template, from the skill's README",
+      description: "The template's slug, from the creator-remix skill",
       required: true,
     },
     dir: {
