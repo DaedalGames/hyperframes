@@ -55,6 +55,27 @@ export interface ScreenshotCaptureResult {
   failures: ScreenshotFailure[];
 }
 
+const SHOT_ATTEMPTS = 3;
+const SHOT_RETRY_PAUSE_MS = 500;
+
+async function screenshotRetryingRefusal(
+  page: Pick<Page, "screenshot">,
+  options: Parameters<Page["screenshot"]>[0],
+): Promise<Uint8Array> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await page.screenshot(options);
+    } catch (err) {
+      if (
+        attempt >= SHOT_ATTEMPTS ||
+        !/unable to capture screenshot/i.test(normalizeErrorMessage(err))
+      )
+        throw err;
+      await new Promise((r) => setTimeout(r, SHOT_RETRY_PAUSE_MS * attempt));
+    }
+  }
+}
+
 /** Notes one shot that failed. A timeout, a closed page or a refused output folder still ends the whole capture. */
 function shotFailure(err: unknown, file: string, scrollY: number | null): ScreenshotFailure {
   const message = normalizeErrorMessage(err);
@@ -124,7 +145,7 @@ export async function captureFullPagePlate(
     if (docHeight > MAX_PLATE_HEIGHT_PX) return { kind: "omitted", reason: "height-limit" };
     if ((budget.remainingMs?.() ?? 1) <= 0) return { kind: "omitted", reason: "budget-exhausted" };
 
-    const buffer = await page.screenshot({ type: "png", fullPage: true });
+    const buffer = await screenshotRetryingRefusal(page, { type: "png", fullPage: true });
     // Confirm what Chrome produced instead of trusting the measurement: the capture itself can
     // trigger another round of lazy loading. A clipped plate is undetectable downstream — the
     // skill only teaches the tile fallback when the file is *absent* — so emit nothing rather
@@ -324,7 +345,7 @@ export async function captureScrollScreenshots(
       if (budgetSpent()) break;
       let buffer: Uint8Array;
       try {
-        buffer = await page.screenshot({ type: "png" });
+        buffer = await screenshotRetryingRefusal(page, { type: "png" });
       } catch (err) {
         result.failures.push(shotFailure(err, `screenshots/${filename}`, finalPositions[i]!));
         continue;

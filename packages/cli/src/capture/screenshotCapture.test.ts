@@ -299,10 +299,27 @@ describe("captureScrollScreenshots — a shot Chrome will not take", () => {
     }
   }
 
-  it("names the tile it could not take, and still takes the tiles after it and the plate", async () => {
+  it("takes a tile Chrome refused once, after a pause, so the capture has every shot", async () => {
     let calls = 0;
     const result = await captureWith(async () => {
       if (++calls === 2) throw refusal;
+      return pngBuffer(1080);
+    });
+    expect(result.interruption).toBeNull();
+    expect(result.failures).toEqual([]);
+    expect(result.files).toEqual([
+      "screenshots/scroll-000.png",
+      "screenshots/scroll-055.png",
+      "screenshots/scroll-100.png",
+      "screenshots/full-page.png",
+    ]);
+  });
+
+  it("names the tile it could not take after its tries, and still takes the tiles after it and the plate", async () => {
+    let calls = 0;
+    const result = await captureWith(async () => {
+      calls++;
+      if (calls >= 2 && calls <= 4) throw refusal;
       return pngBuffer(1080);
     });
     expect(result.interruption).toBeNull();

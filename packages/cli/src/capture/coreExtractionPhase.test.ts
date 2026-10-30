@@ -75,7 +75,7 @@ afterEach(() => {
 
 const REFUSED = "Protocol error (Page.captureScreenshot): Unable to capture screenshot";
 
-/** `refuseShot`: the screenshot call (1-based) Chrome refuses. */
+/** `refuseShot`: the screenshot call (1-based) Chrome refuses, and the two tries after it. */
 async function extract(expireScreenshot = false, refuseShot?: number) {
   vi.useFakeTimers();
   const outputDir = mkdtempSync(join(tmpdir(), "hf-core-budget-"));
@@ -83,7 +83,9 @@ async function extract(expireScreenshot = false, refuseShot?: number) {
   const state = createPartialCaptureState({ url: "https://example.com", outputDir });
   let shots = 0;
   const screenshot = vi.fn(async () => {
-    if (++shots === refuseShot) throw new Error(REFUSED);
+    shots++;
+    if (refuseShot !== undefined && shots >= refuseShot && shots < refuseShot + 3)
+      throw new Error(REFUSED);
     if (expireScreenshot) control.remaining = 0;
     return new Uint8Array(24);
   });
