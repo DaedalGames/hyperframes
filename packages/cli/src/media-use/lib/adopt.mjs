@@ -13,7 +13,8 @@ function audioKind(filePath) {
   const words = filePath.toLowerCase().split(/[^a-z0-9]+/);
   const has = (test) => words.some(test);
   if (has((w) => w === "bgm" || w === "music" || w === "soundtrack")) return "bgm";
-  if (has((w) => w === "sfx" || w === "fx" || w === "sound" || w === "sounds")) return "sfx";
+  if (has((w) => w === "sfx" || w === "fx" || (w.startsWith("sound") && w !== "soundtrack")))
+    return "sfx";
   if (has((w) => w.startsWith("voice") || w.startsWith("narrat"))) return "voice";
   return "bgm";
 }

@@ -173,36 +173,43 @@ export function severalAddJson(
   return installJson(results, errors);
 }
 
-async function installEach(
-  names: readonly string[],
-  context: {
-    projectDir: string;
-    force: boolean | undefined;
-    vars: string | undefined;
-    json: boolean;
-  },
-) {
+interface InstallContext {
+  projectDir: string;
+  force: boolean | undefined;
+  vars: string | undefined;
+  json: boolean;
+}
+
+type InstallOutcome = { result: RunAddResult } | { name: string; error: string };
+
+async function installOne(name: string, context: InstallContext): Promise<InstallOutcome> {
+  try {
+    const result = await runAdd({
+      name,
+      projectDir: context.projectDir,
+      skipClipboard: true,
+      force: context.force,
+      vars: context.vars,
+    });
+    if (!context.json) {
+      for (const warning of result.warnings) console.log(`  ${c.warn("Warning:")} ${warning}`);
+      console.log(`  ${c.success("✓")} ${result.name}`);
+    }
+    return { result };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    if (!context.json) console.log(`  ${c.error("✗")} ${name} (skipped: ${reason})`);
+    return { name, error: reason };
+  }
+}
+
+async function installEach(names: readonly string[], context: InstallContext) {
   const results: RunAddResult[] = [];
   const errors: Array<{ name: string; error: string }> = [];
   for (const name of names) {
-    try {
-      const result = await runAdd({
-        name,
-        projectDir: context.projectDir,
-        skipClipboard: true,
-        force: context.force,
-        vars: context.vars,
-      });
-      results.push(result);
-      for (const warning of result.warnings) {
-        if (!context.json) console.log(`  ${c.warn("Warning:")} ${warning}`);
-      }
-      if (!context.json) console.log(`  ${c.success("✓")} ${result.name}`);
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      errors.push({ name, error: reason });
-      if (!context.json) console.log(`  ${c.error("✗")} ${name} (skipped: ${reason})`);
-    }
+    const outcome = await installOne(name, context);
+    if ("result" in outcome) results.push(outcome.result);
+    else errors.push(outcome);
   }
   return { results, errors };
 }

@@ -81,6 +81,7 @@ function runTests() {
     drop("narration.mp3");
     drop("soundtrack/main.mp3");
     drop("track.mp3");
+    drop("soundfx/pop.mp3");
     const types = Object.fromEntries(
       adoptExistingAssets(tmp).map((record) => [record.path, record.type]),
     );
@@ -90,6 +91,7 @@ function runTests() {
       "assets/narration.mp3": "voice",
       "assets/soundtrack/main.mp3": "bgm",
       "assets/track.mp3": "bgm",
+      "assets/soundfx/pop.mp3": "sfx",
     });
     cleanup();
   });
