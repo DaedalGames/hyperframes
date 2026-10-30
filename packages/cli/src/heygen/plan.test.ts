@@ -46,7 +46,7 @@ describe("pageUrl", () => {
     vi.stubEnv("HYPERFRAMES_ENV", "dev");
     expect(pageUrl("plans")).toBe("https://dev.hyperframes.dev/pricing?from=cli");
     expect(pageUrl("credits", { needed: 180, tool: "reverse" })).toBe(
-      "https://dev.hyperframes.dev/account/plan?from=cli&needed_credits=180&tool=reverse",
+      "https://dev.hyperframes.dev/plan?from=cli&needed_credits=180&tool=reverse",
     );
   });
 });
