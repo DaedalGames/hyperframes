@@ -290,7 +290,7 @@ describe("inlineSubCompositions – #ID selector scoping divergence", () => {
       const sceneHtml = `<template id="scene-template">
   <div id="root" data-composition-id="scene" data-width="640" data-height="360" data-duration="3">
     <h1 class="title">Hi</h1>
-    <style>#root[data-composition-id="scene"] { background: red; } #root[data-composition-id="scene"] .title { color: blue; }</style>
+    <style>#root[data-composition-id="scene"] { background: red; } #root[data-composition-id="scene"] .title { color: blue; } #root[data-composition-id="scene"]::before { content: "x"; }</style>
   </div>
 </template>`;
       const flattenInnerRoot = (innerRoot: Element): Element => {
@@ -312,9 +312,12 @@ describe("inlineSubCompositions – #ID selector scoping divergence", () => {
       const selectors = result.styles.flatMap((style) =>
         [...style.css.matchAll(/([^{}]+)\{/g)].map((match) => match[1]!.trim()),
       );
-      const [box, title] = selectors.map((selector) => page.querySelectorAll(selector).length);
+      const [box, title, before] = selectors.map(
+        (selector) => page.querySelectorAll(selector.replaceAll("::before", "")).length,
+      );
       expect(box).toBe(1);
       expect(title).toBe(1);
+      expect(before).toBe(1);
     },
   );
 

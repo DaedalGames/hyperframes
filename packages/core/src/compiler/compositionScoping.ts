@@ -82,7 +82,7 @@ function scopeSelector(
     );
   if (wrapperAlone === authored) return scopeOnce(selector);
   // A named host carries the id, the preserved inner root the authored id; an anonymous host's wrapper carries both.
-  return `:is(${scopeOnce(authored).trim()}, ${scopeOnce(wrapperAlone).trim()})`;
+  return `${scopeOnce(authored).trim()}, ${scopeOnce(wrapperAlone).trim()}`;
 }
 
 function scopeSelectorOnce(
