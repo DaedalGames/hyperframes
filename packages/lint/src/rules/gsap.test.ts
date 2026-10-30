@@ -3753,6 +3753,24 @@ describe("SVG draw-on rules", () => {
       ).toBe(false);
     });
 
+    it("accepts a descendant selector inside the query", async () => {
+      expect(
+        await flagged(
+          scene(
+            'gsap.set(document.querySelector("[data-composition-id=scene] .ov"), { opacity: 0 });',
+          ),
+        ),
+      ).toBe(false);
+    });
+
+    it("accepts a querySelector variable written without semicolons", async () => {
+      expect(
+        await flagged(
+          scene('const ov = root.querySelector(".ov")\n    gsap.set(ov, { opacity: 0 })'),
+        ),
+      ).toBe(false);
+    });
+
     it("still flags an overlay nothing hides at zero", async () => {
       expect(await flagged(scene(""))).toBe(true);
     });
