@@ -29,7 +29,6 @@ export function closestMatch(input: string, candidates: Iterable<string>): strin
   return best;
 }
 
-/** Up to `limit` candidates sharing a dash-separated word with `input`, most shared words first, then nearest spelling. */
 export function closestNames(input: string, candidates: Iterable<string>, limit = 5): string[] {
   const words = new Set(input.split("-"));
   return [...candidates]
