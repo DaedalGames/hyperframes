@@ -156,13 +156,45 @@ export function collectExternalStyles(
 }
 
 const MAX_EXTERNAL_SCRIPT_BYTES = 1_000_000;
+const MAX_IMPORTED_MODULES = 20;
+const RELATIVE_IMPORT_RE =
+  /\b(?:import|export)\b[^'"`;]*?(?:\bfrom\s*)?["'](\.{1,2}\/[^"'?#]+)["']|\bimport\s*\(\s*["'](\.{1,2}\/[^"'?#]+)["']\s*\)/g;
+
+type ExternalScript = NonNullable<HyperframeLinterOptions["externalScripts"]>[number];
+
+function importedModules(
+  projectDir: string,
+  fromFile: string,
+  text: string,
+  seen: Set<string>,
+): ExternalScript[] {
+  const modules: ExternalScript[] = [];
+  for (const match of text.matchAll(RELATIVE_IMPORT_RE)) {
+    const specifier = match[1] ?? match[2] ?? "";
+    const target = resolveExistingLocalAsset(projectDir, join(dirname(fromFile), specifier));
+    if (!target || seen.has(target.rootRelativePath) || seen.size >= MAX_IMPORTED_MODULES) continue;
+    seen.add(target.rootRelativePath);
+    const read = readProjectFile(target.resolved);
+    if (read.kind !== "file" || read.text.length > MAX_EXTERNAL_SCRIPT_BYTES) continue;
+    modules.push({
+      src: specifier,
+      attrs: 'type="module"',
+      content: read.text,
+      file: join(projectDir, target.rootRelativePath),
+      rootRelativePath: target.rootRelativePath,
+    });
+    modules.push(...importedModules(projectDir, target.rootRelativePath, read.text, seen));
+  }
+  return modules;
+}
 
 function collectExternalScripts(
   projectDir: string,
   html: string,
   compSrcPath?: string,
-): NonNullable<HyperframeLinterOptions["externalScripts"]> {
-  const scripts: NonNullable<HyperframeLinterOptions["externalScripts"]> = [];
+): ExternalScript[] {
+  const scripts: ExternalScript[] = [];
+  const seen = new Set<string>();
   const { document } = parseHTML(html);
   for (const element of querySelectorAllIncludingTemplates(document, "script[src]")) {
     const src = element.getAttribute("src") ?? "";
@@ -187,6 +219,9 @@ function collectExternalScripts(
       file: join(projectDir, script.rootRelativePath),
       rootRelativePath: script.rootRelativePath,
     });
+    seen.add(script.rootRelativePath);
+    if (element.getAttribute("type")?.trim().toLowerCase() === "module")
+      scripts.push(...importedModules(projectDir, script.rootRelativePath, read.text, seen));
   }
   return scripts;
 }

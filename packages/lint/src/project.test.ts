@@ -591,6 +591,31 @@ describe("local script files", () => {
     expect(await registryFindings(projectWithScript("console.log('no timeline')"))).toHaveLength(1);
   });
 
+  it("counts a timeline registered in a file the module script imports", async () => {
+    const project = projectWithScript(
+      'import { build } from "./lib/timeline.js";\nbuild();',
+      'type="module"',
+    );
+    mkdirSync(join(project, "lib"), { recursive: true });
+    writeFileSync(
+      join(project, "lib/timeline.js"),
+      'import "../more.js";\nexport function build() { window.__timelines = window.__timelines || {};\nwindow.__timelines["main"] = gsap.timeline({ paused: true }); }',
+    );
+    writeFileSync(join(project, "more.js"), 'import "./lib/timeline.js";');
+
+    expect(await registryFindings(project)).toEqual([]);
+  });
+
+  it("does not follow imports from a classic script", async () => {
+    const project = projectWithScript('import { build } from "./timeline.js";');
+    writeFileSync(
+      join(project, "timeline.js"),
+      'window.__timelines = {}; window.__timelines["main"] = 1;',
+    );
+
+    expect(await registryFindings(project)).toHaveLength(1);
+  });
+
   it("reads a module script file as a module", async () => {
     const project = projectWithScript(
       'import { gsap } from "gsap";\nwindow.__timelines = window.__timelines || {};\nwindow.__timelines["main"] = gsap.timeline({ paused: true });',
