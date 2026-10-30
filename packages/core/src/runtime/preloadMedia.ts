@@ -75,7 +75,6 @@ export function stopMediaDownload(media: HTMLMediaElement): void {
   media.load();
 }
 
-// The whole file in memory: its download is over, so releasing it would free no connection, only drop the data.
 function wholeFileBuffered(media: HTMLMediaElement): boolean {
   const { buffered, duration } = media;
   return (
