@@ -83,7 +83,7 @@ function level(f: Uint8Array, w: number, [x0, y0, x1, y1]: number[]) {
 const changes = (g: Uint8Array[], w: number, rect: number[]) =>
   g.map((f, i) => (i ? diff(f, g[i - 1]!, w, rect) : 0));
 
-/** Runs of frames changing by over twice the series' 25th percentile and over 2 grey levels; one quiet frame bridged. */
+/** Runs of frames changing by over twice the series' 25th percentile and 2 grey levels; one quiet frame bridged. */
 function bursts(d: number[]): [number, number][] {
   const q = d.slice(1).sort((a, b) => a - b);
   const act = Math.max(2, 2 * (q[Math.floor(q.length / 4)] ?? 0));

@@ -338,8 +338,8 @@ function ssimSeries(ref: Clip, yours: Clip, logPath: string): Series {
   }
 }
 
-/** Stretches where a cell the original fills is flat in yours, by each cell's luma spread: SSIM scores two near-blank
- * patches alike. `judged(k)` lists the cells of the original's frame k this applies to (a person's gesture is theirs). */
+/** Stretches where a cell the original fills is flat in yours, by each cell's luma spread (SSIM scores near-blank
+ * patches alike). `judged(k)` lists the cells of the original's frame k it applies to; a person's gesture is theirs. */
 function missingContent(
   ref: Clip,
   yours: Clip,

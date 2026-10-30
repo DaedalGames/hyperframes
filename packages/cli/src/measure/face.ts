@@ -190,7 +190,7 @@ export function againstStart(clipDuration: number, originalDuration: number, fro
   return Math.abs(clipDuration - originalDuration) <= 0.5 ? from : 0;
 }
 
-/** The GSAP transform that puts a cover-fit clip's face on the original's: `scale` about the clip's centre, then `x`, `y`
+/** The GSAP transform putting a cover-fit clip's face on the original's: `scale` about the clip's centre, then `x`, `y`
  * in canvas pixels. Moments pair by time within PAIR_S and each side's faces are medianed, so one stray detection can't
  * move it. `residual` is the median distance left between the faces, in the original's face heights. */
 export function faceFit(
