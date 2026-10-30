@@ -889,9 +889,24 @@ describe("painting", () => {
     }).h;
     initCaptureMotionBlur(eventful);
     win.__hfMotionBlur?.probe();
-    expect(eventful.seek.mock.calls.length).toBeGreaterThan(10);
-    expect(eventful.seek.mock.calls.every(([, suppress]) => suppress === false)).toBe(true);
+    const loud = eventful.seek.mock.calls.filter(([, suppress]) => suppress === false);
+    expect(loud.length).toBeGreaterThan(10);
+    // The scan ends with callbacks on, so their state is the frame's when it is done.
+    expect(eventful.seek.mock.calls.at(-1)?.[1]).toBe(false);
   });
+
+  /** A slider that only a timeline callback moves, as a render(t) function would. */
+  function callbackHost() {
+    const { root, el, h } = movingHost({
+      "data-motion-blur": "on",
+      "data-motion-blur-events": "on",
+    });
+    const slide = h.seek;
+    const seek = vi.fn((t: number, suppress: boolean) => {
+      if (!suppress) slide(t, suppress);
+    });
+    return { root, el, h: { ...h, seek } };
+  }
 
   it("seeks pose reads with events suppressed unless the root allows them", () => {
     installHtmlInCanvas();
@@ -901,15 +916,58 @@ describe("painting", () => {
     expect(quiet.seek.mock.calls.every(([, suppress]) => suppress === true)).toBe(true);
 
     resetCaptureMotionBlurForTests();
-    const eventful = movingHost({
-      "data-motion-blur": "on",
-      "data-motion-blur-events": "on",
-    }).h;
-    initCaptureMotionBlur(eventful);
+    const { h } = callbackHost();
+    initCaptureMotionBlur(h);
     void paintCaptureMotionBlur(0.5, PLAY);
-    const calls = eventful.seek.mock.calls;
+    const calls = h.seek.mock.calls;
     expect(calls.at(-1)?.[1]).toBe(false);
     expect(calls.some(([, suppress]) => suppress === false)).toBe(true);
+  });
+
+  // Each frame's reads step back to the frame from half a shutter ahead. A callback that keeps
+  // state (a simulation that replays from zero on a backward seek) would redo all of it per frame.
+  it("reads poses with callbacks off when callbacks move no mover, even with events on", () => {
+    installHtmlInCanvas();
+    const { h } = movingHost({ "data-motion-blur": "on", "data-motion-blur-events": "on" });
+    initCaptureMotionBlur(h);
+    win.__hfMotionBlur?.probe();
+    expect(win.__hfMotionBlur?.report().movers).toBe(1);
+    h.seek.mockClear();
+    void paintCaptureMotionBlur(0.5, PLAY);
+    expect(h.seek.mock.calls.length).toBeGreaterThan(0);
+    expect(h.seek.mock.calls.every(([, suppress]) => suppress === true)).toBe(true);
+  });
+
+  it("fires a one-off timeline call an even number of times over a scan, so a toggle ends as it began", () => {
+    installHtmlInCanvas();
+    const { h } = movingHost({ "data-motion-blur": "on", "data-motion-blur-events": "on" });
+    // A call at 0.7 s that flips state each time an eventful seek crosses it, either way.
+    let at = 0;
+    let flipped = false;
+    const slide = h.seek;
+    const seek = vi.fn((t: number, suppress: boolean) => {
+      slide(t, suppress);
+      if (!suppress && Math.min(at, t) < 0.7 && Math.max(at, t) >= 0.7) flipped = !flipped;
+      at = t;
+    });
+    initCaptureMotionBlur({ ...h, seek });
+    win.__hfMotionBlur?.probe();
+    expect(seek.mock.calls.length).toBeGreaterThan(10);
+    expect(flipped).toBe(false);
+  });
+
+  it("reads poses with callbacks on when a callback moves a mover", () => {
+    installHtmlInCanvas();
+    const { h } = callbackHost();
+    initCaptureMotionBlur(h);
+    win.__hfMotionBlur?.probe();
+    expect(win.__hfMotionBlur?.report().movers).toBe(1);
+    h.seek.mockClear();
+    void paintCaptureMotionBlur(0.5, PLAY);
+    // Wrapping resyncs at host.now() (0) on its own; the shutter's reads are the rest.
+    const reads = h.seek.mock.calls.filter(([t]) => t > 0);
+    expect(reads.length).toBeGreaterThan(0);
+    expect(reads.every(([, suppress]) => suppress === false)).toBe(true);
   });
 
   it("fires timeline callbacks during discovery only when the root allows events", () => {
@@ -1786,6 +1844,21 @@ describe("filter fallback", () => {
     expect(el.style.filter).toMatch(/url\("?#hf-mb-0"?\)/);
     expect(paintCaptureMotionBlur(0.5)).toBeNull();
     expect(el.style.filter).toBe("drop-shadow(0px 0px 4px red)");
+  });
+
+  it("reads poses with callbacks off when callbacks move no mover in the filter tier too", () => {
+    const { h } = movingHost({
+      "data-motion-blur": "on",
+      "data-motion-blur-events": "on",
+      "data-motion-blur-tier": "filter",
+    });
+    initCaptureMotionBlur(h);
+    win.__hfMotionBlur?.probe();
+    expect(win.__hfMotionBlur?.report()).toMatchObject({ tier: "filter", movers: 1 });
+    h.seek.mockClear();
+    void paintCaptureMotionBlur(0.5, PLAY);
+    expect(h.seek.mock.calls.length).toBeGreaterThan(0);
+    expect(h.seek.mock.calls.every(([, suppress]) => suppress === true)).toBe(true);
   });
 
   it("removes its filters and its SVG on teardown", () => {
