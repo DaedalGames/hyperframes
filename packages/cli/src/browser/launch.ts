@@ -17,7 +17,7 @@ import {
 } from "./gpuPolicy.js";
 import { normalizeErrorMessage, notePageCrash } from "../utils/errorMessage.js";
 import { requestCliExit } from "../utils/commandResult.js";
-import { processIsAlive } from "../utils/processTree.js";
+import { processIsAlive, terminateWindowsProcessTree } from "../utils/processTree.js";
 import { chromeDescendants, reapChromeTree } from "./chromeTree.js";
 import { watchChromeTree, type ChromeWatchdog } from "./windowsChromeWatchdog.js";
 
@@ -290,6 +290,13 @@ function closeGracefully(browser: Browser): Promise<void> {
   return (gracefulClose.get(browser) ?? (() => browser.close()))();
 }
 
+async function killBrowser(child: ChildProcess): Promise<void> {
+  if (process.platform === "win32" && child.pid !== undefined) {
+    await terminateWindowsProcessTree(child.pid).catch(() => undefined);
+  }
+  child.kill("SIGKILL");
+}
+
 async function closedWithoutKill(browser: Browser): Promise<boolean> {
   const child = browser.process();
   if (!child) throw new Error("A managed browser lost its owned process.");
@@ -309,7 +316,7 @@ async function closedWithoutKill(browser: Browser): Promise<boolean> {
       grace,
     ]);
     const clean = child.exitCode !== null || child.signalCode !== null;
-    if (!clean) child.kill("SIGKILL");
+    if (!clean) await killBrowser(child);
     clearTimeout(timer);
     const exitLimit = new Promise<never>((_, reject) => {
       timer = setTimeout(
