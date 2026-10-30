@@ -49,6 +49,7 @@ export type HyperframeLinterOptions = {
   }>;
   externalScripts?: Array<{
     src: string;
+    attrs: string;
     content: string;
     file: string;
     rootRelativePath: string;

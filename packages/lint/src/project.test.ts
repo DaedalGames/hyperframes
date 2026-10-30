@@ -572,11 +572,11 @@ describe("local script files", () => {
       .flatMap((entry) => entry.result.findings)
       .filter((finding) => finding.code === "missing_timeline_registry");
 
-  function projectWithScript(script: string): string {
+  function projectWithScript(script: string, attrs = ""): string {
     const project = makeProject(
       `<html><body>
   <div data-composition-id="main" data-width="1920" data-height="1080" data-start="0" data-duration="10"></div>
-  <script src="animation.js"></script>
+  <script ${attrs} src="animation.js"></script>
 </body></html>`,
     );
     writeFileSync(join(project, "animation.js"), script);
@@ -589,6 +589,20 @@ describe("local script files", () => {
     );
     expect(await registryFindings(registered)).toEqual([]);
     expect(await registryFindings(projectWithScript("console.log('no timeline')"))).toHaveLength(1);
+  });
+
+  it("reads a module script file as a module", async () => {
+    const project = projectWithScript(
+      'import { gsap } from "gsap";\nwindow.__timelines = window.__timelines || {};\nwindow.__timelines["main"] = gsap.timeline({ paused: true });',
+      'type="module"',
+    );
+
+    const codes = (await lintProject(project)).results
+      .flatMap((entry) => entry.result.findings)
+      .map((finding) => finding.code);
+
+    expect(codes).not.toContain("invalid_inline_script_syntax");
+    expect(codes).not.toContain("missing_timeline_registry");
   });
 });
 

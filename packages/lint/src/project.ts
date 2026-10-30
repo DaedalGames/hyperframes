@@ -177,8 +177,12 @@ function collectExternalScripts(
     if (!script) continue;
     const read = readProjectFile(script.resolved);
     if (read.kind !== "file" || read.text.length > MAX_EXTERNAL_SCRIPT_BYTES) continue;
+    const attrs = Array.from(element.attributes)
+      .map(({ name, value }) => `${name}="${value.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}"`)
+      .join(" ");
     scripts.push({
       src,
+      attrs,
       content: read.text,
       file: join(projectDir, script.rootRelativePath),
       rootRelativePath: script.rootRelativePath,

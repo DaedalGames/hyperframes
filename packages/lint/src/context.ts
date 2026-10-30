@@ -67,7 +67,7 @@ export function buildLintContext(html: string, options: HyperframeLinterOptions 
   const scripts = [
     ...structure.scripts,
     ...(options.externalScripts ?? []).map((script) => ({
-      attrs: `src="${script.src}"`,
+      attrs: script.attrs,
       content: script.content,
       raw: script.content,
       index: -1,
