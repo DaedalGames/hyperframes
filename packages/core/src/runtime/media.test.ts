@@ -2106,6 +2106,28 @@ describe("syncRuntimeMedia", () => {
         expect(el.play).not.toHaveBeenCalled();
       });
 
+      it("holds a video on its last frame before the out-point when that frame is dropped", () => {
+        const { clip, el, present } = reportingVideo();
+        el.currentTime = 9.6;
+        tick(clip, 9.6);
+        present(9.875);
+        present(9.9167); // the frame at 9.9583 is dropped; the next one would be the out-point's
+        expect(el.pause).not.toHaveBeenCalled();
+        el.currentTime = 9.975;
+        tick(clip, 9.975);
+        expect(el.pause).toHaveBeenCalledTimes(1);
+      });
+
+      it("holds a video with an uneven cadence before a long step crosses the out-point", () => {
+        const { clip, el, present } = reportingVideo();
+        el.currentTime = 9.6;
+        tick(clip, 9.6);
+        present(9.8);
+        present(9.8833);
+        present(9.925); // a step as long as the earlier one would land past 10
+        expect(el.pause).toHaveBeenCalledTimes(1);
+      });
+
       it("plays a held video again once a seek takes the playhead back", () => {
         const { clip, el, present } = reportingVideo();
         el.currentTime = 9.6;

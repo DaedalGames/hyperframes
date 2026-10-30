@@ -325,6 +325,7 @@ const heldAhead = new WeakSet<HTMLMediaElement>();
 const OUT_POINT_WATCH_SECONDS = 0.5;
 const outPointWatch = new WeakMap<HTMLMediaElement, number>();
 const heldAtOutPoint = new WeakMap<HTMLMediaElement, number>();
+const lastFrameBefore = new WeakMap<HTMLMediaElement, { outPoint: number; at: number }>();
 const reportsFrames = (el: HTMLMediaElement): el is HTMLVideoElement =>
   typeof (el as HTMLVideoElement).requestVideoFrameCallback === "function";
 
@@ -332,17 +333,24 @@ function watchOutPoint(el: HTMLVideoElement, outPoint: number): void {
   if (outPointWatch.get(el) === outPoint) return;
   outPointWatch.set(el, outPoint);
   let previous: number | null = null;
+  let shortestStep = Number.POSITIVE_INFINITY;
+  let longestStep = 0;
   const onFrame = (_now: number, frame: VideoFrameCallbackMetadata) => {
     if (outPointWatch.get(el) !== outPoint) return;
     if (el.paused) {
       outPointWatch.delete(el);
       return;
     }
-    // A seek between two frames is not a frame step.
+    // A seek between two frames is not a frame step; a dropped frame or an uneven cadence is a longer one.
     const gap = previous === null ? Number.NaN : frame.mediaTime - previous;
-    const step = gap > 0 && gap < VIDEO_LEAD_HOLD_SECONDS ? gap : MEDIA_SYNC_TOLERANCE_SECONDS;
+    if (gap > 0 && gap < VIDEO_LEAD_HOLD_SECONDS) {
+      shortestStep = Math.min(shortestStep, gap);
+      longestStep = Math.max(longestStep, gap);
+      const framesLeft = Math.floor((outPoint - 0.001 - frame.mediaTime) / shortestStep);
+      lastFrameBefore.set(el, { outPoint, at: frame.mediaTime + framesLeft * shortestStep });
+    }
     previous = frame.mediaTime;
-    if (frame.mediaTime + step < outPoint - 0.001) {
+    if (frame.mediaTime + (longestStep || MEDIA_SYNC_TOLERANCE_SECONDS) < outPoint - 0.001) {
       el.requestVideoFrameCallback(onFrame);
       return;
     }
@@ -357,6 +365,14 @@ function watchOutPoint(el: HTMLVideoElement, outPoint: number): void {
 function forgetOutPoint(el: HTMLMediaElement): void {
   outPointWatch.delete(el);
   heldAtOutPoint.delete(el);
+  lastFrameBefore.delete(el);
+}
+
+/** Where a watched video is held: on the last frame before its out-point once its cadence is known. */
+function outPointHoldTime(el: HTMLMediaElement, outPoint: number, watched: boolean): number {
+  if (!watched) return outPoint - MEDIA_SYNC_TOLERANCE_SECONDS;
+  const last = lastFrameBefore.get(el);
+  return last?.outPoint === outPoint ? last.at : outPoint;
 }
 
 // A muted video's clock is its audio track, which starts tens of ms after play(), so an upcoming
@@ -652,7 +668,7 @@ export function syncRuntimeMedia(params: {
           !clip.loop &&
           (offset < -VIDEO_LEAD_HOLD_SECONDS ||
             atOutPoint ||
-            currentElTime >= outPoint - (watched ? 0 : MEDIA_SYNC_TOLERANCE_SECONDS));
+            currentElTime >= outPointHoldTime(el, outPoint, watched));
         if (!playing || (!ahead && offset >= -MEDIA_SYNC_TOLERANCE_SECONDS)) heldAhead.delete(el);
         else if (ahead && (!el.paused || atOutPoint)) {
           heldAhead.add(el);
