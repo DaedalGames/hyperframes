@@ -19,23 +19,23 @@ export interface TemplatePack {
 export const TEMPLATES: Record<string, TemplatePack> = {
   "fern-brand-explained": {
     id: "M9004",
-    sha256: "bccf797d02ab310207c6900242564fcec6d77fbd3775b507d844d1c45def2e92",
-    bytes: 20171669,
+    sha256: "59b2e6fc22e17a0a6133f4cf0465ecbc199fbbd2196b1c8f544b084eae67d733",
+    bytes: 20171637,
   },
   "kurzgesagt-science-explainer": {
     id: "M9003",
-    sha256: "0cb12b7d0ef1414903d07bbaf1edde9369ee8bc51f2cb5f22fb08f1dff2d1f65",
-    bytes: 25563149,
+    sha256: "a508e7f1ab5fef59c2958f3e2d95deb334ea7a068b1177d585d72159c324468c",
+    bytes: 25563134,
   },
   "vox-america-explained": {
     id: "M9001",
-    sha256: "f0a65863070ead51bc51bbbff1c4511fb254bab1943eb493ecc8b3ba74f12851",
-    bytes: 36704890,
+    sha256: "4d93fd4e215bbbc1751f942dfc7cbf2bb2534bcb7b78c4132e1d1fc4a2ccdc64",
+    bytes: 36704855,
   },
   "xiaolin-yikouqi": {
     id: "M9002",
-    sha256: "de82d9ca119b062602d129a8199f3fa95cccc2f02f1f7722c54a1980587fae5d",
-    bytes: 152166700,
+    sha256: "f8f8aa292a4132355cfc98ff3b62c9e0c60d0da92167b8b53538b2e87987895f",
+    bytes: 152166727,
   },
 };
 
