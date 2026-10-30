@@ -44,7 +44,6 @@ const HF_VIDEO_768P_PER_S = 12;
 const HF_VIDEO_REF_768P_PER_S = 100 / 3;
 const HF_VIDEO_EXTRA_IMAGE = 40 / 3;
 const HF_AVATAR_IV_PHOTO_PER_S = 800 / 60;
-const HF_AVATAR_GENERAL_PER_S = 150 / 60;
 const MUSIC_PER_TRACK = 0.08;
 const AVATAR_IV_PER_MIN = 4.83;
 const SCRIPT_WORDS_PER_S = 2;
@@ -86,7 +85,7 @@ export function priceOf(r: GenerateRequest): Price {
       return at(
         Math.ceil(seconds * AVATAR_IV_PER_MIN) / 60,
         `avatar video, about ${seconds} s from ${words} words at $4.83 a minute`,
-        seconds * (HF_AVATAR_IV_PHOTO_PER_S + HF_AVATAR_GENERAL_PER_S),
+        seconds * HF_AVATAR_IV_PHOTO_PER_S,
       );
     }
     case "music":

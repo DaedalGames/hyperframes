@@ -376,9 +376,9 @@ describe("generate", () => {
   it("prices an avatar on the plan's avatar rows, not its API price", () => {
     const script = Array.from({ length: 30 }, () => "word").join(" ");
     const avatar = priceOf({ type: "avatar", out: "a.mp4", script });
-    expect(creditsOf(avatar)).toBe(238);
+    expect(creditsOf(avatar)).toBe(200);
     expect(avatar.list).toBeCloseTo(1.2167);
-    expect(() => checkLimit(creditsOf(avatar), 500)).not.toThrow();
+    expect(() => checkLimit(creditsOf(avatar), 220)).not.toThrow();
   });
 
   it("charges a reference shot's pictures after the first two", () => {
