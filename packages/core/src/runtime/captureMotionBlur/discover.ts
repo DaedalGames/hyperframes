@@ -273,7 +273,6 @@ export function discoverMovers({
 
 export interface ScanOptions extends Omit<DiscoverOptions, "seek"> {
   seek: (t: number, suppressEvents: boolean) => void;
-  /** The root lets blur run timeline callbacks (data-motion-blur-events="on"). */
   events: boolean;
 }
 
@@ -283,12 +282,7 @@ const sameMembers = (a: Iterable<Element>, b: Iterable<Element>): boolean => {
   return x.size === y.size && [...x].every((el) => y.has(el));
 };
 
-/**
- * Discovery, and whether the per-frame pose reads must run timeline callbacks. With events on the
- * scan runs them, so callback-driven movers are found; the reads run them only when a scan without
- * them finds otherwise. Every frame's reads step back from half a shutter ahead, so a callback that
- * keeps state (a simulation that replays from zero on a backward seek) would redo all of it per frame.
- */
+/** Discovery, and whether pose reads need callbacks: only when a callback moves a mover. */
 export function scanMovers({
   seek,
   events,
@@ -297,13 +291,9 @@ export function scanMovers({
 }: ScanOptions): Discovery & { readEvents: boolean } {
   const quiet = (t: number): void => seek(t, true);
   if (!events) return { ...discoverMovers({ ...scan, seek: quiet, onStep }), readEvents: false };
-  // With callbacks first, as when this was the only scan: tweens first render (and take their start
-  // values) after the callbacks before them, and a one-off call fires as often as it did. Run second,
-  // it would start from the end the silent scan left the playhead at and fire such a call once more.
+  // Loud first: run after the silent scan, it starts at the end and fires a one-off call once more.
   const found = discoverMovers({ ...scan, seek: (t) => seek(t, false), onStep });
   const without = discoverMovers({ ...scan, seek: quiet });
-  // ponytail: compares what each scan finds, not each step's boxes, so a mover that a tween and a
-  // callback both move reads without callbacks; compare per-step boxes if that case shows up.
   const same =
     sameMembers(without.movers, found.movers) && sameMembers(without.dynamic, found.dynamic);
   return { ...found, readEvents: !same };

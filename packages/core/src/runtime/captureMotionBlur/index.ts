@@ -1,9 +1,8 @@
 /**
  * Capture motion blur, in preview and render. Root attributes: data-motion-blur="on"|"off",
  * -shutter (0–720°, default 240), -samples (2–64; unset: at least 32, more for a long smear),
- * -events="on" (run timeline callbacks in the mover scan, and at sub-frame samples when they move
- * a mover). PAGE_MOTION_BLUR_OFF_GLOBAL (engine blur, or a preview that could not blur) turns all
- * off.
+ * -events="on" (callbacks run in the scan, and in pose reads when they move a mover).
+ * PAGE_MOTION_BLUR_OFF_GLOBAL (engine blur, or a preview that could not blur) turns all off.
  *
  * Per frame: read movers' poses across the shutter (seeks, no paint), capture the root and crop
  * the movers, hide them and capture the background, then redraw each along its path.
