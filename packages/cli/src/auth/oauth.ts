@@ -83,7 +83,7 @@ export interface AuthorizeFlowOptions {
   scope?: string;
   /** Inject a custom fetch (used by tests). */
   fetchImpl?: typeof fetch;
-  /** Override timeout in ms (default 120s). */
+  /** Override timeout in ms (default 60 minutes). */
   timeoutMs?: number;
 }
 
@@ -155,7 +155,7 @@ export async function startAuthorizationCodeFlow(
   });
 
   // Print the host+path only (no state / code_challenge) so live
-  // values can't leak into scrollback / CI logs during the 120s window.
+  // values can't leak into scrollback / CI logs during the 60-minute window.
   console.log(`Opening browser to ${c.dim(authorizeHost(authorizeUrl))} ...`);
   const { opened } = await openBrowser(authorizeUrl);
   if (!opened) {
