@@ -397,9 +397,7 @@ describe("auth login", () => {
     expect(console.error).toHaveBeenCalledWith(
       expect.stringContaining("Run `hyperframes auth login` again"),
     );
-    expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining("Anything you bought stays on your account"),
-    );
+    expect(console.error).not.toHaveBeenCalledWith(expect.stringContaining("bought"));
     expect(telemetry.trackAuthLoginFailed).toHaveBeenCalledWith("oauth", "flow_timeout");
   });
 

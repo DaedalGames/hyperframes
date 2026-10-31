@@ -1,3 +1,4 @@
+import { get } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { startLoopback, type LoopbackHandle } from "./loopback.js";
 
@@ -83,10 +84,13 @@ describe("auth/loopback", () => {
     const handle = await startLoopback({ state: "s" });
     active = handle;
     await vi.advanceTimersByTimeAsync(CHECKOUT_WINDOW_MS - 1_000);
-    await fetch(`${handle.redirectUri}?code=the_code&state=s`);
+    // node:http, not fetch: undici registers its own timers, which would pollute the count.
+    get(`${handle.redirectUri}?code=the_code&state=s`).on("error", () => {});
     await expect(handle.result).resolves.toMatchObject({ code: "the_code" });
-    await handle.close();
+    // Checked before any explicit close(): the flow must clean up after itself on success,
+    // or the CLI stays alive for the whole window after "Signed in".
     expect(vi.getTimerCount()).toBe(0);
+    await handle.close();
   });
 
   it("gives up at the checkout window, not before", async () => {

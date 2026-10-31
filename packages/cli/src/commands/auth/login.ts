@@ -234,9 +234,7 @@ async function runOAuthLogin(): Promise<void> {
     trackAuthLoginFailed("oauth", timedOut ? "flow_timeout" : "flow_error");
     console.error(c.error(`Sign-in failed: ${message}`));
     if (timedOut) {
-      console.error(
-        "Run `hyperframes auth login` again. Anything you bought stays on your account.",
-      );
+      console.error("Run `hyperframes auth login` again.");
     }
     failCommand();
   }
