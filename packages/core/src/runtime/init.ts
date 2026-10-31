@@ -54,6 +54,7 @@ import { injectCompositionCssVariables } from "./getVariables";
 import { createCssAdapter } from "./adapters/css";
 import {
   createGsapAdapter,
+  holdLandingMarks,
   rerenderGsapTimelineAt,
   seekGsapTimeline,
   type GsapStructureKey,
@@ -3988,6 +3989,28 @@ export function initSandboxRuntimeModular(): void {
       now: () => Math.max(0, state.currentTime || 0),
       seek: (t, suppressEvents) => {
         seekRootChildrenAndAdapters(state.capturedTimeline, t, { suppressEvents });
+      },
+      // Silent pose reads re-arm GSAP's landing marks (a step at t would fire again), and a render
+      // seek, which has no structure, lands back on t without same-time steps' authored order.
+      holdFrame: () => {
+        const timelines = [state.capturedTimeline, ...sceneTimelines().map(([, tl]) => tl)];
+        const marks = timelines.map((tl) => tl && holdLandingMarks(tl, gsapStructureOf(tl)));
+        return (t) => {
+          seekRootChildrenAndAdapters(state.capturedTimeline, t, { suppressEvents: true });
+          for (const tl of timelines) {
+            if (tl?.totalTime && !gsapStructureOf(tl)) {
+              rerenderGsapTimelineAt(
+                {
+                  totalTime: tl.totalTime.bind(tl),
+                  totalDuration: tl.totalDuration?.bind(tl),
+                  getChildren: tl.getChildren?.bind(tl),
+                },
+                Number(tl.totalTime()),
+              );
+            }
+          }
+          for (const put of marks) put?.();
+        };
       },
       ignoreMutations: withoutOwnCompositionRecords,
     });

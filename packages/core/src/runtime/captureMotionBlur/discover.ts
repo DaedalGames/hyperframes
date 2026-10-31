@@ -292,7 +292,7 @@ function boxesKey(boxes: ReadonlyArray<DOMRect | undefined>): number {
   return h;
 }
 
-/** Discovery, and whether pose reads need callbacks: only when a callback moves any box. */
+/** Discovery, and whether pose reads need callbacks: when they change an element's style or box. */
 export function scanMovers({
   seek,
   events,

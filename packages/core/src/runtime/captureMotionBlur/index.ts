@@ -271,6 +271,7 @@ function createInstance(host: CaptureMotionBlurHost, config: Config, form: HtmlI
       movers,
       reader,
       seek: readSeek,
+      restore: readEvents ? undefined : host.holdFrame?.(),
       t,
       reads,
       shutterSeconds: config.shutterDeg / 360 / host.fps,

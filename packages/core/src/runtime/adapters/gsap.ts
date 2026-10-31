@@ -383,6 +383,24 @@ function stepsAt(
   return steps;
 }
 
+export function holdLandingMarks(
+  timeline: { getChildren?: RuntimeTimelineLike["getChildren"] },
+  structure?: GsapStructureKey,
+): () => void {
+  const placed = structure ? placedLandingMarks(timeline, structure) : null;
+  const marks = placed
+    ? [...placed.always, ...placed.points.map((point) => point.mark)]
+    : childrenWithLandingMarksIn(timeline);
+  const held = marks.map((mark) => [mark, mark.ratio, mark._zTime, mark._act] as const);
+  return () => {
+    for (const [mark, ratio, zTime, active] of held) {
+      mark.ratio = ratio;
+      mark._zTime = zTime;
+      mark._act = active;
+    }
+  };
+}
+
 function landingMarksOf(
   timeline: { getChildren?: RuntimeTimelineLike["getChildren"] },
   structure: GsapStructureKey | undefined,

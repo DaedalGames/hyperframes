@@ -183,6 +183,7 @@ export function createFilterTier(
       movers,
       reader,
       seek: readSeek,
+      restore: readEvents ? undefined : host.holdFrame?.(),
       t,
       reads: engineMode ? RENDER_READS : PREVIEW_READS,
       shutterSeconds: config.shutterDeg / 360 / host.fps,

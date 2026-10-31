@@ -891,7 +891,7 @@ describe("painting", () => {
     win.__hfMotionBlur?.probe();
     const loud = eventful.seek.mock.calls.filter(([, suppress]) => suppress === false);
     expect(loud.length).toBeGreaterThan(10);
-    // The scan ends with callbacks on, so their state is the frame's when it is done.
+    // The page goes back to the frame with callbacks on after the scan.
     expect(eventful.seek.mock.calls.at(-1)?.[1]).toBe(false);
   });
 
@@ -934,8 +934,42 @@ describe("painting", () => {
     expect(win.__hfMotionBlur?.report().movers).toBe(1);
     h.seek.mockClear();
     void paintCaptureMotionBlur(0.5, PLAY);
-    expect(h.seek.mock.calls.length).toBeGreaterThan(0);
-    expect(h.seek.mock.calls.every(([, suppress]) => suppress === true)).toBe(true);
+    const reads = h.seek.mock.calls.filter(([t]) => t > 0);
+    expect(reads.length).toBeGreaterThan(0);
+    expect(reads.every(([, suppress]) => suppress === true)).toBe(true);
+  });
+
+  it("lands silent reads back on the frame through the host's holdFrame, taken before the first read", () => {
+    installHtmlInCanvas();
+    const { h } = movingHost({ "data-motion-blur": "on", "data-motion-blur-events": "on" });
+    const order: string[] = [];
+    const seek = vi.fn((t: number, suppress: boolean) => {
+      h.seek(t, suppress);
+      order.push(`seek ${t.toFixed(3)}`);
+    });
+    const hold = vi.fn(() => {
+      order.push("hold");
+      return (t: number) => void order.push(`restore ${t}`);
+    });
+    initCaptureMotionBlur({ ...h, seek, holdFrame: hold });
+    win.__hfMotionBlur?.probe();
+    order.length = 0;
+    void paintCaptureMotionBlur(0.5, PLAY);
+    const first = order.findIndex((step) => step.startsWith("seek 0.4"));
+    expect(order.indexOf("hold")).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf("hold")).toBeLessThan(first);
+    expect(order.at(-1)).toBe("restore 0.5");
+    expect(order.filter((step) => step === "seek 0.500")).toEqual([]);
+  });
+
+  it("does not hold the page when callbacks run in the reads", () => {
+    installHtmlInCanvas();
+    const { h } = callbackHost();
+    const hold = vi.fn(() => () => {});
+    initCaptureMotionBlur({ ...h, holdFrame: hold });
+    win.__hfMotionBlur?.probe();
+    void paintCaptureMotionBlur(0.5, PLAY);
+    expect(hold).not.toHaveBeenCalled();
   });
 
   it("fires a one-off timeline call an even number of times over a scan, so a toggle ends as it began", () => {

@@ -1,7 +1,12 @@
 // @vitest-environment happy-dom
 import gsap from "gsap";
 import { describe, expect, it } from "vitest";
-import { createGsapAdapter, rerenderGsapTimelineAt, seekGsapTimeline } from "./gsap";
+import {
+  createGsapAdapter,
+  holdLandingMarks,
+  rerenderGsapTimelineAt,
+  seekGsapTimeline,
+} from "./gsap";
 import type { GsapStructureKey } from "./gsap";
 import type { RuntimeTimelineLike } from "../types";
 
@@ -769,5 +774,54 @@ describe("rerenderGsapTimelineAt with a structure key", () => {
       }
       expect(keyed.state()).toEqual(plain.state());
     }
+  });
+});
+
+describe("holdLandingMarks", () => {
+  const FPS = 30;
+  // Motion blur's pose reads seek silently across the shutter, then land back on the frame.
+  function readsAround(timeline: gsap.core.Timeline, t: number, render: boolean, hold: boolean) {
+    const tl = timeline as unknown as RuntimeTimelineLike;
+    const key: GsapStructureKey | undefined = render
+      ? undefined
+      : { owner: timeline, version: "1" };
+    const put = hold ? holdLandingMarks(tl, key) : () => {};
+    for (const at of [t - 0.011, t - 0.004, t + 0.004, t + 0.011])
+      seekGsapTimeline(tl, at, true, key);
+    seekGsapTimeline(tl, t, true, key);
+    if (render) rerenderGsapTimelineAt(timeline, t);
+    put();
+  }
+  function play(timeline: gsap.core.Timeline, render: boolean, hold: boolean, frames: number) {
+    for (let frame = 0; frame <= frames; frame++) {
+      const t = frame / FPS;
+      seekGsapTimeline(timeline as unknown as RuntimeTimelineLike, t, false);
+      readsAround(timeline, t, render, hold);
+    }
+  }
+
+  it.each([false, true])(
+    "fires a call on a frame once across silent reads around it (render %s)",
+    (render) => {
+      const run = (hold: boolean) => {
+        let fires = 0;
+        let on = false;
+        const timeline = gsap.timeline({ paused: true });
+        timeline.to({}, { duration: 2 }, 0);
+        timeline.call(() => ((on = !on), fires++), [], 1);
+        play(timeline, render, hold, 45);
+        return { fires, on };
+      };
+      expect(run(false).fires).toBeGreaterThan(1);
+      expect(run(true)).toEqual({ fires: 1, on: true });
+    },
+  );
+
+  it("keeps two same-time sets in authored order after silent reads around a render frame", () => {
+    const value = { v: 0 };
+    const timeline = gsap.timeline({ paused: true });
+    timeline.to({}, { duration: 2 }, 0).set(value, { v: 1 }, 1).set(value, { v: 2 }, 1);
+    play(timeline, true, true, FPS);
+    expect(value.v).toBe(2);
   });
 });
