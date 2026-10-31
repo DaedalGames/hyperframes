@@ -163,7 +163,9 @@ export async function startAuthorizationCodeFlow(
     // last on-screen instruction so it isn't buried above "Waiting…".
     console.log(c.dim("(open the URL above to continue)"));
   }
-  console.log(`Waiting for callback on ${c.accent(loopback.redirectUri)} ...`);
+  console.log(
+    `Waiting for callback on ${c.accent(loopback.redirectUri)} (up to 60 minutes, Ctrl+C to cancel) ...`,
+  );
 
   let codeResult;
   try {
