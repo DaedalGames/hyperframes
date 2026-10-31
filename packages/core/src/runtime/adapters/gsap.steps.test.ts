@@ -3,6 +3,7 @@ import gsap from "gsap";
 import { describe, expect, it } from "vitest";
 import {
   createGsapAdapter,
+  holdFrameMarks,
   holdLandingMarks,
   rerenderGsapTimelineAt,
   seekGsapTimeline,
@@ -816,6 +817,29 @@ describe("holdLandingMarks", () => {
       expect(run(true)).toEqual({ fires: 1, on: true });
     },
   );
+
+  it("lands a render frame with the root drawn after its scenes, as the frame's own seek does", () => {
+    const shared = { x: 0 };
+    const scene = gsap.timeline({ paused: true });
+    scene.fromTo(shared, { x: 0 }, { x: 100, duration: 2, ease: "none" }, 0);
+    const root = gsap.timeline({ paused: true });
+    root.fromTo(shared, { x: 1000 }, { x: 2000, duration: 2, ease: "none" }, 0);
+    const tl = (timeline: gsap.core.Timeline) => timeline as unknown as RuntimeTimelineLike;
+    const seekBoth = (t: number, silent: boolean) => {
+      seekGsapTimeline(tl(scene), t, silent);
+      seekGsapTimeline(tl(root), t, silent);
+    };
+    seekBoth(0.5, false);
+    expect(shared.x).toBe(1250);
+    const land = holdFrameMarks({
+      scenes: [tl(scene)],
+      root: tl(root),
+      structureOf: () => undefined,
+    });
+    for (const at of [0.489, 0.496, 0.504, 0.511]) seekBoth(at, true);
+    land(() => seekBoth(0.5, true));
+    expect(shared.x).toBe(1250);
+  });
 
   it("keeps two same-time sets in authored order after silent reads around a render frame", () => {
     const value = { v: 0 };

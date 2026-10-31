@@ -401,6 +401,35 @@ export function holdLandingMarks(
   };
 }
 
+export function holdFrameMarks({
+  scenes,
+  root,
+  structureOf,
+}: {
+  scenes: RuntimeTimelineLike[];
+  root: RuntimeTimelineLike | null;
+  structureOf: (timeline: RuntimeTimelineLike) => GsapStructureKey | undefined;
+}): (landBack: () => void) => void {
+  const rootLandsLast = root ? [...scenes, root] : scenes;
+  const marks = rootLandsLast.map((timeline) => holdLandingMarks(timeline, structureOf(timeline)));
+  return (landBack) => {
+    landBack();
+    for (const timeline of rootLandsLast) {
+      if (timeline.totalTime && !structureOf(timeline)) {
+        rerenderGsapTimelineAt(
+          {
+            totalTime: timeline.totalTime.bind(timeline),
+            totalDuration: timeline.totalDuration?.bind(timeline),
+            getChildren: timeline.getChildren?.bind(timeline),
+          },
+          Number(timeline.totalTime()),
+        );
+      }
+    }
+    for (const put of marks) put();
+  };
+}
+
 function landingMarksOf(
   timeline: { getChildren?: RuntimeTimelineLike["getChildren"] },
   structure: GsapStructureKey | undefined,
