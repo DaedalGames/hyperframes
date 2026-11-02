@@ -50,6 +50,12 @@ function summary(started: ReverseStart, savedTo: string | undefined) {
 function refusalWhenServerBlocksFree(session: ReverseSession): Fix | undefined {
   if (session.gate !== "block" || session.plan !== "free") return undefined;
   const link = reverseUpgradeUrl(session);
+  if (link === null) {
+    return new Fix(
+      "Reverse is part of HyperFrames Pro, and a plan can't be purchased right now.",
+      "Run reverse start again once this account is on Pro.",
+    );
+  }
   return new Fix(
     `Reverse is part of HyperFrames Pro. Upgrade here, then run reverse start again: ${link}`,
     link,

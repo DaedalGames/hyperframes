@@ -44,8 +44,9 @@ example:
 > Reply "done" once you're on Pro and I'll start.
 
 When `reverse start` refuses the run (it exits with an error whose `fix` is the upgrade link), give the person that
-exact link and stop; once they reply that they are on Pro, run `reverse start` again. Only on a CLI without
-`reverse start`, give `! npx hyperframes billing subscribe` instead.
+exact link and stop; once they reply that they are on Pro, run `reverse start` again. When `upgrade_url` is `null`
+(or the refusal names no link), a plan can't be purchased right now: say so plainly, give no link, and stop. Only on
+a CLI without `reverse start`, give `! npx hyperframes billing subscribe` instead.
 
 ## Signed in on Pro
 
