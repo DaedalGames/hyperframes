@@ -189,6 +189,13 @@ describe("shouldIgnoreRequestFailure", () => {
     }
   });
 
+  it("keeps an aborted image request reportable whatever its file suffix", () => {
+    for (const ext of ["mkv", "mp4", "png"]) {
+      const url = `http://127.0.0.1:3000/assets/plate.${ext}`;
+      expect(shouldIgnoreRequestFailure(url, "net::ERR_ABORTED", "image")).toBe(false);
+    }
+  });
+
   it("keeps non-media and non-aborted failures reportable", () => {
     expect(
       shouldIgnoreRequestFailure("http://127.0.0.1:3000/assets/map.png", "net::ERR_ABORTED"),
