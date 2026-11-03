@@ -7,6 +7,10 @@ const opened = vi.hoisted(() => [] as string[]);
 vi.mock("../auth/browser.js", () => ({
   openBrowser: async (url: string) => void opened.push(url),
 }));
+vi.mock("../cloud/auth.js", () => ({
+  resolveCloudAuthHeaders: async () => ({ "x-api-key": "k" }),
+  resolveCloudBaseUrl: () => "https://api.example.test",
+}));
 vi.mock("../heygen/plan.js", async (importOriginal) => {
   const real = await importOriginal<typeof import("../heygen/plan.js")>();
   let calls = 0;
@@ -19,6 +23,7 @@ vi.mock("../heygen/plan.js", async (importOriginal) => {
 const { default: billing } = await import("./billing.js");
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   opened.length = 0;
   vi.restoreAllMocks();
   consumeCommandResult();
@@ -27,6 +32,10 @@ afterEach(() => {
 describe("billing subscribe", () => {
   it("opens the plans page credited to the feature and run that sent the person", async () => {
     vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.stubGlobal(
+      "fetch",
+      async () => new Response(JSON.stringify({ data: { space_info: { space_id: "sp-1" } } })),
+    );
     vi.useFakeTimers();
     const done = runCommand(billing, {
       rawArgs: ["subscribe", "--feature", "reverse", "--session", "rvs_abc"],
@@ -37,5 +46,6 @@ describe("billing subscribe", () => {
     const url = new URL(opened[0] ?? "");
     expect(url.searchParams.get("feature")).toBe("reverse");
     expect(url.searchParams.get("rs")).toBe("rvs_abc");
+    expect(url.searchParams.get("workspace_hint")).toBe("sp-1");
   });
 });
