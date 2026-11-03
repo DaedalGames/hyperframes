@@ -51,7 +51,7 @@ function refusalWhenServerBlocksFree(session: ReverseSession): Fix | undefined {
   if (session.gate !== "block" || session.plan !== "free") return undefined;
   const link = reverseUpgradeUrl(session);
   return new Fix(
-    `Reverse is part of HyperFrames Pro. Upgrade here, then run reverse start again: ${link}`,
+    `Reverse is part of HyperFrames Pro. Run \`npx hyperframes billing subscribe --feature reverse --session ${session.sessionId}\` to see Pro and pay from the terminal (or open ${link}), then run reverse start again`,
     link,
   );
 }
