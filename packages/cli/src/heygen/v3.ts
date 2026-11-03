@@ -101,16 +101,22 @@ function refusal(status: number, body: unknown, estimate?: number): Refused {
   const needs = given ? `${given} in total` : needed ? `about ${needed} in total` : "more";
   const balance = err.balance === undefined ? "" : `, balance ${String(err.balance)}`;
   // The fix is the one line the agent relays as printed; the problem says how to wait for the person.
-  if (/hf_subscription_required/i.test(code))
+  if (/hf_subscription_required/i.test(code)) {
+    const link = url ?? pageUrl("plans", { needed });
     return new Refused(
       `this is a HyperFrames Pro feature; nothing was charged. Run \`npx hyperframes billing subscribe\`: it opens the page and waits`,
-      `Subscribe: ${url ?? pageUrl("plans", { needed })}`,
+      `Subscribe: ${link}`,
+      link,
     );
-  if (/hf_usage_exhausted/i.test(code))
+  }
+  if (/hf_usage_exhausted/i.test(code)) {
+    const link = url ?? pageUrl("credits", { needed });
     return new Refused(
       `out of HyperFrames credits (this step needs ${needs}${balance}); nothing was charged. Run \`npx hyperframes billing top-up${needed ? ` --needed ${needed}` : ""}\`: it opens the page and waits`,
-      `Add credits: ${url ?? pageUrl("credits", { needed })}`,
+      `Add credits: ${link}`,
+      link,
     );
+  }
   if (/api_key_required/i.test(code))
     return new Refused(
       "this HeyGen feature is not available with this sign-in yet; nothing was charged",
