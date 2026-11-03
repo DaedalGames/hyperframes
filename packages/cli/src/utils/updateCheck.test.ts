@@ -425,16 +425,12 @@ describe("updateCheckDue / cachedUpdateCheck — what the parent reads without f
 
   it.each([
     ["no cache", {}, true],
-    [
-      "a cache from 30 minutes ago",
-      { lastUpdateCheck: hoursAgo(0.5), latestVersion: "9.9.9" },
-      false,
-    ],
-    ["a cache from 2 hours ago", { lastUpdateCheck: hoursAgo(2), latestVersion: "9.9.9" }, true],
+    ["a cache from an hour ago", { lastUpdateCheck: hoursAgo(1), latestVersion: "9.9.9" }, false],
+    ["a cache from 25 hours ago", { lastUpdateCheck: hoursAgo(25), latestVersion: "9.9.9" }, true],
     ["an unreadable timestamp", { lastUpdateCheck: "garbage", latestVersion: "9.9.9" }, true],
     [
       "an unsafe cached version",
-      { lastUpdateCheck: hoursAgo(0.5), latestVersion: "1.2.3; rm" },
+      { lastUpdateCheck: hoursAgo(1), latestVersion: "1.2.3; rm" },
       true,
     ],
   ])("with %s, a check is due: %s", async (_, config, due) => {
@@ -475,9 +471,9 @@ describe("updateCheckDue / cachedUpdateCheck — what the parent reads without f
     },
   );
 
-  it("treats a cached latest older than the running CLI as unknown, without re-checking sooner than the hourly cadence", async () => {
+  it("treats a cached latest older than the running CLI as unknown, without re-checking sooner than the daily cadence", async () => {
     vi.doMock("../version.js", () => ({ VERSION: "0.9.6", PRODUCER_VERSION: "0.9.6" }));
-    const mod = await load({ lastUpdateCheck: hoursAgo(0.5), latestVersion: "0.9.5" });
+    const mod = await load({ lastUpdateCheck: hoursAgo(1), latestVersion: "0.9.5" });
     expect(mod.updateCheckDue()).toBe(false);
     expect(mod.getUpdateMeta()).toEqual({
       version: "0.9.6",

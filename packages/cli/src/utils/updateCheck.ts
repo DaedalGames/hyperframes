@@ -14,7 +14,7 @@ import { isSafeVersion } from "./safeVersion.js";
 export { isSafeVersion } from "./safeVersion.js";
 
 const NPM_REGISTRY_URL = "https://registry.npmjs.org/hyperframes/latest";
-const CHECK_INTERVAL_MS = 60 * 60 * 1000; // an hour: releases ship several times a day
+const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const FETCH_TIMEOUT_MS = 3000;
 
 /** Returns true if `a` is newer than `b` per semver (handles alpha, beta, rc). */
@@ -41,7 +41,7 @@ export interface UpdateMeta {
 }
 
 /**
- * Check npm registry for the latest version. Uses an hour's cache to avoid
+ * Check npm registry for the latest version. Uses a 24h cache to avoid
  * hitting the registry on every invocation.
  *
  * @param force - Skip the cache, opt-outs and DNS probe: the caller waits for the registry
