@@ -15,6 +15,7 @@ export { isSafeVersion } from "./safeVersion.js";
 
 const NPM_REGISTRY_URL = "https://registry.npmjs.org/hyperframes/latest";
 const CHECK_INTERVAL_MS = 2 * 60 * 60 * 1000;
+const SKILLS_COUNT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 3000;
 
 /** Returns true if `a` is newer than `b` per semver (handles alpha, beta, rc). */
@@ -149,10 +150,12 @@ export function getUpdateMeta(): UpdateMeta {
   };
 }
 
-/** The cached outdated-skills count, only when it was taken for this CLI version's tag. */
+/** The cached outdated-skills count, only when taken for this CLI version's tag in the last 24 h. */
 function cachedSkillsOutdated(config: ReturnType<typeof readConfig>): number | undefined {
   if (process.env["HYPERFRAMES_SKIP_SKILLS"] === "1") return undefined;
   if (!config.lastSkillsCheck || config.skillsCheckedVersion !== VERSION) return undefined;
+  const age = Date.now() - new Date(config.lastSkillsCheck).getTime();
+  if (!(age >= 0 && age < SKILLS_COUNT_MAX_AGE_MS)) return undefined;
   const count = config.skillsOutdatedCount;
   return typeof count === "number" && Number.isInteger(count) && count >= 0 ? count : undefined;
 }

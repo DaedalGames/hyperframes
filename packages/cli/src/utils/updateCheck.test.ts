@@ -475,6 +475,11 @@ describe("updateCheckDue / cachedUpdateCheck — what the parent reads without f
       }
     });
 
+    it("still reports a count taken 23 hours ago", async () => {
+      const mod = await loadAt096(skillsCache({ lastSkillsCheck: hoursAgo(23) }));
+      expect(mod.getUpdateMeta().skillsOutdated).toBe(3);
+    });
+
     it("reports zero when the check found everything current", async () => {
       const mod = await loadAt096(skillsCache({ skillsOutdatedCount: 0 }));
       expect(mod.getUpdateMeta().skillsOutdated).toBe(0);
@@ -487,6 +492,8 @@ describe("updateCheckDue / cachedUpdateCheck — what the parent reads without f
         skillsCache({ skillsCheckedVersion: "0.9.5" }),
       ],
       ["the cached count is not a count", skillsCache({ skillsOutdatedCount: "3" })],
+      // Nothing refreshes the count once HYPERFRAMES_NO_UPDATE_CHECK (or CI/dev) stops the checks.
+      ["the check is over a day old", skillsCache({ lastSkillsCheck: hoursAgo(25) })],
     ])("is absent when %s", async (_, config) => {
       const mod = await loadAt096(config);
       expect("skillsOutdated" in mod.getUpdateMeta()).toBe(false);

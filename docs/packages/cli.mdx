@@ -71,8 +71,9 @@ background process, and never under CI or `HYPERFRAMES_NO_UPDATE_CHECK=1`.
 `checkedAt` says when npm answered. A cached latest older than the running CLI
 is left out and rechecked on the next run. `skillsOutdated` counts the installed
 HyperFrames skills that are behind this CLI's release, from the same background
-check; it is absent until that check has run for this version, and under
-`HYPERFRAMES_SKIP_SKILLS=1`. `--json` never makes a network request of its own.
+check; it is absent until that check has run for this version, once it is more
+than a day old (as when `HYPERFRAMES_NO_UPDATE_CHECK=1` stops the checks), and
+under `HYPERFRAMES_SKIP_SKILLS=1`. `--json` never makes a network request of its own.
 Deprecated commands add `_meta.deprecated: true`.
 
 A failure under `--json` always prints one JSON object on stdout, with a
@@ -2055,7 +2056,9 @@ installed skills against the manifest at this CLI's release tag, in one call.
 `--check` only reports. Without it, `update` upgrades the CLI the way
 `upgrade --yes` does (an `npx` or project-local run gets
 `npx hyperframes@latest` to run instead) and then runs `skills update` at the
-release tag of the CLI that runs next. An unattended run without `--yes` or
+release tag of the CLI that is now installed. Homebrew installs whatever its
+formula has, which can trail npm, so `update` reads the installed version back
+and reports `unchanged` when the formula has not moved. An unattended run without `--yes` or
 `--check` exits 2. Under an agent plugin it reports, but leaves updating to the
 plugin manager, and `HYPERFRAMES_SKIP_SKILLS=1` leaves the skills alone.
 `--check --json` returns:

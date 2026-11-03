@@ -119,7 +119,8 @@ async function applyUpdate(cli: CliReport, skills: SkillsReport): Promise<Update
   if (cliOutcome.status !== "upgraded" && skills.status === "checked" && !skills.updateAvailable) {
     return { cli: cliOutcome, skills: { status: "current" } };
   }
-  const cliVersion = cliOutcome.status === "upgraded" ? cli.latest : VERSION;
+  // The skills follow the CLI that is installed now, which a brew upgrade may leave short of npm's.
+  const cliVersion = cliOutcome.status === "upgraded" ? cliOutcome.version : VERSION;
   try {
     const result = await updateSkills({ refreshInstalled: true, strict: true, cliVersion });
     return { cli: cliOutcome, skills: { status: "updated", result } };
@@ -157,12 +158,26 @@ function skillsLine(skills: SkillsReport): string {
   );
 }
 
+function cliOutcomeLine(cli: UpdateOutcome["cli"]): string {
+  switch (cli.status) {
+    case "upgraded":
+      return c.success(`CLI upgraded to v${cli.version}.`);
+    case "unchanged":
+      return c.warn(`CLI stays at v${cli.version}: ${cli.reason}.`);
+    case "unverified":
+      return c.warn(`CLI: ran ${cli.command}, but ${cli.reason}.`);
+    case "manual":
+      return c.warn(`CLI: run ${cli.command} (${cli.reason}).`);
+    case "failed":
+      return c.error(`CLI upgrade failed. Run: ${cli.command}`);
+    default:
+      return c.success("CLI is up to date.");
+  }
+}
+
 function printOutcome(outcome: UpdateOutcome): void {
-  const { cli, skills } = outcome;
-  if (cli.status === "upgraded") console.log(c.success(`CLI upgraded to v${cli.version}.`));
-  else if (cli.status === "manual") console.log(c.warn(`CLI: run ${cli.command} (${cli.reason}).`));
-  else if (cli.status === "failed") console.log(c.error(`CLI upgrade failed. Run: ${cli.command}`));
-  else console.log(c.success("CLI is up to date."));
+  const { skills } = outcome;
+  console.log(cliOutcomeLine(outcome.cli));
   if (skills.status === "updated") {
     const n = skills.result.installed.length;
     console.log(

@@ -15,6 +15,8 @@ const state = vi.hoisted(() => ({
   spawnCalls: [] as { command: string; args: readonly string[] }[],
   installFails: false,
   registryLatest: "0.9.8" as string | null,
+  // What Homebrew's linked binary reports after `brew upgrade` (null: it cannot be read).
+  brewInstalled: "0.9.8" as string | null,
   fetchedUrls: [] as string[],
 }));
 
@@ -39,6 +41,11 @@ vi.mock("node:child_process", () => ({
   execFile: vi.fn(),
   execFileSync: vi.fn((command: string, args: readonly string[], opts: unknown) => {
     state.execCalls.push({ command, args, opts });
+    if (command === "brew" && args[0] === "--prefix") return "/opt/homebrew/opt/hyperframes\n";
+    if (command.replaceAll("\\", "/") === "/opt/homebrew/opt/hyperframes/bin/hyperframes") {
+      if (state.brewInstalled === null) throw new Error("not linked");
+      return `${state.brewInstalled}\n`;
+    }
     if (state.installFails && INSTALLERS.has(command)) throw new Error("boom");
     return Buffer.from("11.0.0");
   }),
@@ -100,7 +107,8 @@ async function runUpdate(entry: string, args: Record<string, unknown>) {
 }
 
 const json = () => JSON.parse(stdout.join("\n")) as Record<string, any>;
-const installs = () => state.execCalls.filter((c) => INSTALLERS.has(c.command));
+const installs = () =>
+  state.execCalls.filter((c) => INSTALLERS.has(c.command) && c.args[0] !== "--prefix");
 const skillsAdds = () => state.spawnCalls.filter((c) => c.args.includes("add"));
 
 beforeEach(() => {
@@ -110,6 +118,7 @@ beforeEach(() => {
   state.spawnCalls = [];
   state.installFails = false;
   state.registryLatest = "0.9.8";
+  state.brewInstalled = "0.9.8";
   state.fetchedUrls = [];
   vi.stubGlobal(
     "fetch",
@@ -224,7 +233,7 @@ describe("hyperframes update (install)", () => {
     ["npm", ENTRIES.npm, "npm", ["install", "-g", "hyperframes@0.9.8"]],
     ["pnpm", ENTRIES.pnpm, "pnpm", ["add", "-g", "hyperframes@0.9.8"]],
     ["bun", ENTRIES.bun, "bun", ["add", "-g", "hyperframes@0.9.8"]],
-    // Explicit: the user asked to update, so brew may move to the tap's formula (unlike auto-update).
+    // Explicit: the user asked, so brew may move to the formula (unlike auto-update); here it reached npm.
     ["brew", ENTRIES.brew, "brew", ["upgrade", "hyperframes"]],
   ])(
     "%s: upgrades the CLI like upgrade --yes, then installs the skills at the new CLI's tag",
@@ -259,6 +268,33 @@ describe("hyperframes update (install)", () => {
       expect(skillsAdds()[0]!.args).toContain("https://github.com/heygen-com/hyperframes#v0.9.5");
     },
   );
+
+  // `brew upgrade` installs the formula's version, which lags npm, and exits 0 on a no-op: the
+  // skills must follow the CLI that is actually installed, never npm's latest.
+  it("brew staying behind npm: reports the CLI unchanged and keeps the skills at its own tag", async () => {
+    state.brewInstalled = "0.9.5";
+    expect(await runUpdate(ENTRIES.brew, { yes: true, json: true })).toBe(0);
+
+    expect(json().updated.cli).toMatchObject({ status: "unchanged", version: "0.9.5" });
+    expect(json().updated.cli.reason).toContain("0.9.8");
+    const adds = skillsAdds().flatMap((c) => c.args);
+    expect(adds).not.toContain("https://github.com/heygen-com/hyperframes#v0.9.8");
+    expect(adds).toContain("https://github.com/heygen-com/hyperframes#v0.9.5");
+  });
+
+  it("brew moving to a formula between the two: skills at the version brew installed", async () => {
+    state.brewInstalled = "0.9.7";
+    expect(await runUpdate(ENTRIES.brew, { yes: true, json: true })).toBe(0);
+    expect(json().updated.cli).toMatchObject({ status: "upgraded", version: "0.9.7" });
+    expect(skillsAdds()[0]!.args).toContain("https://github.com/heygen-com/hyperframes#v0.9.7");
+  });
+
+  it("brew whose installed version cannot be read: says so and keeps the skills at this CLI's tag", async () => {
+    state.brewInstalled = null;
+    expect(await runUpdate(ENTRIES.brew, { yes: true, json: true })).toBe(0);
+    expect(json().updated.cli).toMatchObject({ status: "unverified" });
+    expect(skillsAdds()[0]!.args).toContain("https://github.com/heygen-com/hyperframes#v0.9.5");
+  });
 
   it("plugin: refuses, installing neither the CLI nor the skills", async () => {
     vi.stubEnv("HYPERFRAMES_PLUGIN_VERSION", "0.9.5");
