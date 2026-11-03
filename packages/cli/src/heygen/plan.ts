@@ -50,7 +50,6 @@ const webBase = () => "https://hyperframes.studio";
 const plansUrl = () => process.env["HYPERFRAMES_PLANS_URL"] || `${webBase()}/pricing`;
 const creditsUrl = () => process.env["HYPERFRAMES_CREDITS_URL"] || `${webBase()}/pricing`;
 
-/** The workspace the sign-in is bound to, or undefined when it cannot be read. */
 async function signedInSpace(): Promise<string | undefined> {
   try {
     const res = await fetch(`${billingBaseUrl()}/v1/pacific/account.get`, {
@@ -66,10 +65,7 @@ async function signedInSpace(): Promise<string | undefined> {
   }
 }
 
-/**
- * A plans or credits page link with what the web side reads: `from=cli`, the credits needed, the waiting step,
- * and `workspace_hint` (the signed-in workspace, so the site's sign-in lands in the same one; none when signed out).
- */
+/** A plans or credits page link with what the web side reads, incl. the signed-in `workspace_hint`. */
 export async function pageUrl(
   kind: "plans" | "credits",
   fields: { needed?: number; tool?: string; feature?: string; rs?: string; base?: string } = {},
