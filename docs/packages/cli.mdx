@@ -61,7 +61,9 @@ second call:
     "latestVersion": "0.1.5",
     "updateAvailable": true,
     "checkedAt": "2026-11-03T08:00:00.000Z",
-    "skillsOutdated": 2
+    "skillsOutdated": 2,
+    "skillsMissing": 0,
+    "updateNotice": "For the user: HyperFrames CLI 0.1.5 is available (this run is 0.1.4), and 2 installed HyperFrames skills are out of date. To update both, run: npx hyperframes update"
   }
 }
 ```
@@ -70,11 +72,23 @@ The version numbers come from a cache refreshed at most every two hours, in a
 background process, and never under CI or `HYPERFRAMES_NO_UPDATE_CHECK=1`.
 `checkedAt` says when npm answered. A cached latest older than the running CLI
 is left out and rechecked on the next run. `skillsOutdated` counts the installed
-HyperFrames skills that are behind this CLI's release, from the same background
-check; it is absent until that check has run for this version, once it is more
-than a day old (as when `HYPERFRAMES_NO_UPDATE_CHECK=1` stops the checks), and
-under `HYPERFRAMES_SKIP_SKILLS=1`. `--json` never makes a network request of its own.
+HyperFrames skills that are behind this CLI's release, and `skillsMissing` the
+core skills that are not installed, from the same background check; both are
+absent until that check has run for this version, once it is more than a day old
+(as when `HYPERFRAMES_NO_UPDATE_CHECK=1` stops the checks), and under
+`HYPERFRAMES_SKIP_SKILLS=1`. `--json` never makes a network request of its own.
 Deprecated commands add `_meta.deprecated: true`.
+
+`updateNotice` is one sentence for the agent to pass on to the person when the
+CLI or the skills are behind: what is newer and the command that updates it.
+The person decides whether to run it. The command is `npx hyperframes update`
+(`npx hyperframes@latest update` from an `npx` run whose cache may hold the old
+CLI); a Homebrew install names `brew upgrade hyperframes`, or its own
+`hyperframes update` when the skills are behind too. The skills half is left
+out when no skill is behind or under `HYPERFRAMES_SKIP_SKILLS=1`. The notice
+appears at most once a day per project, while the numeric fields stay on every
+result. It is never added under CI, `HYPERFRAMES_NO_UPDATE_CHECK=1`, or an agent
+plugin (`HYPERFRAMES_PLUGIN_VERSION`), and `update`'s own output leaves it out.
 
 A failure under `--json` always prints one JSON object on stdout, with a
 machine-readable `code` and, when there is a next step, a `hint`:
@@ -135,7 +149,7 @@ notice; `HYPERFRAMES_NO_AUTO_INSTALL=1` turns off only the install.
 a command ends with one line on stderr naming `npx hyperframes skills update`.
 It shows at most once a day per project. In an unattended run it shows only when
 a core skill is missing; outdated skills reach agents as `_meta.skillsOutdated`
-instead. `HYPERFRAMES_SKIP_SKILLS=1` turns it off. No notice
+and `_meta.updateNotice` instead. `HYPERFRAMES_SKIP_SKILLS=1` turns it off. No notice
 follows a usage error.
 
 ## Create a project
@@ -2080,7 +2094,7 @@ plugin manager, and `HYPERFRAMES_SKIP_SKILLS=1` leaves the skills alone.
     "updateAvailable": true,
     "outdated": 2,
     "missing": 0,
-    "command": "npx hyperframes skills update"
+    "command": "npx hyperframes update"
   },
   "_meta": { "version": "0.9.5", "latestVersion": "0.9.8", "updateAvailable": true }
 }

@@ -25,7 +25,10 @@ export const examples: Example[] = [
   ["Update the CLI and the skills without prompting", "hyperframes update --yes"],
 ];
 
-const SKILLS_UPDATE = "npx hyperframes skills update";
+/** `update` covers the skills too; it is the one command this report and `_meta` recommend. */
+const UPDATE_COMMAND = "npx hyperframes update";
+/** This command's own result names what to run, so its `_meta` carries no update notice. */
+const NO_NOTICE = { updateNotice: false };
 const PLUGIN_REASON =
   "This CLI runs from an agent plugin, which pins the CLI and its skills; update the plugin through your agent's plugin manager.";
 
@@ -102,7 +105,7 @@ async function checkInstalledSkills(channel: InstallChannel): Promise<SkillsRepo
       updateAvailable: result.updateAvailable,
       outdated: result.summary.outdated,
       missing: result.summary.coreMissing,
-      command: result.updateAvailable ? SKILLS_UPDATE : null,
+      command: result.updateAvailable ? UPDATE_COMMAND : null,
     };
   } catch (err) {
     return { status: "error", error: failureMessage(err) };
@@ -208,7 +211,9 @@ interface Mode {
 function installAllowed(channel: InstallChannel, mode: Mode): boolean {
   if (channel === "plugin") {
     if (mode.json) {
-      console.log(JSON.stringify(withMeta(jsonFailure("plugin_managed", PLUGIN_REASON)), null, 2));
+      console.log(
+        JSON.stringify(withMeta(jsonFailure("plugin_managed", PLUGIN_REASON), NO_NOTICE), null, 2),
+      );
     } else {
       clack.log.error(c.error(PLUGIN_REASON));
     }
@@ -218,7 +223,7 @@ function installAllowed(channel: InstallChannel, mode: Mode): boolean {
   if (!mode.yes && (mode.json || isUnattended())) {
     clack.confirmationRequired(
       "hyperframes update",
-      "Pass --yes to update the CLI and the skills, or --check to only report what is outdated.",
+      "Ask the person first; pass --yes only when they asked to update. --check only reports.",
     );
   }
   return true;
@@ -240,7 +245,8 @@ async function installUpdates(cli: CliReport, skills: SkillsReport, mode: Mode):
   if (!mode.json) printCheck(cli, skills);
   if (!(await confirmed(cli, skills, mode))) return;
   const outcome = await applyUpdate(cli, skills);
-  if (mode.json) console.log(JSON.stringify(withMeta({ cli, skills, updated: outcome }), null, 2));
+  if (mode.json)
+    console.log(JSON.stringify(withMeta({ cli, skills, updated: outcome }, NO_NOTICE), null, 2));
   else printOutcome(outcome);
   if (outcome.cli.status === "failed" || outcome.skills.status === "failed") {
     setCommandExitCode(1);
@@ -265,7 +271,7 @@ export default defineCommand({
     const cli = await checkCli();
     const skills = await checkInstalledSkills(install.channel);
     if (args.check === true) {
-      if (mode.json) console.log(JSON.stringify(withMeta({ cli, skills }), null, 2));
+      if (mode.json) console.log(JSON.stringify(withMeta({ cli, skills }, NO_NOTICE), null, 2));
       else printCheck(cli, skills);
       return;
     }

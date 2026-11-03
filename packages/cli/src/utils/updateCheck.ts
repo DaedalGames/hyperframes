@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { compareVersions } from "compare-versions";
 import { readConfig, readConfigFresh, writeConfig } from "../telemetry/config.js";
 import { VERSION } from "../version.js";
@@ -7,7 +7,8 @@ import { isCI, isUnattended } from "./attendedTerminal.js";
 import { isDevMode } from "./env.js";
 import { asNotice } from "./jsonError.js";
 import { hostAnswers } from "./hostAnswers.js";
-import { detectInstaller } from "./installerDetection.js";
+import { claimDailyNotice } from "./dailyNotice.js";
+import { detectInstaller, runningInstall, updateCommandFor } from "./installerDetection.js";
 import { readPinnedHyperframesVersions } from "./projectPin.js";
 import { isSafeVersion } from "./safeVersion.js";
 
@@ -41,6 +42,13 @@ export interface UpdateMeta {
   checkedAt?: string;
   /** Installed skills behind this CLI's release tag, per the cached background check. */
   skillsOutdated?: number;
+  /** Core skills not installed, from the same cached check and under the same rules as `skillsOutdated`. */
+  skillsMissing?: number;
+  /**
+   * One sentence for the agent to pass on to the person: a newer CLI or skills, and the command
+   * that updates them. Added by `withMeta` at most once a day per project; absent otherwise.
+   */
+  updateNotice?: string;
   /** Present (and true) only for commands superseded by `check`; absent otherwise. */
   deprecated?: boolean;
 }
@@ -140,24 +148,76 @@ export function getUpdateMeta(): UpdateMeta {
   const config = readConfig();
   const latestVersion = cachedVersionForThisInstall(config.latestVersion);
   const checkedAt = latestVersion ? config.lastUpdateCheck : undefined;
-  const skillsOutdated = cachedSkillsOutdated(config);
+  const skillsOutdated = cachedSkillsCount(config, config.skillsOutdatedCount);
+  const skillsMissing = cachedSkillsCount(config, config.skillsMissingCount);
   return {
     version: VERSION,
     latestVersion,
     updateAvailable: latestVersion ? isNewerSemver(latestVersion, VERSION) : false,
     ...(checkedAt ? { checkedAt } : {}),
     ...(skillsOutdated === undefined ? {} : { skillsOutdated }),
+    ...(skillsMissing === undefined ? {} : { skillsMissing }),
   };
 }
 
-/** The cached outdated-skills count, only when taken for this CLI version's tag in the last 24 h. */
-function cachedSkillsOutdated(config: ReturnType<typeof readConfig>): number | undefined {
+/** A cached skills count, only when taken for this CLI version's tag in the last 24 h. */
+function cachedSkillsCount(
+  config: ReturnType<typeof readConfig>,
+  count: unknown,
+): number | undefined {
   if (process.env["HYPERFRAMES_SKIP_SKILLS"] === "1") return undefined;
   if (!config.lastSkillsCheck || config.skillsCheckedVersion !== VERSION) return undefined;
   const age = Date.now() - new Date(config.lastSkillsCheck).getTime();
   if (!(age >= 0 && age < SKILLS_COUNT_MAX_AGE_MS)) return undefined;
-  const count = config.skillsOutdatedCount;
   return typeof count === "number" && Number.isInteger(count) && count >= 0 ? count : undefined;
+}
+
+/** "3 installed HyperFrames skills are out of date and 1 core skill is missing", or null. */
+function skillsBehindPhrase(meta: UpdateMeta): string | null {
+  const outdated = meta.skillsOutdated ?? 0;
+  const missing = meta.skillsMissing ?? 0;
+  const parts: string[] = [];
+  if (outdated > 0) {
+    parts.push(
+      `${outdated} installed HyperFrames ${outdated === 1 ? "skill is" : "skills are"} out of date`,
+    );
+  }
+  if (missing > 0) {
+    const which = outdated > 0 ? "core" : "core HyperFrames";
+    parts.push(`${missing} ${which} ${missing === 1 ? "skill is" : "skills are"} missing`);
+  }
+  return parts.length > 0 ? parts.join(" and ") : null;
+}
+
+/**
+ * The command that updates what the notice names. `hyperframes update` covers the CLI and the
+ * skills; a Homebrew install updates its CLI with brew, and runs its own `update` (which calls
+ * brew) for both, since an npx copy would put the skills at npm's tag, not brew's.
+ */
+function noticeCommand(cliBehind: boolean, skillsBehind: boolean, latest: string): string {
+  const install = runningInstall();
+  if (install.channel === "brew") {
+    return skillsBehind ? "hyperframes update" : updateCommandFor(install, latest);
+  }
+  // A bare `npx hyperframes` can reuse the stale copy in npx's cache.
+  if (install.channel === "npx" && cliBehind) return "npx hyperframes@latest update";
+  return "npx hyperframes update";
+}
+
+/** The update notice for this run's `_meta`, before the once-a-day gate; null when there is nothing to say. */
+function updateNoticeText(meta: UpdateMeta): string | null {
+  if (updateCheckDisabled() || process.env["HYPERFRAMES_PLUGIN_VERSION"]) return null;
+  const latest = meta.updateAvailable && meta.latestVersion ? meta.latestVersion : null;
+  const skills = skillsBehindPhrase(meta);
+  if (!latest && !skills) return null;
+  const command = noticeCommand(latest !== null, skills !== null, latest ?? meta.version);
+  if (latest && skills) {
+    return `For the user: HyperFrames CLI ${latest} is available (this run is ${meta.version}), and ${skills}. To update both, run: ${command}`;
+  }
+  if (latest) {
+    return `For the user: HyperFrames CLI ${latest} is available (this run is ${meta.version}). To update, run: ${command}`;
+  }
+  return `For the user: ${skills} (this run is HyperFrames CLI ${meta.version}). To update them, run: ${command}`;
 }
 
 /**
@@ -167,12 +227,20 @@ function cachedSkillsOutdated(config: ReturnType<typeof readConfig>): number | u
  * Pass `{ deprecated: true }` from a command superseded by `check` (validate,
  * inspect, layout) to add `_meta.deprecated: true`; every other call site is
  * unaffected — the key is only ever added, never set to `false`.
+ *
+ * `_meta.updateNotice` is added when the CLI or the skills are behind, at most once a day per
+ * project (the numeric fields stay on every result). `{ updateNotice: false }` leaves it out,
+ * for `update`, whose own result already says what to run.
  */
 export function withMeta<T extends object>(
   data: T,
-  options?: { deprecated?: boolean },
+  options?: { deprecated?: boolean; updateNotice?: boolean },
 ): T & { _meta: UpdateMeta } {
   const meta = getUpdateMeta();
+  if (options?.updateNotice !== false) {
+    const notice = updateNoticeText(meta);
+    if (notice && claimDailyNotice("update", resolve(process.cwd()))) meta.updateNotice = notice;
+  }
   if (options?.deprecated) meta.deprecated = true;
   return { ...data, _meta: meta };
 }

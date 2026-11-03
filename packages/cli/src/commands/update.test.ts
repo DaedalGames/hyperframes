@@ -170,7 +170,7 @@ describe("hyperframes update --check", () => {
       ref: "v0.9.5",
       outdated: 2,
       updateAvailable: true,
-      command: "npx hyperframes skills update",
+      command: "npx hyperframes update",
     });
     expect(out._meta).toMatchObject({
       latestVersion: "0.9.8",
