@@ -6,6 +6,9 @@
 import { EventEmitter } from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// The package-manager binaries a CLI upgrade runs; npx (cmd.exe on Windows) and git are the skills tooling.
+const INSTALLERS = vi.hoisted(() => new Set(["npm", "pnpm", "bun", "brew"]));
+
 const state = vi.hoisted(() => ({
   config: {} as Record<string, unknown>,
   execCalls: [] as { command: string; args: readonly string[]; opts: unknown }[],
@@ -36,7 +39,7 @@ vi.mock("node:child_process", () => ({
   execFile: vi.fn(),
   execFileSync: vi.fn((command: string, args: readonly string[], opts: unknown) => {
     state.execCalls.push({ command, args, opts });
-    if (state.installFails && command !== "npx" && command !== "git") throw new Error("boom");
+    if (state.installFails && INSTALLERS.has(command)) throw new Error("boom");
     return Buffer.from("11.0.0");
   }),
   spawn: vi.fn((command: string, args: readonly string[]) => {
@@ -97,7 +100,7 @@ async function runUpdate(entry: string, args: Record<string, unknown>) {
 }
 
 const json = () => JSON.parse(stdout.join("\n")) as Record<string, any>;
-const installs = () => state.execCalls.filter((c) => c.command !== "npx" && c.command !== "git");
+const installs = () => state.execCalls.filter((c) => INSTALLERS.has(c.command));
 const skillsAdds = () => state.spawnCalls.filter((c) => c.args.includes("add"));
 
 beforeEach(() => {
