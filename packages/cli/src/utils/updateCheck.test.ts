@@ -438,6 +438,67 @@ describe("updateCheckDue / cachedUpdateCheck — what the parent reads without f
     expect(mod.updateCheckDue()).toBe(due);
   });
 
+  // A release reaches agents within hours: the cache answers for 2 h, not a day.
+  it("re-asks the registry once the cache is 3 hours old", async () => {
+    const mod = await load({ lastUpdateCheck: hoursAgo(3), latestVersion: "9.9.9" });
+    expect(mod.updateCheckDue()).toBe(true);
+  });
+
+  it("says in _meta when the cached latest was checked", async () => {
+    const checkedAt = hoursAgo(1);
+    const mod = await load({ lastUpdateCheck: checkedAt, latestVersion: "999.0.0" });
+    expect(mod.getUpdateMeta()).toMatchObject({ latestVersion: "999.0.0", checkedAt });
+  });
+
+  describe("_meta.skillsOutdated, from the cached background skills check", () => {
+    const skillsCache = (over: Record<string, unknown> = {}) => ({
+      lastSkillsCheck: hoursAgo(1),
+      skillsCheckedVersion: "0.9.6",
+      skillsOutdatedCount: 3,
+      skillsMissingCount: 0,
+      ...over,
+    });
+    const loadAt096 = (config: Record<string, unknown>) => {
+      vi.doMock("../version.js", () => ({ VERSION: "0.9.6", PRODUCER_VERSION: "0.9.6" }));
+      return load(config);
+    };
+
+    it("reports the count without a network call", async () => {
+      const fetchSpy = vi.fn();
+      vi.stubGlobal("fetch", fetchSpy);
+      try {
+        const mod = await loadAt096(skillsCache());
+        expect(mod.withMeta({ ok: true })._meta.skillsOutdated).toBe(3);
+        expect(fetchSpy).not.toHaveBeenCalled();
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("reports zero when the check found everything current", async () => {
+      const mod = await loadAt096(skillsCache({ skillsOutdatedCount: 0 }));
+      expect(mod.getUpdateMeta().skillsOutdated).toBe(0);
+    });
+
+    it.each([
+      ["no skills check is cached", {}],
+      [
+        "the check ran under another CLI version (another release tag)",
+        skillsCache({ skillsCheckedVersion: "0.9.5" }),
+      ],
+      ["the cached count is not a count", skillsCache({ skillsOutdatedCount: "3" })],
+    ])("is absent when %s", async (_, config) => {
+      const mod = await loadAt096(config);
+      expect("skillsOutdated" in mod.getUpdateMeta()).toBe(false);
+    });
+
+    it("is absent when HYPERFRAMES_SKIP_SKILLS hands the skills to something else", async () => {
+      const mod = await loadAt096(skillsCache());
+      vi.stubEnv("HYPERFRAMES_SKIP_SKILLS", "1");
+      expect("skillsOutdated" in mod.getUpdateMeta()).toBe(false);
+    });
+  });
+
   it("is never due under CI", async () => {
     const mod = await load({});
     vi.stubEnv("CI", "1");
@@ -471,10 +532,13 @@ describe("updateCheckDue / cachedUpdateCheck — what the parent reads without f
     },
   );
 
-  it("treats a cached latest older than the running CLI as unknown, without re-checking sooner than the daily cadence", async () => {
+  // The cache predates this install (an upgrade happened since), so however recent, it is
+  // stale: the next background check asks the registry (launchBackgroundChecks' 1 h
+  // failure backoff still bounds how often).
+  it("treats a cached latest older than the running CLI as unknown, and as due for a recheck now", async () => {
     vi.doMock("../version.js", () => ({ VERSION: "0.9.6", PRODUCER_VERSION: "0.9.6" }));
     const mod = await load({ lastUpdateCheck: hoursAgo(1), latestVersion: "0.9.5" });
-    expect(mod.updateCheckDue()).toBe(false);
+    expect(mod.updateCheckDue()).toBe(true);
     expect(mod.getUpdateMeta()).toEqual({
       version: "0.9.6",
       latestVersion: undefined,

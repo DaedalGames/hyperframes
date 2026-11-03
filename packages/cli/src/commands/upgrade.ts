@@ -22,7 +22,11 @@ import {
   isSafeVersion,
   type UpdateCheckResult,
 } from "../utils/updateCheck.js";
-import { detectInstaller, installInvocation } from "../utils/installerDetection.js";
+import {
+  detectInstaller,
+  installInvocation,
+  type InstallInvocation,
+} from "../utils/installerDetection.js";
 
 export default defineCommand({
   meta: { name: "upgrade", description: "Check for updates and show upgrade instructions" },
@@ -124,24 +128,59 @@ function applyUpgrade(result: UpdateCheckResult, autoYes: boolean): void {
     return;
   }
 
-  const installer = detectInstaller();
-  const invocation = installInvocation(installer.kind, result.latest);
-  const displayCmd = installer.installCommand(result.latest);
-  const npxFallback = `npx hyperframes@${result.latest}`;
-
-  // Undetectable / ephemeral (npx, bunx) / project-local / workspace: don't
-  // guess a manager command; point at the universal npx fallback instead.
-  if (!invocation || !displayCmd) {
-    printNpxFallback(installer.reason, npxFallback, autoYes);
+  const plan = upgradePlan(result.latest);
+  if ("manual" in plan) {
+    printNpxFallback(plan.reason, plan.manual, autoYes);
     return;
   }
 
   if (!autoYes) {
-    printManualCommands(displayCmd, npxFallback);
+    printManualCommands(plan.displayCmd, `npx hyperframes@${result.latest}`);
     return;
   }
 
-  runDetectedInstall(invocation, displayCmd, result.latest);
+  runDetectedInstall(plan.invocation, plan.displayCmd, result.latest);
+}
+
+const NPX_LATEST = "npx hyperframes@latest";
+
+/**
+ * How `upgrade --yes` moves this install to `latest`: the detected manager's argv, or, for an
+ * install no manager owns (npx/bunx, project-local, workspace, unknown), the npx line to run
+ * instead of a guessed manager command.
+ */
+function upgradePlan(
+  latest: string,
+): { invocation: InstallInvocation; displayCmd: string } | { manual: string; reason: string } {
+  const installer = detectInstaller();
+  const invocation = installInvocation(installer.kind, latest);
+  const displayCmd = installer.installCommand(latest);
+  if (!invocation || !displayCmd) return { manual: NPX_LATEST, reason: installer.reason };
+  return { invocation, displayCmd };
+}
+
+export type CliUpgradeOutcome =
+  | { status: "upgraded"; version: string; command: string }
+  | { status: "manual"; command: string; reason: string }
+  | { status: "failed"; command: string };
+
+/**
+ * `upgrade --yes` without its prose, for `hyperframes update`: the same plan and argv, and the
+ * installer's output goes to stderr so a --json stdout stays one parseable object.
+ */
+export function upgradeRunningCli(latest: string): CliUpgradeOutcome {
+  if (!isSafeVersion(latest)) return { status: "failed", command: NPX_LATEST };
+  const plan = upgradePlan(latest);
+  if ("manual" in plan) return { status: "manual", command: plan.manual, reason: plan.reason };
+  try {
+    execFileSync(plan.invocation.bin, plan.invocation.args, {
+      stdio: ["inherit", 2, 2],
+      shell: false,
+    });
+    return { status: "upgraded", version: latest, command: plan.displayCmd };
+  } catch {
+    return { status: "failed", command: plan.displayCmd };
+  }
 }
 
 function printNpxFallback(reason: string, npxFallback: string, autoYes: boolean): void {

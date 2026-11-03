@@ -327,12 +327,18 @@ export async function updateSkills(
     all?: boolean;
     strict?: boolean;
     cwd?: string;
+    /**
+     * The CLI version whose release tag to install from (default: this one). `hyperframes
+     * update` passes the version it just upgraded to, so the skills match the CLI that runs next.
+     */
+    cliVersion?: string;
   } = {},
 ): Promise<UpdateSkillsResult> {
   const named = [...new Set(opts.requested ?? [])];
   const retired = named.filter((name) => RETIRED_SKILLS.includes(name));
   const requested = named.filter((name) => !retired.includes(name));
   const strict = opts.strict ?? false;
+  const cliVersion = opts.cliVersion ?? VERSION;
 
   let check: SkillsCheckResult | null = null;
   try {
@@ -346,7 +352,7 @@ export async function updateSkills(
     // that no longer exists, and verifyInstalled would strict-throw on a
     // "failure" that was never real. Resolving canonically means a retired
     // skill simply never appears as a target in the first place.
-    check = await checkSkills({ cwd: opts.cwd, canonical: true, cliVersion: VERSION });
+    check = await checkSkills({ cwd: opts.cwd, canonical: true, cliVersion });
   } catch (err) {
     // A *malformed* canonical manifest (the server was reached, but served a
     // bad shape) is otherwise indistinguishable from being offline — both fall
@@ -372,7 +378,10 @@ export async function updateSkills(
         ),
       );
     }
-    return { ...(await updateSkillsOffline(requested, { strict, cwd: opts.cwd })), retired };
+    return {
+      ...(await updateSkillsOffline(requested, { strict, cwd: opts.cwd, cliVersion })),
+      retired,
+    };
   }
 
   const manifestSkills = check.skills;
@@ -463,7 +472,7 @@ function verifyInstalled(names: readonly string[], opts: { strict: boolean; cwd?
  */
 async function updateSkillsOffline(
   requested: readonly string[],
-  opts: { strict: boolean; cwd?: string },
+  opts: { strict: boolean; cwd?: string; cliVersion: string },
 ): Promise<Omit<UpdateSkillsResult, "retired">> {
   if (requested.length === 0 && opts.strict) {
     throw new Error(
@@ -487,7 +496,7 @@ async function updateSkillsOffline(
     await installSkills(absent, {
       cwd: opts.cwd,
       strict: opts.strict,
-      ref: cliReleaseTag(VERSION) ?? "main",
+      ref: cliReleaseTag(opts.cliVersion) ?? "main",
     });
     verifyInstalled(absent, opts);
   }
@@ -607,7 +616,7 @@ const checkCommand = defineCommand({
  * the router's trigger-time `skills update <workflow>` replaces a pinned install
  * with the latest upstream skills (GH #5695).
  */
-function skillsManagedExternally(): boolean {
+export function skillsManagedExternally(): boolean {
   return process.env["HYPERFRAMES_SKIP_SKILLS"] === "1";
 }
 

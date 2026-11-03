@@ -14,7 +14,7 @@ import { isSafeVersion } from "./safeVersion.js";
 export { isSafeVersion } from "./safeVersion.js";
 
 const NPM_REGISTRY_URL = "https://registry.npmjs.org/hyperframes/latest";
-const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const CHECK_INTERVAL_MS = 2 * 60 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 3000;
 
 /** Returns true if `a` is newer than `b` per semver (handles alpha, beta, rc). */
@@ -36,12 +36,16 @@ export interface UpdateMeta {
   version: string;
   latestVersion?: string;
   updateAvailable: boolean;
+  /** When the registry gave `latestVersion` (ISO). Absent when no usable answer is cached. */
+  checkedAt?: string;
+  /** Installed skills behind this CLI's release tag, per the cached background check. */
+  skillsOutdated?: number;
   /** Present (and true) only for commands superseded by `check`; absent otherwise. */
   deprecated?: boolean;
 }
 
 /**
- * Check npm registry for the latest version. Uses a 24h cache to avoid
+ * Check npm registry for the latest version. Uses a 2h cache to avoid
  * hitting the registry on every invocation.
  *
  * @param force - Skip the cache, opt-outs and DNS probe: the caller waits for the registry
@@ -93,10 +97,14 @@ export async function checkForUpdate(force?: boolean): Promise<UpdateCheckResult
   }
 }
 
-/** Whether the background check should ask the registry: not opted out, and no fresh safe cache. */
+/**
+ * Whether the background check should ask the registry: not opted out, and no fresh safe cache.
+ * A cached latest older than the running CLI predates this install, so it is stale however recent.
+ */
 export function updateCheckDue(config = readConfig()): boolean {
   if (updateCheckDisabled()) return false;
   if (!config.lastUpdateCheck || !isSafeCache(config.latestVersion)) return true;
+  if (isNewerSemver(VERSION, config.latestVersion)) return true;
   const fresh = Date.now() - new Date(config.lastUpdateCheck).getTime() < CHECK_INTERVAL_MS;
   return !fresh;
 }
@@ -128,12 +136,25 @@ function cachedVersionForThisInstall(value: unknown): string | undefined {
  * Never fetches. Returns what the last background check found.
  */
 export function getUpdateMeta(): UpdateMeta {
-  const latestVersion = cachedVersionForThisInstall(readConfig().latestVersion);
+  const config = readConfig();
+  const latestVersion = cachedVersionForThisInstall(config.latestVersion);
+  const checkedAt = latestVersion ? config.lastUpdateCheck : undefined;
+  const skillsOutdated = cachedSkillsOutdated(config);
   return {
     version: VERSION,
     latestVersion,
     updateAvailable: latestVersion ? isNewerSemver(latestVersion, VERSION) : false,
+    ...(checkedAt ? { checkedAt } : {}),
+    ...(skillsOutdated === undefined ? {} : { skillsOutdated }),
   };
+}
+
+/** The cached outdated-skills count, only when it was taken for this CLI version's tag. */
+function cachedSkillsOutdated(config: ReturnType<typeof readConfig>): number | undefined {
+  if (process.env["HYPERFRAMES_SKIP_SKILLS"] === "1") return undefined;
+  if (!config.lastSkillsCheck || config.skillsCheckedVersion !== VERSION) return undefined;
+  const count = config.skillsOutdatedCount;
+  return typeof count === "number" && Number.isInteger(count) && count >= 0 ? count : undefined;
 }
 
 /**
