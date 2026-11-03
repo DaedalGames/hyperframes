@@ -403,7 +403,7 @@ describe("checkForUpdate — registry boundary guard", () => {
 });
 
 describe("updateCheckDue / cachedUpdateCheck — what the parent reads without fetching", () => {
-  // Where claimDailyNotice keeps `update-notice.json`: a fresh directory per load().
+  // The directory that holds the daily notice claims: a fresh one per load().
   let stateDir = "";
 
   afterEach(() => {
