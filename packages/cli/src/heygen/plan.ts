@@ -50,7 +50,7 @@ const webBase = () => "https://hyperframes.studio";
 const plansUrl = () => process.env["HYPERFRAMES_PLANS_URL"] || `${webBase()}/pricing`;
 const creditsUrl = () => process.env["HYPERFRAMES_CREDITS_URL"] || `${webBase()}/pricing`;
 
-/** The workspace the sign-in is bound to (the web side's `workspace_hint` shape), or undefined when it cannot be read. */
+/** The workspace the sign-in is bound to, or undefined when it cannot be read. */
 async function signedInSpace(): Promise<string | undefined> {
   try {
     const res = await fetch(`${billingBaseUrl()}/v1/pacific/account.get`, {
