@@ -204,20 +204,27 @@ function noticeCommand(cliBehind: boolean, skillsBehind: boolean, latest: string
   return "npx hyperframes update";
 }
 
+/** The sentence itself: the newer CLI, the skills behind, or both, and the command. */
+function noticeSentence(
+  version: string,
+  latest: string | null,
+  skills: string | null,
+  command: string,
+): string {
+  const cli = latest ? `HyperFrames CLI ${latest} is available (this run is ${version})` : null;
+  if (cli && skills) return `For the user: ${cli}, and ${skills}. To update both, run: ${command}`;
+  if (cli) return `For the user: ${cli}. To update, run: ${command}`;
+  return `For the user: ${skills} (this run is HyperFrames CLI ${version}). To update them, run: ${command}`;
+}
+
 /** The update notice for this run's `_meta`, before the once-a-day gate; null when there is nothing to say. */
 function updateNoticeText(meta: UpdateMeta): string | null {
   if (updateCheckDisabled() || process.env["HYPERFRAMES_PLUGIN_VERSION"]) return null;
-  const latest = meta.updateAvailable && meta.latestVersion ? meta.latestVersion : null;
+  const latest = meta.updateAvailable ? (meta.latestVersion ?? null) : null;
   const skills = skillsBehindPhrase(meta);
   if (!latest && !skills) return null;
   const command = noticeCommand(latest !== null, skills !== null, latest ?? meta.version);
-  if (latest && skills) {
-    return `For the user: HyperFrames CLI ${latest} is available (this run is ${meta.version}), and ${skills}. To update both, run: ${command}`;
-  }
-  if (latest) {
-    return `For the user: HyperFrames CLI ${latest} is available (this run is ${meta.version}). To update, run: ${command}`;
-  }
-  return `For the user: ${skills} (this run is HyperFrames CLI ${meta.version}). To update them, run: ${command}`;
+  return noticeSentence(meta.version, latest, skills, command);
 }
 
 /**
