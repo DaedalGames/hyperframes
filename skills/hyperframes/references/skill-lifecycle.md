@@ -1,15 +1,15 @@
 # Skill installation and freshness
 
-Read this reference when installing or updating skills, diagnosing unexpected skill behavior, or running HyperFrames setup in CI.
+Read this reference when the person asks about installing or updating skills, when diagnosing unexpected skill behavior, or when running HyperFrames setup in CI. Skills are versioned with the CLI. Installing, updating and removing them is the person's step: tell them what is out of date and which command fits, and do not run it yourself.
 
 For a plugin installation, follow [plugin execution rules](plugin-installation.md); the plugin manager owns updates and every skill is bundled. The commands below apply only to standalone skills.
 
 - **Core set, installed eagerly:** `/hyperframes`, `/hyperframes-cli`, `/hyperframes-registry` and `/media-use`.
-- **On demand:** `/figma`, `/slideshow`, `/remotion-to-hyperframes` and `/reverse-any-video`, installed with `npx hyperframes skills update <name>`.
+- **On demand:** `/figma`, `/slideshow`, `/remotion-to-hyperframes` and `/reverse-any-video`, which the person installs with `npx hyperframes skills update <name>`.
 
 ## What `init` does
 
-`npx hyperframes init` installs the core set when it is missing and leaves every skill that is already installed as it is: it never refreshes, replaces or removes one. Updating is `npx hyperframes skills update`, run by you. Offline or rate-limited checks degrade gracefully and do not fail project scaffolding.
+`npx hyperframes init` installs the core set when it is missing and leaves every skill that is already installed as it is: it never refreshes, replaces or removes one. The person updates skills with `npx hyperframes skills update`. Offline or rate-limited checks degrade gracefully and do not fail project scaffolding.
 
 `--skip-skills` makes `init` leave skills alone. `HYPERFRAMES_SKIP_SKILLS=1` does the same for CI and tests.
 
@@ -19,11 +19,16 @@ For a plugin installation, follow [plugin execution rules](plugin-installation.m
 
 After `render`, `lint` and `validate`, the CLI prints `N HyperFrames skills out of date or missing` to stderr when the cached check finds stale skills, so an agent run without a terminal sees it too. It is off in CI, in dev, with `HYPERFRAMES_NO_UPDATE_CHECK=1` and with `HYPERFRAMES_SKIP_SKILLS=1`, and runs with `--json` too, since it only writes stderr and leaves `--json` stdout untouched.
 
-## Diagnose and update
+## Diagnose, and what the person can run
 
 ```bash
 npx hyperframes skills check
 npx hyperframes skills check --json
+```
+
+The person's install and update commands, to name when you relay a stale result:
+
+```bash
 npx hyperframes skills update
 npx hyperframes skills update <name>
 npx hyperframes skills
@@ -34,9 +39,9 @@ npx hyperframes skills
 - Named `skills update <name...>` also installs those named skills.
 - Bare `skills` installs the full published set explicitly.
 
-If the HyperFrames CLI is unavailable, use `npx skills add heygen-com/hyperframes --skill <name>` for one skill or `npx skills add heygen-com/hyperframes --all` for the full published set.
+If the HyperFrames CLI is unavailable, the person can install with `npx skills add heygen-com/hyperframes --skill <name>` for one skill or `npx skills add heygen-com/hyperframes --all` for the full published set.
 
-The CLI may print a one-line stale-skill reminder during `render`, `lint`, or `check`. Treat a failed update as a visible tool failure; do not continue from a remembered skill.
+The CLI may print a one-line stale-skill reminder during `render`, `lint`, or `check`. Relay it to the person and keep working from the installed skills; do not continue from a remembered skill.
 
 ## Keep the project's CLI current
 

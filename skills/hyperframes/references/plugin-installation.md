@@ -37,7 +37,7 @@ in every skill and reference:
   project or a temporary directory. Pass this plugin root and launcher convention
   to any delegated agent so it does not fall back to global skills.
 
-To get newer skills, use the client's plugin update flow and reload the session.
-Do not silently update an installed plugin during a video task.
+Newer skills come through the client's plugin update flow and a session reload,
+which the person runs. Do not update an installed plugin yourself.
 
 The launcher suppresses CLI update notices as well as standalone skill refreshes, including when running an older CLI with a stale notice cache. It passes the release as `HYPERFRAMES_PLUGIN_VERSION` for plugin-aware helpers and as `HYPERFRAMES_SKILL_PKG_VERSION` for the existing helper-package bootstrap. Our release process versions those packages together.

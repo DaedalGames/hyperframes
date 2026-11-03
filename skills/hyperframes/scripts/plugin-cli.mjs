@@ -29,7 +29,7 @@ export function pluginVersion(pluginRoot = root) {
     return manifest.version;
   }
   throw new Error(
-    "No HyperFrames plugin manifest found. Use the standalone skills installation instructions.",
+    "No HyperFrames plugin manifest found. This is a standalone skill install; run `npx hyperframes` directly.",
   );
 }
 
