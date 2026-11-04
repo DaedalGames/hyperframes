@@ -3,7 +3,6 @@
 
 import type { AccessMode, LinkRole } from "./share";
 
-// hf/logic/review_errors.py:29-37: code equals the HTTP status; data.reason is always present.
 export interface ErrorEnvelope {
   code: number;
   message: string;
@@ -20,14 +19,12 @@ export interface ErrorEnvelope {
   };
 }
 
-// hf/dto/review_project_dto.py:10-14
 export interface RegisterProjectRequest {
   studio_project_id: string;
   title: string;
   client_operation_id: string;
 }
 
-// hf/logic/review_access.py:371-378
 interface Capabilities {
   can_view: true;
   can_comment: boolean;
@@ -36,7 +33,6 @@ interface Capabilities {
   can_manage_sharing: boolean;
 }
 
-// hf/logic/review_projects.py:120-132
 export interface ProjectDTO {
   review_entitlements?: ReviewEntitlements | null;
   project_id: string;
@@ -74,7 +70,6 @@ interface SpaceRef {
   has_other_members?: boolean;
 }
 
-// hf/logic/review_projects.py:99-117
 export interface ShareDTO {
   review_entitlements?: ReviewEntitlements | null;
   sharing_state?: ReviewSharingState;
@@ -95,7 +90,6 @@ export interface ShareDTO {
   moderation_hold_kind?: "takedown" | "auto_reports" | null;
 }
 
-// hf/dto/review_project_dto.py:17-22
 export interface UpdateProjectShareRequest {
   access_mode: AccessMode;
   default_role: LinkRole;
@@ -103,7 +97,6 @@ export interface UpdateProjectShareRequest {
   expected_revision: number;
 }
 
-// hf/dto/review_project_dto.py:50-53: POST share turns the link back on (a new address) when it was turned off.
 export interface ProjectOperationRequest {
   expected_link_generation: number;
   client_operation_id: string;

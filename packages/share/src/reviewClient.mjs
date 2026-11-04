@@ -1,6 +1,6 @@
 // @ts-check
 // The one owner of every shared-reviews call (experiment-framework #55224). Main only: the server refuses a write that
-// carries an Origin or Referer unless it is an allowlisted https site (hf/logic/review_access.py:121-143), and a bearer
+// carries an Origin or Referer unless it is an allowlisted https site (the backend review access policy), and a bearer
 // call with neither passes.
 
 import { randomUUID } from "node:crypto";
