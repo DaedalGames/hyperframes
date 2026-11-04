@@ -1,4 +1,5 @@
 import { ReviewFailed, reviewSentence } from "@hyperframes/share";
+import { ShareSourceError } from "./sources.js";
 import { isAuthError } from "../auth/errors.js";
 
 const HINTS: Record<string, string> = {
@@ -16,6 +17,7 @@ const HINTS: Record<string, string> = {
     "This project has no shared review yet. Run hyperframes share with an explicit audience.",
 };
 export function shareError(error: unknown): { code: string; message: string } {
+  if (error instanceof ShareSourceError) return { code: error.reason, message: error.message };
   if (isAuthError(error))
     return {
       code: error.code.toLowerCase(),
