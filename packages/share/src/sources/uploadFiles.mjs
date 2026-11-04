@@ -13,8 +13,8 @@ import {
 } from "./transfer.mjs";
 import { lstat } from "node:fs/promises";
 
-/** @typedef {import("./types").FileGrant} FileGrant @typedef {import("./types").GrantRequest} GrantRequest
- * @typedef {import("./types").InflightUpload} InflightUpload */
+/** @typedef {import("./types.js").FileGrant} FileGrant @typedef {import("./types.js").GrantRequest} GrantRequest
+ * @typedef {import("./types.js").InflightUpload} InflightUpload */
 
 /** The server's single-PUT ceiling and part size. */
 const PART_BYTES = 64 * 1024 * 1024;
@@ -27,14 +27,14 @@ const URL_MARGIN_MS = 60_000;
 
 /** The file's multipart upload can take no more parts (`hyperframes_composition_upload_file_not_writable`): this
  * upload cannot finish, so the send cancels it and begins a new one. */
-export class NotWritable extends Error {
+class NotWritable extends Error {
   constructor() {
     super("composition sync: a file's multipart upload can no longer take parts");
     this.name = "NotWritable";
   }
 }
 
-/** @typedef {import("./types").UploadJob} UploadJob */
+/** @typedef {import("./types.js").UploadJob} UploadJob */
 
 /** @param {UploadJob} job @param {unknown} error @param {number} attempt the attempt that just failed, from 1
  * @returns {Promise<boolean>} whether to try again */
