@@ -1,7 +1,7 @@
 // Shared-reviews wire types (experiment-framework #55224, hf/ = heygen/services/heygen_server/hyperframes/), only the
 // ones Desktop sends or reads. Response fields are always serialized; `| null` is nullable on the wire.
 
-import type { AccessMode, LinkRole } from "./share";
+import type { AccessMode, LinkRole } from "./share.js";
 
 export interface ErrorEnvelope {
   code: number;

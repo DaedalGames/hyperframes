@@ -2,7 +2,7 @@ import { promisify } from "node:util";
 import { execFile as nodeExecFile } from "node:child_process";
 import { signedInRequest as defaultRequest } from "./signedInRequest.mjs";
 // @ts-check
-/** @typedef {import("./hosts").ShareHost} ShareHost */
+/** @typedef {import("./hosts.js").ShareHost} ShareHost */
 /** @type {Partial<ShareHost>} */
 const host = { execFile: nodeExecFile, signedInRequest: defaultRequest };
 /** Bound by the host's main process, each part beside the doors that need it (packages/desktop/main/share.mjs,
