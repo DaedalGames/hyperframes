@@ -321,8 +321,8 @@ describe("TransportClock", () => {
       for (const stepMs of [30, 40, 50]) {
         const run = playStepping(240, stepMs);
         expect(run.skipped, `${stepMs} ms steps: film frames skipped`).toBe(0);
-        // A 30 fps frame spans two 60 Hz ticks; one read late after an update can add a third, never more.
-        expect(run.longestHold, `${stepMs} ms steps: ticks a frame is held`).toBeLessThanOrEqual(2);
+        // A 30 fps frame spans two 60 Hz ticks: held for one extra tick, never two.
+        expect(run.longestHold, `${stepMs} ms steps: ticks a frame is held`).toBeLessThanOrEqual(1);
         expect(run.back, `${stepMs} ms steps: reads that went back`).toBe(0);
         expect(run.mostAhead, `${stepMs} ms steps: lead over the element`).toBeLessThanOrEqual(
           stepMs / 1000 + 1e-9,

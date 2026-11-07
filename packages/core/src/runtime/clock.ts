@@ -29,11 +29,30 @@ const HAVE_FUTURE_DATA = 3;
 const AUDIO_START_WAIT_MS = 1500;
 const MEDIA_SYNC_STEER_TOLERANCE_SECONDS = 0.04;
 /** The longest step between an element's time updates the clock carries itself across; a longer one is a jump. */
-const MAX_MEDIA_STRIDE_MS = 250;
+const MAX_MEDIA_STEP_SECONDS = 0.25;
+/** How many of the element's last steps set how far the clock may run ahead of it. */
+const MEDIA_STEPS_KEPT = 8;
 
 type PendingAudioStart = { sinceMs: number; at: number; from: number | null };
-/** The element's last distinct time, when the clock read it, and how far (in wall ms) its update before that moved. */
-type MediaReading = { el: HTMLMediaElement; time: number; atMs: number; strideMs: number };
+/** The element's last distinct time and its last steps, and where the clock's own run started (time, wall ms). */
+type MediaReading = {
+  el: HTMLMediaElement;
+  time: number;
+  steps: number[];
+  from: number;
+  fromMs: number;
+};
+
+/** How far the clock may run ahead of the element: its largest recent step. */
+const leadOf = (reading: MediaReading | null) => (reading ? Math.max(0, ...reading.steps) : 0);
+
+/** Moves the reading to `time`, keeping the step it took unless it was a jump. */
+function noteStep(reading: MediaReading, time: number): void {
+  const step = time - reading.time;
+  if (step > 0 && step <= MAX_MEDIA_STEP_SECONDS)
+    reading.steps = [...reading.steps.slice(1 - MEDIA_STEPS_KEPT), step];
+  reading.time = time;
+}
 
 export class TransportClock {
   private _baseTime = 0;
@@ -114,22 +133,22 @@ export class TransportClock {
 
   /**
    * Chromium moves `currentTime` in steps of 10-50 ms or more, so a clock that reads it as is holds a frame, then jumps.
-   * Between two updates the clock runs on from the last one at the play rate, for at most the step that update moved,
-   * and never goes back; null when `time` is behind the playhead by more than that (a late clip, not a step).
+   * The clock runs on at the play rate and is only pulled into [element time, element time + its largest recent step];
+   * it never goes back. Null when `time` is behind the playhead by more than that step (a late clip, not a step).
    */
   private _betweenUpdates(el: HTMLMediaElement, time: number): number | null {
     const nowMs = this._nowMs();
     const last = this._reading?.el === el ? this._reading : null;
-    const stride = last ? (last.strideMs / 1000) * this._rate : 0;
-    if (time < this._lastNow - stride) return null;
-    if (!last || time !== last.time) {
-      const moved = last && time > last.time ? ((time - last.time) / this._rate) * 1000 : 0;
-      const strideMs = Math.min(moved, MAX_MEDIA_STRIDE_MS);
-      this._reading = { el, time, atMs: nowMs, strideMs };
+    if (time < this._lastNow - leadOf(last)) return null;
+    if (!last) {
+      this._reading = { el, time, steps: [], from: time, fromMs: nowMs };
       return Math.max(time, this._lastNow);
     }
-    const ahead = (Math.min(nowMs - last.atMs, last.strideMs) / 1000) * this._rate;
-    return Math.max(this._lastNow, time + ahead);
+    noteStep(last, time);
+    const run = last.from + ((nowMs - last.fromMs) / 1000) * this._rate;
+    const held = Math.min(Math.max(run, time), time + leadOf(last));
+    if (held !== run) Object.assign(last, { from: held, fromMs: nowMs });
+    return Math.max(held, this._lastNow);
   }
 
   private _heldUntilAudioOutputStarts(seeking: boolean, time: number): number | null | undefined {
