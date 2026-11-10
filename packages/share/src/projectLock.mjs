@@ -64,7 +64,7 @@ async function claim(candidate, lock, owner) {
     await fs.link(candidate, lock);
   } catch (error) {
     if (
-      !["EPERM", "ENOTSUP", "EOPNOTSUPP", "EXDEV", "EINVAL", "EISDIR"].includes(
+      !["EPERM", "ENOTSUP", "EOPNOTSUPP", "EXDEV", "EINVAL", "EISDIR", "EACCES"].includes(
         String(errorCode(error)),
       )
     )
