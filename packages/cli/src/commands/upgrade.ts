@@ -18,6 +18,7 @@ export const examples: Example[] = [
 import { VERSION } from "../version.js";
 import {
   checkForUpdate,
+  updateChannel,
   NO_UPDATE_NOTICE,
   withMeta,
   isSafeVersion,
@@ -143,7 +144,7 @@ function applyUpgrade(result: UpdateCheckResult, autoYes: boolean): void {
   runDetectedInstall(plan.invocation, plan.displayCmd, result.latest);
 }
 
-const NPX_LATEST = "npx hyperframes@latest";
+const NPX_LATEST = `npx hyperframes@${updateChannel()}`;
 
 /**
  * How `upgrade --yes` moves this install to `latest`: the detected manager's argv, or, for an
