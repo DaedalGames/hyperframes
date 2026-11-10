@@ -9,6 +9,37 @@ Recent HyperFrames releases, including user-facing features, fixes, and migratio
 {/* New release entries are prepended by `bun run changelog:draft <version> --write`. */}
 
 <Update
+  label="HyperFrames v0.9.32"
+  description="Released - 2026-11-10"
+  tags={["Release", "Producer", "Lint", "Docs"]}
+>
+Long films that are slow to open now render instead of failing before their first frame. The CLI, Studio and the renderer also stop a project folder from choosing what they run or serve.
+
+## Features
+
+- **Producer:** The render stream's complete event names the producer version that rendered it ([7afa05a78](https://github.com/heygen-com/hyperframes/commit/7afa05a782c452ca76af22bdde12d4cddaf64c60), [#7515](https://github.com/heygen-com/hyperframes/pull/7515)).
+
+## Fixes
+
+- **Producer:** Long films that are slow to open no longer fail before their first frame: the wait for the first frame now follows how long the browser took to start, up to 15 minutes ([7ff8ece46](https://github.com/heygen-com/hyperframes/commit/7ff8ece461e87282e17f3da14f0b83d0cbe9d38f), [#7517](https://github.com/heygen-com/hyperframes/pull/7517)).
+- **Lint:** Flag a script that calls gsap before GSAP loads, and say so when a render fails on it ([124591a9d](https://github.com/heygen-com/hyperframes/commit/124591a9d5d54fb90ab9ab832ced2b3af1527d11), [#7514](https://github.com/heygen-com/hyperframes/pull/7514)).
+- **Producer,engine:** Harden render paths, render slots and local listeners ([60fb9d2c5](https://github.com/heygen-com/hyperframes/commit/60fb9d2c5e0c213787888300dd98b8cb05fc2b31), [#7508](https://github.com/heygen-com/hyperframes/pull/7508)).
+- **Studio Server:** Harden preview paths, cache folders and local servers ([b8bb49190](https://github.com/heygen-com/hyperframes/commit/b8bb4919003fd5082a0db481271db4baf7701b30), [#7510](https://github.com/heygen-com/hyperframes/pull/7510)).
+- **CLI:** Keep project folders from choosing the programs and config the CLI runs ([84c7d02a1](https://github.com/heygen-com/hyperframes/commit/84c7d02a190f79420cd8c5d112033706fb0a8efc), [#7511](https://github.com/heygen-com/hyperframes/pull/7511)).
+- **CLI:** Harden lambda destroy, snapshot media, upgrade and project file serving ([c96ff540c](https://github.com/heygen-com/hyperframes/commit/c96ff540c4d696929774aee35ab62830caa7146c), [#7509](https://github.com/heygen-com/hyperframes/pull/7509)).
+
+## Performance
+
+- **Docs:** Load showcase film tiles only when they are near the screen ([fd0c2337c](https://github.com/heygen-com/hyperframes/commit/fd0c2337c5f85cf2c2850a41feeb150a7ef27fe6), [#7507](https://github.com/heygen-com/hyperframes/pull/7507)).
+
+## Catalog
+
+- Harden docs snippets, SVG sanitizer, lint regexes, GSAP writers and registry pins ([24508ce2d](https://github.com/heygen-com/hyperframes/commit/24508ce2da7182b2c7b5ca368062c18fb85c489b), [#7512](https://github.com/heygen-com/hyperframes/pull/7512)).
+
+[View the full commit range](https://github.com/heygen-com/hyperframes/compare/v0.9.31...v0.9.32).
+</Update>
+
+<Update
   label="HyperFrames v0.9.31"
   description="Released - 2026-11-10"
   tags={["Release", "Core", "Studio", "Publish"]}
