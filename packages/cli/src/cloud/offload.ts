@@ -38,7 +38,7 @@ import {
   CONVERTIBLE_IMAGE_EXTS,
   VIDEO_EXTS,
 } from "@hyperframes/studio-server/outside-file";
-import { followFfmpegProgress } from "@hyperframes/studio-server/ffmpeg-progress";
+import { followFfmpegProgress } from "@hyperframes/parsers/ff-binaries";
 import { type PlayedSegment, planTrim } from "./offloadTrim.js";
 import {
   archiveKey,
@@ -745,13 +745,13 @@ async function uploadPlanned(
   plan: FilePlan,
 ): Promise<{ url: string; asset_id: string }> {
   const filename = basename(path);
+  const report = ctx.opts.onReencodeProgress;
   const file: UploadableFile = plan.preset
     ? await ctx.reencoder.run(
         plan.sourcePath,
         plan.preset,
         plan.segments,
-        (doneSeconds, totalSeconds) =>
-          ctx.opts.onReencodeProgress?.({ path, doneSeconds, totalSeconds }),
+        report && ((doneSeconds, totalSeconds) => report({ path, doneSeconds, totalSeconds })),
       )
     : Buffer.isBuffer(staged)
       ? { bytes: staged, filename, contentType: plan.contentType! }
