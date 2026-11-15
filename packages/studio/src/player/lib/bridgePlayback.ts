@@ -57,8 +57,7 @@ export function previewStageSize(
   return (frame && mirrors.get(frame)?.stageSize) ?? null;
 }
 
-/** The origins a post from this frame can carry, given its sandbox and what it loads. A page its server sandboxed
- * (`Content-Security-Policy: sandbox`) is opaque under a frame with no sandbox attribute, and posts as `null`. */
+/** The origins a post from this frame can carry; a page its server sandboxed posts as `null` without the attribute. */
 export function frameOrigins(iframe: HTMLIFrameElement): string[] {
   const sandbox = iframe.getAttribute("sandbox")?.toLowerCase().split(/\s+/);
   if (sandbox && !sandbox.includes("allow-same-origin")) return ["null"];

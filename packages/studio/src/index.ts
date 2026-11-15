@@ -220,7 +220,6 @@ export type { UseClipboardOptions } from "./hooks/useClipboard";
 export { useDomEditSession } from "./hooks/useDomEditSession";
 export type { UseDomEditSessionParams } from "./hooks/useDomEditSession";
 export { useLivePreviewIframe } from "./hooks/useLivePreviewIframe";
-// A host's own reads of the preview frame, which an opaque frame refuses directly; one client per frame load.
 export {
   previewComputedStyles,
   previewFrameOpaque,

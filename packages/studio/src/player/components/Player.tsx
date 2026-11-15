@@ -43,8 +43,6 @@ interface PlayerProps {
   suppressLoadingOverlay?: boolean;
   loadingUi?: "studio" | "host";
   noLoadTimeout?: boolean;
-  /** "opaque" frames the composition on an opaque origin: its script cannot reach this page, its storage or its
-   * same-origin requests, and Studio reads it over the preview channel. The host serves the frame's own loads. */
   sandboxOrigin?: "opaque";
 }
 
@@ -96,8 +94,10 @@ function enableInteractiveIframe(player: HyperframesPlayerElement): void {
   iframe?.style.setProperty("pointer-events", "auto");
 }
 
-/** Before `src`, so the composition never boots on this page's origin. */
-function setSandboxOrigin(player: HTMLElement, origin: PlayerProps["sandboxOrigin"]): void {
+function setSandboxOriginBeforeSrc(
+  player: HTMLElement,
+  origin: PlayerProps["sandboxOrigin"],
+): void {
   if (origin) player.setAttribute("sandbox-origin", origin);
 }
 
@@ -352,7 +352,7 @@ export const Player = forwardRef<HTMLIFrameElement, PlayerProps>(
         player.setAttribute("shader-loading", "player");
         player.setAttribute("low-power-idle", "");
         player.toggleAttribute("no-load-timeout", noLoadTimeout === true);
-        setSandboxOrigin(player, host.sandboxOrigin);
+        setSandboxOriginBeforeSrc(player, host.sandboxOrigin);
         player.setAttribute("width", String(portrait ? 1080 : 1920));
         player.setAttribute("height", String(portrait ? 1920 : 1080));
         player.style.width = "100%";

@@ -58,7 +58,6 @@ interface NLEPreviewProps extends Pick<
   /** Draws the picture edge to edge in this box, without Studio's inset band. */
   fillBox?: boolean;
   compositionSizeHint?: PreviewCompositionSize;
-  /** Every preview frame here runs on an opaque origin (Player `sandboxOrigin`). */
   sandboxOrigin?: "opaque";
 }
 
