@@ -40,7 +40,7 @@ class TestHyperframesPlayer extends HTMLElement {
 
     const setPlayerAttribute = this.setAttribute.bind(this);
     this.setAttribute = (name, value) => {
-      if (name === "src") lifecycleLog.push("src");
+      if (name === "src" || name === "sandbox-origin") lifecycleLog.push(name);
       setPlayerAttribute(name, value);
     };
   }
@@ -165,6 +165,21 @@ describe("preview errors", () => {
       expect(lifecycleLog.indexOf(listener)).toBeGreaterThan(-1);
       expect(lifecycleLog.indexOf(listener)).toBeLessThan(srcIndex);
     }
+  });
+
+  it("frames an opaque preview before it navigates, so the composition never boots on this origin", async () => {
+    const { player } = await mountPlayer({ sandboxOrigin: "opaque" });
+
+    expect(player.getAttribute("sandbox-origin")).toBe("opaque");
+    expect(lifecycleLog.indexOf("sandbox-origin")).toBeGreaterThan(-1);
+    expect(lifecycleLog.indexOf("sandbox-origin")).toBeLessThan(lifecycleLog.indexOf("src"));
+  });
+
+  it("frames a same-origin preview when the host asks for no sandbox origin", async () => {
+    const { player } = await mountPlayer();
+
+    expect(player.hasAttribute("sandbox-origin")).toBe(false);
+    expect(lifecycleLog).toContain("src");
   });
 
   it("retries a failed preview with a fresh player URL", async () => {
