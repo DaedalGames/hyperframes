@@ -27,16 +27,22 @@ export function contentAddressedSha256(url: string): string | undefined {
 }
 
 /** A URL scheme ffmpeg opens by itself: two letters or more, so `C:\` stays a path; `subfile,` names the URL it opens. */
-const SCHEME = /^(subfile),|^([a-z][a-z0-9+.-]+):/i;
+const SCHEME = /^([a-z][a-z0-9+.-]+):/i;
 const PROXIED_PROTOCOLS = "http,https,tls,tcp,httpproxy";
+const ROUTES = new Map<string, "local" | "proxy">([
+  ["file", "local"],
+  ["http", "proxy"],
+  ["https", "proxy"],
+]);
 
 function restrictedRoute(input: string): "local" | "declared" | "proxy" {
-  const match = SCHEME.exec(input);
-  const scheme = (match?.[1] ?? match?.[2])?.toLowerCase();
-  if (scheme === undefined || scheme === "file") return "local";
-  if (scheme === "https" && contentAddressedSha256(input)) return "declared";
-  if (scheme === "http" || scheme === "https") return "proxy";
-  throw new Error(`[FFmpeg] a ${scheme}: input is not read with a restricted page network`);
+  const scheme = /^subfile,/i.test(input) ? "subfile" : SCHEME.exec(input)?.[1]?.toLowerCase();
+  const route = scheme === undefined ? "local" : ROUTES.get(scheme);
+  if (!route)
+    throw new Error(`[FFmpeg] a ${scheme}: input is not read with a restricted page network`);
+  return route === "proxy" && /^https:/i.test(input) && contentAddressedSha256(input)
+    ? "declared"
+    : route;
 }
 
 export function selfContainedFormatArgs(): string[] {

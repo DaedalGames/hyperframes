@@ -9,6 +9,13 @@ import { runFfmpeg } from "./runFfmpeg.js";
 import { urlInputArgs, withPublicOnlyProxy } from "./urlInput.js";
 
 const HAS_FF = spawnSync(getFfmpegBinary(), ["-version"]).status === 0;
+const HAS_CA_BUNDLE = (() => {
+  try {
+    return urlInputArgs("https://example.com/clip.mp4").length > 0;
+  } catch {
+    return false;
+  }
+})();
 
 /** A local service the render must never reach: it counts every request it gets. */
 async function localService(): Promise<{ server: Server; url: string; hits: () => number }> {
@@ -47,15 +54,27 @@ describe("media inputs with PRODUCER_RESTRICT_PAGE_NETWORK on", () => {
   });
 
   // fails without the fix: ffmpeg was handed the URL directly, with no public-only proxy in front of it.
-  it.skipIf(!HAS_FF)(
-    "refuses the cloud metadata address and a private https host",
+  it.skipIf(!HAS_FF)("refuses the cloud metadata address", { timeout: 60_000 }, async () => {
+    const seen = refusals();
+    try {
+      await expect(
+        runFfprobe("http://169.254.169.254/latest/meta-data/", ["-show_format"]),
+      ).rejects.toThrow();
+      expect(seen.classes).toContain("link-local");
+    } finally {
+      seen.stop();
+    }
+  });
+
+  // Without a CA bundle (Windows) an https input is refused before ffmpeg starts.
+  it.skipIf(!HAS_FF || !HAS_CA_BUNDLE)(
+    "refuses a private https host",
     { timeout: 60_000 },
     async () => {
       const seen = refusals();
       try {
-        for (const url of ["http://169.254.169.254/latest/meta-data/", "https://10.0.0.1/clip.mp4"])
-          await expect(runFfprobe(url, ["-show_format"])).rejects.toThrow();
-        expect(seen.classes).toEqual(expect.arrayContaining(["link-local", "private"]));
+        await expect(runFfprobe("https://10.0.0.1/clip.mp4", ["-show_format"])).rejects.toThrow();
+        expect(seen.classes).toContain("private");
       } finally {
         seen.stop();
       }
