@@ -17,8 +17,7 @@ const RECONNECT_ARGS = ["-rw_timeout", "30000000", "-reconnect", "1", "-reconnec
 const contentAddressedUrls = new Map<string, string>();
 const withoutQuery = (url: string) => url.split(/[?#]/, 1)[0] ?? url;
 
-/** A URL whose bytes can never change (its path holds their hash), so probes of it are cacheable. A render declares
- * only its operator's own files, so with a restricted page network these are also the URLs read directly. */
+/** An operator's file whose path holds its hash: probes of it are cacheable, and it is read without the proxy. */
 export function declareContentAddressedUrl(url: string, sha256: string): void {
   contentAddressedUrls.set(withoutQuery(url), sha256);
 }
@@ -27,20 +26,17 @@ export function contentAddressedSha256(url: string): string | undefined {
   return contentAddressedUrls.get(withoutQuery(url));
 }
 
-/** A media input with a URL scheme ffmpeg would open itself (two letters or more, so `C:\` stays a path). */
-const SCHEME = /^([a-z][a-z0-9+.-]+):/i;
+/** A URL scheme ffmpeg opens by itself: two letters or more, so `C:\` stays a path; `subfile,` names the URL it opens. */
+const SCHEME = /^(subfile),|^([a-z][a-z0-9+.-]+):/i;
 const PROXIED_PROTOCOLS = "http,https,tls,tcp,httpproxy";
 
-/** How a media input is read with a restricted page network: a local file as it is, an https URL the render declared
- * directly, any other http(s) URL only through the public-only capture proxy. Any other scheme is refused. */
 function restrictedRoute(input: string): "local" | "declared" | "proxy" {
-  const scheme = SCHEME.exec(input)?.[1]?.toLowerCase();
+  const match = SCHEME.exec(input);
+  const scheme = (match?.[1] ?? match?.[2])?.toLowerCase();
   if (scheme === undefined || scheme === "file") return "local";
   if (scheme === "https" && contentAddressedSha256(input)) return "declared";
   if (scheme === "http" || scheme === "https") return "proxy";
-  throw new Error(
-    `[FFmpeg] a ${scheme}: input is not read with a restricted page network`,
-  );
+  throw new Error(`[FFmpeg] a ${scheme}: input is not read with a restricted page network`);
 }
 
 export function selfContainedFormatArgs(): string[] {
@@ -60,7 +56,7 @@ export function urlInputArgs(
   const restricted = resolveRestrictPageNetwork();
   const route = restricted ? restrictedRoute(input) : undefined;
   if (route === "proxy" && !/^https:\/\//i.test(input))
-    return [...RECONNECT_ARGS, ...networkRetryFor(tool), ...proxiedLimits(), ...UNSET_PROXY];
+    return [...RECONNECT_ARGS, ...networkRetryFor(tool), ...proxiedLimits(), ...PROXY_THAT_REACHES_NOTHING];
   if (!/^https:\/\//i.test(input)) return mediaFormats();
   const caFile = caBundles.find((path) => existsSync(path));
   if (!caFile) {
@@ -71,7 +67,7 @@ export function urlInputArgs(
   const networkRetry = networkRetryFor(tool);
   const renderServiceLimits =
     route === "proxy"
-      ? [...proxiedLimits(), ...UNSET_PROXY]
+      ? [...proxiedLimits(), ...PROXY_THAT_REACHES_NOTHING]
       : restricted
         ? ["-protocol_whitelist", "https,tls,tcp", ...selfContainedFormatArgs()]
         : mediaFormats();
@@ -93,14 +89,11 @@ const proxiedLimits = () => [
   PROXIED_PROTOCOLS,
   ...selfContainedFormatArgs(),
 ];
-// Port 9 (discard) answers nothing: a read that never went through withPublicOnlyProxy reaches no host at all.
-const UNSET_PROXY = ["-http_proxy", "http://127.0.0.1:9"];
+const PROXY_THAT_REACHES_NOTHING = ["-http_proxy", "http://127.0.0.1:9"];
 
 type Routed = { args: string[]; env: NodeJS.ProcessEnv; close(): Promise<void> };
 
-/** With a restricted page network, `args` with each http(s) input the render did not declare (given by its index)
- * preceded by its limits and `-http_proxy` to a public-only proxy, stopped by `close`. Undefined, with nothing
- * awaited, when no input needs the proxy, so a local read spawns exactly as before. */
+/** Undefined, with nothing awaited, unless an input at `inputAt` must be read through the public-only proxy. */
 export function withPublicOnlyProxy(
   args: readonly string[],
   inputAt: readonly number[],
@@ -116,17 +109,15 @@ async function startProxyFor(args: readonly string[], proxied: readonly number[]
   );
   const proxy = await startCaptureProxy(null, logRefusal);
   const out = [...args];
-  // From the last input back, so each earlier index still points at its input.
   for (const at of [...proxied].sort((a, b) => b - a)) {
     const flagAt = out[at - 1] === "-i" || out[at - 1] === "--" ? at - 1 : at;
     out.splice(flagAt, 0, ...proxiedLimits(), "-http_proxy", proxy.url);
   }
-  // ffmpeg skips its proxy for a host `no_proxy` names.
+  // FFmpeg before 4.4 takes an https proxy only from http_proxy, and every version skips it for a no_proxy host.
   const { no_proxy: _a, NO_PROXY: _b, ...env } = process.env;
-  return { args: out, env, close: () => proxy.close() };
+  return { args: out, env: { ...env, http_proxy: proxy.url }, close: () => proxy.close() };
 }
 
-/** Where each `-i` input sits in an ffmpeg command line. */
 export const ffmpegInputIndexes = (args: readonly string[]): number[] =>
   args.flatMap((arg, at) => (arg === "-i" && at + 1 < args.length ? [at + 1] : []));
 

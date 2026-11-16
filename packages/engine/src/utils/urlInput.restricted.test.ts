@@ -3,14 +3,12 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { onRenderRefusal } from "../services/publicNetwork/captureProxy.js";
-import { getFfmpegBinary, getFfprobeBinary } from "./ffmpegBinaries.js";
+import { getFfmpegBinary } from "./ffmpegBinaries.js";
 import { declareContentAddressedUrl, runFfprobe } from "./ffprobe.js";
 import { runFfmpeg } from "./runFfmpeg.js";
-import { urlInputArgs } from "./urlInput.js";
+import { urlInputArgs, withPublicOnlyProxy } from "./urlInput.js";
 
-const HAS_FF =
-  spawnSync(getFfmpegBinary(), ["-version"]).status === 0 &&
-  spawnSync(getFfprobeBinary(), ["-version"]).status === 0;
+const HAS_FF = spawnSync(getFfmpegBinary(), ["-version"]).status === 0;
 
 /** A local service the render must never reach: it counts every request it gets. */
 async function localService(): Promise<{ server: Server; url: string; hits: () => number }> {
@@ -86,12 +84,30 @@ describe("media inputs with PRODUCER_RESTRICT_PAGE_NETWORK on", () => {
       "ftp://10.0.0.1/a.mp4",
       "concat:/a.mp4|/b.mp4",
       "data:,x",
+      "subfile,,start,0,end,0,,:https://10.0.0.1/a.mp4",
     ])
       expect(() => urlInputArgs(input)).toThrow(/not read with a restricted page network/);
   });
 
+  // fails without the fix: FFmpeg before 4.4 ignores -http_proxy for https and reads only the http_proxy variable.
+  it("gives the child the proxy in http_proxy too, and no no_proxy", async () => {
+    vi.stubEnv("no_proxy", "10.0.0.1");
+    vi.stubEnv("NO_PROXY", "10.0.0.1");
+    const routed = await withPublicOnlyProxy(["-i", "https://10.0.0.1/clip.mp4"], [1]);
+    try {
+      const proxy = routed!.args[routed!.args.indexOf("-http_proxy") + 1];
+      expect(proxy).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+      expect(routed!.env.http_proxy).toBe(proxy);
+      expect(routed!.env).not.toHaveProperty("no_proxy");
+      expect(routed!.env).not.toHaveProperty("NO_PROXY");
+    } finally {
+      await routed?.close();
+    }
+  });
+
   it("reads a local file and a URL the render declared as before, with no proxy", () => {
     expect(urlInputArgs("/renders/clip.mp4")).not.toContain("-protocol_whitelist");
+    expect(urlInputArgs("C:\\renders\\clip.mp4")).not.toContain("-protocol_whitelist");
     const declared = "https://bucket.s3.amazonaws.com/renders/abc.mp4";
     declareContentAddressedUrl(declared, "a".repeat(64));
     const args = urlInputArgs(`${declared}?X-Amz-Signature=deadbeef`, {
