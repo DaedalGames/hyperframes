@@ -56,7 +56,12 @@ export function urlInputArgs(
   const restricted = resolveRestrictPageNetwork();
   const route = restricted ? restrictedRoute(input) : undefined;
   if (route === "proxy" && !/^https:\/\//i.test(input))
-    return [...RECONNECT_ARGS, ...networkRetryFor(tool), ...proxiedLimits(), ...PROXY_THAT_REACHES_NOTHING];
+    return [
+      ...RECONNECT_ARGS,
+      ...networkRetryFor(tool),
+      ...proxiedLimits(),
+      ...PROXY_THAT_REACHES_NOTHING,
+    ];
   if (!/^https:\/\//i.test(input)) return mediaFormats();
   const caFile = caBundles.find((path) => existsSync(path));
   if (!caFile) {
@@ -104,9 +109,8 @@ export function withPublicOnlyProxy(
 }
 
 async function startProxyFor(args: readonly string[], proxied: readonly number[]): Promise<Routed> {
-  const { logRefusal, startCaptureProxy } = await import(
-    "../services/publicNetwork/captureProxy.js"
-  );
+  const { logRefusal, startCaptureProxy } =
+    await import("../services/publicNetwork/captureProxy.js");
   const proxy = await startCaptureProxy(null, logRefusal);
   const out = [...args];
   for (const at of [...proxied].sort((a, b) => b - a)) {
