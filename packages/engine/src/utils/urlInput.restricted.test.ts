@@ -1,0 +1,103 @@
+import { spawnSync } from "node:child_process";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { onRenderRefusal } from "../services/publicNetwork/captureProxy.js";
+import { getFfmpegBinary, getFfprobeBinary } from "./ffmpegBinaries.js";
+import { declareContentAddressedUrl, runFfprobe } from "./ffprobe.js";
+import { runFfmpeg } from "./runFfmpeg.js";
+import { urlInputArgs } from "./urlInput.js";
+
+const HAS_FF =
+  spawnSync(getFfmpegBinary(), ["-version"]).status === 0 &&
+  spawnSync(getFfprobeBinary(), ["-version"]).status === 0;
+
+/** A local service the render must never reach: it counts every request it gets. */
+async function localService(): Promise<{ server: Server; url: string; hits: () => number }> {
+  let hits = 0;
+  const server = createServer((_req, res) => {
+    hits++;
+    res.writeHead(404).end();
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  return { server, url: `http://127.0.0.1:${port}/clip.mp4`, hits: () => hits };
+}
+
+function refusals(): { classes: string[]; stop: () => void } {
+  const classes: string[] = [];
+  const stop = onRenderRefusal((hostClass) => classes.push(hostClass));
+  return { classes, stop };
+}
+
+describe("media inputs with PRODUCER_RESTRICT_PAGE_NETWORK on", () => {
+  beforeEach(() => vi.stubEnv("PRODUCER_RESTRICT_PAGE_NETWORK", "true"));
+  afterEach(() => vi.unstubAllEnvs());
+
+  // fails without the fix: an http input got no protocol limit and no proxy, so ffprobe fetched the local service.
+  it.skipIf(!HAS_FF)("never lets ffprobe reach a local address", { timeout: 60_000 }, async () => {
+    const service = await localService();
+    const seen = refusals();
+    try {
+      await expect(runFfprobe(service.url, ["-show_format"])).rejects.toThrow();
+      expect(service.hits()).toBe(0);
+      expect(seen.classes).toContain("loopback");
+    } finally {
+      seen.stop();
+      service.server.close();
+    }
+  });
+
+  // fails without the fix: ffmpeg was handed the URL directly, with no public-only proxy in front of it.
+  it.skipIf(!HAS_FF)(
+    "refuses the cloud metadata address and a private https host",
+    { timeout: 60_000 },
+    async () => {
+      const seen = refusals();
+      try {
+        for (const url of ["http://169.254.169.254/latest/meta-data/", "https://10.0.0.1/clip.mp4"])
+          await expect(runFfprobe(url, ["-show_format"])).rejects.toThrow();
+        expect(seen.classes).toEqual(expect.arrayContaining(["link-local", "private"]));
+      } finally {
+        seen.stop();
+      }
+    },
+  );
+
+  // fails without the fix: a read that skips urlInputArgs handed its URL to ffmpeg as is.
+  it.skipIf(!HAS_FF)(
+    "puts the proxy in front of a URL any ffmpeg read names",
+    { timeout: 60_000 },
+    async () => {
+      const service = await localService();
+      try {
+        const result = await runFfmpeg(["-i", service.url, "-f", "null", "-"]);
+        expect(result.success).toBe(false);
+        expect(service.hits()).toBe(0);
+      } finally {
+        service.server.close();
+      }
+    },
+  );
+
+  it("refuses a URL scheme other than http and https", () => {
+    for (const input of [
+      "rtsp://10.0.0.1/live",
+      "ftp://10.0.0.1/a.mp4",
+      "concat:/a.mp4|/b.mp4",
+      "data:,x",
+    ])
+      expect(() => urlInputArgs(input)).toThrow(/not read with a restricted page network/);
+  });
+
+  it("reads a local file and a URL the render declared as before, with no proxy", () => {
+    expect(urlInputArgs("/renders/clip.mp4")).not.toContain("-protocol_whitelist");
+    const declared = "https://bucket.s3.amazonaws.com/renders/abc.mp4";
+    declareContentAddressedUrl(declared, "a".repeat(64));
+    const args = urlInputArgs(`${declared}?X-Amz-Signature=deadbeef`, {
+      caBundles: [import.meta.filename],
+    });
+    expect(args[args.indexOf("-protocol_whitelist") + 1]).toBe("https,tls,tcp");
+    expect(args).not.toContain("-http_proxy");
+  });
+});

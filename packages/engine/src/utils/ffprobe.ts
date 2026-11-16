@@ -11,7 +11,12 @@ import {
   pixelFormatHasAlpha,
   videoStreamHasAlpha,
 } from "@hyperframes/parsers/media-alpha";
-import { urlInputArgs } from "./urlInput.js";
+import {
+  contentAddressedSha256,
+  declareContentAddressedUrl,
+  urlInputArgs,
+  withPublicOnlyProxy,
+} from "./urlInput.js";
 import { TextArtMediaError } from "./notMediaPayload.js";
 import { decodableAudioStream, misstatesPcmByteRate } from "@hyperframes/parsers/media-streams";
 import { runFfmpeg } from "./runFfmpeg.js";
@@ -83,71 +88,79 @@ export async function runFfprobe(
     "--",
     filePath,
   ];
-  const proc = spawn(command, args, {
-    // Nothing is ever written to the child's stdin; leaving it as a pipe is
-    // what lets a stdin-reading invocation block indefinitely.
-    stdio: ["ignore", "pipe", "pipe"],
-    // See runFfmpeg.ts: keeps a console window off the user's desktop on Windows.
-    windowsHide: true,
-  });
-  trackChildProcess(proc);
-  // Decoded through StringDecoder rather than per-chunk toString(): a
-  // multi-byte character split across a 64 KiB pipe boundary decodes to U+FFFD
-  // on both sides. -show_format output above ~64 KiB with non-ASCII tag text
-  // (an MKV with many chapters, or title/artist tags) came back silently
-  // mangled — JSON.parse still succeeds, so nothing surfaced it, and tag
-  // lookups like alpha_mode could miss.
-  const decoder = new StringDecoder("utf8");
-  let stdout = "";
-  let stdoutTruncated = false;
-  const stdoutMaxChars = stdoutOptions?.maxChars ?? FFPROBE_STDOUT_MAX_CHARS;
-  proc.stdout.on("data", (data: Buffer) => {
-    // stderr is capped by ManagedChildProcess; stdout had no bound at all, and
-    // analyzeKeyframeIntervals emits one line per frame — an all-intra ProRes
-    // proxy can produce an unbounded string.
-    if (stdoutTruncated) return;
-    stdout += decoder.write(data);
-    // Checked AFTER appending: a single chunk can already exceed the bound,
-    // so a pre-append check only ever stops the second one.
-    if (stdout.length > stdoutMaxChars) {
-      if (stdoutOptions?.retainTail) {
-        stdout = stdout.slice(-stdoutMaxChars);
-      } else {
-        stdoutTruncated = true;
-        stdout = "";
+  // With a restricted page network, a URL input not declared by the render reaches only public hosts.
+  const proxying = withPublicOnlyProxy(args, [args.length - 1]);
+  const routed = proxying && (await proxying);
+  try {
+    const proc = spawn(command, routed?.args ?? args, {
+      ...(routed && { env: routed.env }),
+      // Nothing is ever written to the child's stdin; leaving it as a pipe is
+      // what lets a stdin-reading invocation block indefinitely.
+      stdio: ["ignore", "pipe", "pipe"],
+      // See runFfmpeg.ts: keeps a console window off the user's desktop on Windows.
+      windowsHide: true,
+    });
+    trackChildProcess(proc);
+    // Decoded through StringDecoder rather than per-chunk toString(): a
+    // multi-byte character split across a 64 KiB pipe boundary decodes to U+FFFD
+    // on both sides. -show_format output above ~64 KiB with non-ASCII tag text
+    // (an MKV with many chapters, or title/artist tags) came back silently
+    // mangled — JSON.parse still succeeds, so nothing surfaced it, and tag
+    // lookups like alpha_mode could miss.
+    const decoder = new StringDecoder("utf8");
+    let stdout = "";
+    let stdoutTruncated = false;
+    const stdoutMaxChars = stdoutOptions?.maxChars ?? FFPROBE_STDOUT_MAX_CHARS;
+    proc.stdout.on("data", (data: Buffer) => {
+      // stderr is capped by ManagedChildProcess; stdout had no bound at all, and
+      // analyzeKeyframeIntervals emits one line per frame — an all-intra ProRes
+      // proxy can produce an unbounded string.
+      if (stdoutTruncated) return;
+      stdout += decoder.write(data);
+      // Checked AFTER appending: a single chunk can already exceed the bound,
+      // so a pre-append check only ever stops the second one.
+      if (stdout.length > stdoutMaxChars) {
+        if (stdoutOptions?.retainTail) {
+          stdout = stdout.slice(-stdoutMaxChars);
+        } else {
+          stdoutTruncated = true;
+          stdout = "";
+        }
       }
-    }
-  });
-  const managed = new ManagedChildProcess(proc, {
-    signal,
-    deadlineAtMs: Date.now() + 30_000,
-    stderrMaxBytes: FFPROBE_STDERR_MAX_BYTES,
-  });
-  const outcome = await managed.wait();
-  stdout += decoder.end();
-  if (stdoutTruncated) {
-    throw new Error(
-      `[FFmpeg] ffprobe output exceeded ${stdoutMaxChars} characters; refusing to parse a truncated result.`,
-    );
-  }
-  if (outcome.reason === "spawn_error") {
-    if ((outcome.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
-      const configured = process.env[FFPROBE_PATH_ENV]?.trim();
+    });
+    const managed = new ManagedChildProcess(proc, {
+      signal,
+      deadlineAtMs: Date.now() + 30_000,
+      stderrMaxBytes: FFPROBE_STDERR_MAX_BYTES,
+    });
+    const outcome = await managed.wait();
+    stdout += decoder.end();
+    if (stdoutTruncated) {
       throw new Error(
-        configured
-          ? `[FFmpeg] ffprobe not found at ${FFPROBE_PATH_ENV}="${configured}". Please install FFmpeg.`
-          : "[FFmpeg] ffprobe not found. Please install FFmpeg.",
+        `[FFmpeg] ffprobe output exceeded ${stdoutMaxChars} characters; refusing to parse a truncated result.`,
       );
     }
-    throw outcome.error ?? new Error(outcome.stderr);
+    if (outcome.reason === "spawn_error") {
+      if ((outcome.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
+        const configured = process.env[FFPROBE_PATH_ENV]?.trim();
+        throw new Error(
+          configured
+            ? `[FFmpeg] ffprobe not found at ${FFPROBE_PATH_ENV}="${configured}". Please install FFmpeg.`
+            : "[FFmpeg] ffprobe not found. Please install FFmpeg.",
+        );
+      }
+      throw outcome.error ?? new Error(outcome.stderr);
+    }
+    if (outcome.reason !== "exit" || outcome.exitCode !== 0) {
+      const diagnostic = sanitizeFfprobeDiagnostic(outcome.stderr, filePath);
+      throw new Error(
+        `[FFmpeg] ffprobe ${outcome.reason} with code ${outcome.exitCode}: ${diagnostic}`,
+      );
+    }
+    return stdout;
+  } finally {
+    await routed?.close();
   }
-  if (outcome.reason !== "exit" || outcome.exitCode !== 0) {
-    const diagnostic = sanitizeFfprobeDiagnostic(outcome.stderr, filePath);
-    throw new Error(
-      `[FFmpeg] ffprobe ${outcome.reason} with code ${outcome.exitCode}: ${diagnostic}`,
-    );
-  }
-  return stdout;
 }
 
 function parseProbeJson(stdout: string): FFProbeOutput {
@@ -371,13 +384,8 @@ function isPngImageProbe(output: FFProbeOutput): boolean {
   );
 }
 
-const contentAddressedUrls = new Map<string, string>();
 const withoutQuery = (url: string) => url.split(/[?#]/, 1)[0] ?? url;
-
-/** A URL whose bytes can never change (its path holds their hash), so probes of it are cacheable. */
-export function declareContentAddressedUrl(url: string, sha256: string): void {
-  contentAddressedUrls.set(withoutQuery(url), sha256);
-}
+export { declareContentAddressedUrl };
 
 const probeFactsUrls = new Map<string, string>();
 
@@ -388,7 +396,7 @@ export function declareProbeFactsUrl(url: string, factsUrl: string): void {
 
 export function mediaFileIdentity(filePath: string): string | null {
   if (/^https?:\/\//i.test(filePath)) {
-    const sha256 = contentAddressedUrls.get(withoutQuery(filePath));
+    const sha256 = contentAddressedSha256(filePath);
     return sha256 ? `sha256:${sha256}` : null;
   }
   try {
