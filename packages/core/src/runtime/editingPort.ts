@@ -168,6 +168,7 @@ export const EDITING_REQUEST_KINDS = [
   "assign-audio-group",
   "gsap-snapshot",
   "motion-path-home",
+  "crop-lift",
 ] as const;
 export type EditingRequestKind = (typeof EDITING_REQUEST_KINDS)[number];
 
@@ -296,6 +297,10 @@ export interface EditingRequests {
   };
   "gsap-snapshot": { params: NoParams; result: GsapSnapshot };
   "motion-path-home": { params: { selector: string }; result: MotionPathFrameHome };
+  "crop-lift": {
+    params: { handle: EditingElementHandle; lift: boolean };
+    result: { lifted: boolean; clipPath: string | null };
+  };
 }
 export type EditingParams<K extends EditingRequestKind> = EditingRequests[K]["params"];
 export type EditingResult<K extends EditingRequestKind> = EditingRequests[K]["result"];
@@ -497,6 +502,10 @@ const PARAM_PARSERS: {
   "motion-path-home": (params) =>
     hasKeys(params, "selector") && isSelector(params.selector)
       ? { selector: params.selector }
+      : null,
+  "crop-lift": (params) =>
+    hasKeys(params, "handle,lift") && isHandle(params.handle) && typeof params.lift === "boolean"
+      ? { handle: params.handle, lift: params.lift }
       : null,
 };
 

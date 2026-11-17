@@ -90,6 +90,7 @@ describe("createEditingPortClient", () => {
           "assign-audio-group",
           "gsap-snapshot",
           "motion-path-home",
+          "crop-lift",
         ],
       });
     } finally {

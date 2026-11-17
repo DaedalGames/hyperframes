@@ -37,6 +37,7 @@ import { stopWatchingGeometry, watchGeometry } from "./editing/watchGeometry";
 import { gestureStart } from "./editingGestureStart";
 import { gsapSnapshot } from "./editing/gsapSnapshot";
 import { motionPathHome } from "./editing/motionPathHome";
+import { cropLift } from "./editing/cropLift";
 import {
   getLogicalOpacity,
   markedForStudio,
@@ -214,6 +215,7 @@ const HANDLERS: Handlers = {
   "assign-audio-group": (params) => assignAudioGroup(params, elementForHandle),
   "gsap-snapshot": () => gsapSnapshot(),
   "motion-path-home": ({ selector }) => motionPathHome(selector),
+  "crop-lift": cropLift,
 };
 
 function serve(port: MessagePort): void {
