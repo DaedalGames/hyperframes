@@ -122,6 +122,25 @@ function runTests() {
     cleanup();
   });
 
+  test("an empty asset's file name prints control characters as visible escapes", () => {
+    setup();
+    const full = join(tmp, "assets", "sfx", "hit\x1b]52;c;aGk=\x07.mp3");
+    mkdirSync(join(full, ".."), { recursive: true });
+    writeFileSync(full, "");
+    const printed = [];
+    const error = console.error;
+    console.error = (line) => printed.push(String(line));
+    try {
+      adoptExistingAssets(tmp);
+    } finally {
+      console.error = error;
+      cleanup();
+    }
+    const line = printed.find((l) => l.includes("skipping 0-byte asset")) ?? "";
+    assert.ok(line.includes("hit\\x1b]52;c;aGk=\\x07.mp3"), line);
+    for (const raw of ["\x07", "\x1b"]) assert.ok(!line.includes(raw), line);
+  });
+
   let passed = 0;
   let failed = 0;
   for (const { name, fn } of tests) {
