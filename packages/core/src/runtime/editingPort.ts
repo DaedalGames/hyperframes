@@ -180,6 +180,7 @@ export const EDITING_REQUEST_KINDS = [
   "edit-element",
   "gsap-set",
   "patch-tweens",
+  "assets-unloaded",
 ] as const;
 export type EditingRequestKind = (typeof EDITING_REQUEST_KINDS)[number];
 
@@ -316,6 +317,7 @@ export interface EditingRequests {
   "edit-element": { params: EditElementParams; result: EditElementResult };
   "gsap-set": { params: GsapSetParams; result: { applied: boolean } };
   "patch-tweens": { params: PatchTweensParams; result: { patched: boolean } };
+  "assets-unloaded": { params: NoParams; result: { unloaded: boolean } };
 }
 export type EditingParams<K extends EditingRequestKind> = EditingRequests[K]["params"];
 export type EditingResult<K extends EditingRequestKind> = EditingRequests[K]["result"];
@@ -526,6 +528,7 @@ const PARAM_PARSERS: {
   "edit-element": parseEditElement,
   "gsap-set": parseGsapSet,
   "patch-tweens": parsePatchTweens,
+  "assets-unloaded": noParams,
 };
 
 /** Validates one request off the wire. Never throws: anything unusable becomes a typed error. */

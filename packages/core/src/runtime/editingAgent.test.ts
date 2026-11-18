@@ -202,6 +202,7 @@ describe("installEditingAgent", () => {
           "edit-element",
           "gsap-set",
           "patch-tweens",
+          "assets-unloaded",
         ],
       },
     });
