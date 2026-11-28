@@ -528,7 +528,9 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
 
   const project: ResolvedProject = { id: projectId, dir: projectDir, title: projectId };
   let cachedProjectSignature: string | null = null;
+  let cachedOutsideAssetsAllowed: boolean | null = null;
   watcher.addListener((changedPath) => {
+    cachedOutsideAssetsAllowed = null;
     if (changedPath === "." || affectsProjectSignature(projectDir, join(projectDir, changedPath))) {
       cachedProjectSignature = null;
     }
@@ -583,6 +585,12 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
     previewWarnings.add(line);
     console.warn(`[studio] ${line}`);
   };
+  const previewOutsideAssetsAllowed = (dir: string): boolean => {
+    if (resolve(dir) !== resolve(projectDir))
+      return outsideAssetsAllowed(dir, undefined, warnPreviewOnce);
+    cachedOutsideAssetsAllowed ??= outsideAssetsAllowed(projectDir, undefined, warnPreviewOnce);
+    return cachedOutsideAssetsAllowed;
+  };
 
   const adapter: PreviewApiAdapter = {
     history: () => (hostAppOwnsHistory ? null : projectHistory()),
@@ -600,7 +608,7 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
 
     resolveProject: (id: string) => (id === projectId ? project : null),
 
-    outsideAssetsAllowed: (dir) => outsideAssetsAllowed(dir, undefined, warnPreviewOnce),
+    outsideAssetsAllowed: previewOutsideAssetsAllowed,
 
     async bundle(dir, options): Promise<string | null> {
       try {
@@ -637,7 +645,7 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
       const preparedDirs = [gifOutputDir, gifDownloadDir, heifOutputDir];
       if (!preparedDirs.every((dir) => isLinkFreeWithinProject(project.dir, dir)))
         return injectDeterministicFontFaces(html);
-      const allowOutsideFiles = outsideAssetsAllowed(project.dir, undefined, warnPreviewOnce);
+      const allowOutsideFiles = previewOutsideAssetsAllowed(project.dir);
       const { html: htmlWithJpegs } = await prepareHeifImageInputs(html, {
         projectDir: project.dir,
         downloadDir: gifDownloadDir,

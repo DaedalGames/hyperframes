@@ -8,6 +8,7 @@ import fs, {
   mkdtempSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
@@ -126,6 +127,21 @@ it("a request for a file that is not there asks the silent drive nothing on the 
   expect(asked.sync).toEqual([]);
   expect(asked.answeredAsleep).toBe(false);
   expect(asked.status).toBe(404);
+});
+
+it("a file linked from outside the project is checked without asking the silent drive on the event loop", async () => {
+  project();
+  const outside = realpathSync(mkdtempSync(join(tmpdir(), "hf-preview-asleep-shared-")));
+  writeFileSync(join(outside, "logo.svg"), "<svg>shared</svg>");
+  symlinkSync(join(outside, "logo.svg"), join(projectDir, "logo.svg"));
+  try {
+    const asked = await askAsleep("logo.svg");
+    expect(asked.sync).toEqual([]);
+    expect(asked.answeredAsleep).toBe(false);
+    expect(asked.body).toBe("<svg>shared</svg>");
+  } finally {
+    rmSync(outside, { recursive: true, force: true });
+  }
 });
 
 it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(

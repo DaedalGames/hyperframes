@@ -1,4 +1,5 @@
 import { closeSync, constants, fstatSync, openSync, readSync, statSync } from "node:fs";
+import { lstat, open, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, extname, isAbsolute, join, relative, sep } from "node:path";
 import { MIME_TYPES } from "./mime.js";
@@ -12,6 +13,7 @@ import {
   VIDEO_EXTS,
 } from "./mediaExtensions.js";
 import { realFilePath } from "./safePath.js";
+import { realFilePathOff } from "./projectDisk.js";
 import { isWithinProjectRoot } from "@hyperframes/parsers/asset-resolution";
 import type { StudioApiAdapter } from "../types.js";
 
@@ -74,8 +76,23 @@ function readRegularFileHead(path: string, length: number): Buffer | null {
   }
 }
 
-function startsAsTransportStream(path: string): boolean {
-  const head = readRegularFileHead(path, 4 * 192);
+async function readRegularFileHeadOff(path: string, length: number): Promise<Buffer | null> {
+  const file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK).catch(() => null);
+  if (!file) return null;
+  try {
+    if (!(await file.stat()).isFile()) return null;
+    const head = Buffer.alloc(length);
+    return head.subarray(0, (await file.read(head, 0, length, 0)).bytesRead);
+  } catch {
+    return null;
+  } finally {
+    await file.close();
+  }
+}
+
+const TS_HEAD_BYTES = 4 * 192;
+
+function isTransportStreamHead(head: Buffer | null): boolean {
   if (!head?.some(isControlByte)) return false;
   return TS_PACKETS.some(({ size, offset }) => {
     const starts = [];
@@ -84,11 +101,23 @@ function startsAsTransportStream(path: string): boolean {
   });
 }
 
+const startsAsTransportStream = (path: string) =>
+  isTransportStreamHead(readRegularFileHead(path, TS_HEAD_BYTES));
+
+type TypeNames = "no" | "yes" | "sniff";
+
+function typeNames(absPath: string, realPath: string, extensions: ReadonlySet<string>): TypeNames {
+  const names = [absPath, realPath].map((path) => extname(path).toLowerCase());
+  if (!names.every((extension) => extensions.has(extension))) return "no";
+  return names.some((extension) => TYPESCRIPT_OR_TRANSPORT_STREAM.has(extension)) ? "sniff" : "yes";
+}
+
+const copiedOnce = (names: TypeNames, transportStream: boolean) =>
+  names === "yes" || (names === "sniff" && transportStream);
+
 function isCopiedType(absPath: string, extensions: ReadonlySet<string>): boolean {
-  const names = [absPath, realFilePath(absPath)].map((path) => extname(path).toLowerCase());
-  if (!names.every((extension) => extensions.has(extension))) return false;
-  const ambiguous = names.some((extension) => TYPESCRIPT_OR_TRANSPORT_STREAM.has(extension));
-  return !ambiguous || startsAsTransportStream(absPath);
+  const names = typeNames(absPath, realFilePath(absPath), extensions);
+  return copiedOnce(names, names === "sniff" && startsAsTransportStream(absPath));
 }
 
 export const isCopiedOutsideFileType = (absPath: string): boolean =>
@@ -143,13 +172,23 @@ function inHomeAppData(projectDir: string, path: string): boolean {
 }
 
 /** An existing file outside the project that publish leaves out: env files, Git data, hidden, system and app-data folders. */
-export function isPrivateOutsideFile(projectDir: string, absPath: string): boolean {
-  const realPath = realFilePath(absPath);
+export const isPrivateOutsideFile = (projectDir: string, absPath: string): boolean =>
+  privateOutside(projectDir, absPath, {
+    realProjectDir: realFilePath(projectDir),
+    realPath: realFilePath(absPath),
+  });
+
+interface RealPaths {
+  realProjectDir: string;
+  realPath: string;
+}
+
+function privateOutside(projectDir: string, absPath: string, real: RealPaths): boolean {
   return (
     isEnvOrGitPath(absPath) ||
-    isEnvOrGitPath(realPath) ||
+    isEnvOrGitPath(real.realPath) ||
     inPrivateLocation(projectDir, absPath) ||
-    inPrivateLocation(realFilePath(projectDir), realPath)
+    inPrivateLocation(real.realProjectDir, real.realPath)
   );
 }
 
@@ -160,16 +199,73 @@ export interface OutsideFilePolicy {
   includeScripts?: boolean;
 }
 
+interface OutsideLinkFacts {
+  private: boolean;
+  folder: boolean;
+  uploaded: boolean;
+  copied: boolean;
+}
+
+function refusalOf(facts: OutsideLinkFacts, policy: OutsideFilePolicy): LeftOutReason | null {
+  if (facts.private) return "blocklisted";
+  if (facts.folder || facts.uploaded) return null;
+  if (!facts.copied) return "file_type";
+  return policy.includeScripts ? null : "script";
+}
+
+const typesOf = (path: string, realPath: string) => ({
+  uploaded: typeNames(path, realPath, UPLOADED_OUTSIDE_FILE_EXTENSIONS),
+  copied: typeNames(path, realPath, OUTSIDE_FILE_EXTENSIONS),
+});
+
+const sniffs = (types: ReturnType<typeof typesOf>) =>
+  types.uploaded === "sniff" || types.copied === "sniff";
+
 export function outsideLinkRefusal(
   projectDir: string,
   path: string,
   policy: OutsideFilePolicy = {},
 ): LeftOutReason | null {
-  if (isPrivateOutsideFile(projectDir, path)) return "blocklisted";
-  const folder = statSync(path, { throwIfNoEntry: false })?.isDirectory();
-  if (folder || isUploadedOutsideFileType(path)) return null;
-  if (!isCopiedOutsideFileType(path)) return "file_type";
-  return policy.includeScripts ? null : "script";
+  const real = { realProjectDir: realFilePath(projectDir), realPath: realFilePath(path) };
+  const types = typesOf(path, real.realPath);
+  const transportStream = sniffs(types) && startsAsTransportStream(path);
+  const facts = {
+    private: privateOutside(projectDir, path, real),
+    folder: statSync(path, { throwIfNoEntry: false })?.isDirectory() === true,
+    uploaded: copiedOnce(types.uploaded, transportStream),
+    copied: copiedOnce(types.copied, transportStream),
+  };
+  return refusalOf(facts, policy);
+}
+
+async function outsideLinkRefusalOff(projectDir: string, path: string, real: RealPaths) {
+  const types = typesOf(path, real.realPath);
+  const head = sniffs(types) ? await readRegularFileHeadOff(path, TS_HEAD_BYTES) : null;
+  const transportStream = isTransportStreamHead(head);
+  const facts = {
+    private: privateOutside(projectDir, path, real),
+    folder: (await stat(path).catch(() => null))?.isDirectory() === true,
+    uploaded: copiedOnce(types.uploaded, transportStream),
+    copied: copiedOnce(types.copied, transportStream),
+  };
+  return refusalOf(facts, {});
+}
+
+/** Real paths when a link under `projectDir` takes `path` outside it; null, reading no real path, when none does. */
+async function linkedOutsideOff(projectDir: string, path: string): Promise<RealPaths | null> {
+  let at = projectDir;
+  for (const part of relative(projectDir, path).split(sep).filter(Boolean)) {
+    at = join(at, part);
+    const entry = await lstat(at).catch(() => null);
+    if (!entry) return null;
+    if (!entry.isSymbolicLink()) continue;
+    const [realProjectDir, realPath] = await Promise.all([
+      realFilePathOff(projectDir),
+      realFilePathOff(path),
+    ]);
+    return isOutside(relative(realProjectDir, realPath)) ? { realProjectDir, realPath } : null;
+  }
+  return null;
 }
 
 /** `blocklisted`: a private location; `received`: reached from an imported file; `file_type`: not a type uploads copy; `network_share`: on another computer; `script`: a script a local render was not told to run; `not_approved`: the person has not approved uploading it. */
@@ -223,7 +319,9 @@ export async function servesProjectPath(
   path: string,
 ): Promise<boolean> {
   if (!isWithinProjectRoot(projectDir, path)) return false;
-  if (!linksOutside(projectDir, path)) return true;
-  if (outsideLinkRefusal(projectDir, path) !== null) return false;
+  const real = await linkedOutsideOff(projectDir, path).catch(() => "unresolvable" as const);
+  if (real === null) return true;
+  if (real === "unresolvable" || (await outsideLinkRefusalOff(projectDir, path, real)))
+    return false;
   return (await adapter.outsideAssetsAllowed?.(projectDir)) ?? true;
 }
