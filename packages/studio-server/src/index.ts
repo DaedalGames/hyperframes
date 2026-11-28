@@ -38,9 +38,12 @@ export { stampProjectHfIds, stampProjectHfIdsAsync } from "./helpers/hfIdPersist
 export {
   patchElementInHtml,
   splitElementInHtml,
+  splitElementInDocument,
   removeElementFromHtml,
+  removeElementsFromDocument,
   findTargetElement,
   parseSourceDocument,
+  serializeSourceDocument,
   dedupeClonedCompositionId,
   type PatchOperation,
   type SourceMutationTarget,

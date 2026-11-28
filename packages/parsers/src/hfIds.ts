@@ -12,6 +12,7 @@ import { parseHTML } from "./linkedom.js";
 import { EXCLUDED_TAGS, assignHfIds, getChildElements } from "./hfIdAssignment.js";
 export {
   EXCLUDED_TAGS,
+  assignHfIds,
   isNonContentElement,
   mintHfId,
   isCompositionTemplate,

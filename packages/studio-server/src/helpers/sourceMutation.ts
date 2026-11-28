@@ -9,6 +9,7 @@ import { escapeCssIdentifier } from "@hyperframes/core/compiler/selector-id-toke
 import { isAllowedHtmlAttribute, isSafeAttributeValue } from "@hyperframes/core/html-attr-safety";
 import { sanitizeRichTextChildren } from "@hyperframes/core/rich-text-sanitize";
 import {
+  assignHfIds,
   ensureHfIds,
   isNonContentElement,
   mintHfId,
@@ -47,6 +48,22 @@ export function parseSourceDocument(raw: string): {
     new Set(Array.from(raw.matchAll(/\bdata-hf-id\s*=\s*["']?([^"'\s>]+)/gi), (m) => m[1]!)),
   );
   return { document, wrappedFragment: !hasDocumentShell };
+}
+
+export function serializeSourceDocument(page: {
+  document: Document;
+  wrappedFragment: boolean;
+}): string {
+  return page.wrappedFragment ? page.document.body.innerHTML || "" : page.document.toString();
+}
+
+/** New elements get their data-hf-id, and the page's ids count as in its source, as if parsed again. */
+function settleSourceDocument(document: Document): void {
+  if (document.body) assignHfIds(document.body);
+  const ids = querySelectorAllWithTemplates(document, "[data-hf-id]").map(
+    (el) => el.getAttribute("data-hf-id") ?? "",
+  );
+  pinnedInSource.set(document, new Set(ids));
 }
 
 /** Drops the rules that style `id` alone (every selector in the list names it), in each style sheet of the page. */
@@ -197,7 +214,17 @@ export function removeElementsFromHtml(
   source: string,
   targets: readonly SourceMutationTarget[],
 ): string {
-  const { document, wrappedFragment } = parseSourceDocument(source);
+  const page = parseSourceDocument(source);
+  return removeElementsFromDocument(page.document, targets)
+    ? serializeSourceDocument(page)
+    : source;
+}
+
+/** removeElementsFromHtml on a parsed page, so several edits share one parse; whether any went. */
+export function removeElementsFromDocument(
+  document: Document,
+  targets: readonly SourceMutationTarget[],
+): boolean {
   let removed = false;
   for (const target of targets) {
     const element = findTargetElement(document, target);
@@ -207,8 +234,8 @@ export function removeElementsFromHtml(
     if (id && !document.getElementById(id)) dropCssRulesForId(document, id);
     removed = true;
   }
-  if (!removed) return source;
-  return wrappedFragment ? document.body.innerHTML || "" : document.toString();
+  if (removed) settleSourceDocument(document);
+  return removed;
 }
 
 export function removeElementFromHtml(source: string, target: SourceMutationTarget): string {
@@ -444,13 +471,6 @@ export interface SplitElementResult {
   refusal?: SplitRefusal;
 }
 
-const refused = (html: string, refusal: SplitRefusal): SplitElementResult => ({
-  html,
-  matched: false,
-  newId: null,
-  refusal,
-});
-
 function resolveElementTiming(el: Element): {
   start: number;
   duration: number;
@@ -484,7 +504,6 @@ function isWindowOf(
   return !row || (near(media.start, row.start) && near(media.duration, row.duration));
 }
 
-// fallow-ignore-next-line complexity
 export function splitElementInHtml(
   source: string,
   target: SourceMutationTarget,
@@ -502,10 +521,25 @@ export function splitElementInHtml(
     track?: number;
   },
 ): SplitElementResult {
-  const { document, wrappedFragment } = parseSourceDocument(source);
+  const page = parseSourceDocument(source);
+  const split = splitElementInDocument(page.document, target, splitTime, newId, fallbackTiming);
+  return split.matched
+    ? { ...split, html: serializeSourceDocument(page) }
+    : { ...split, html: source };
+}
+
+/** splitElementInHtml on a parsed page, changed in place; a refused split leaves it as it was. */
+// fallow-ignore-next-line complexity
+export function splitElementInDocument(
+  document: Document,
+  target: SourceMutationTarget,
+  splitTime: number,
+  newId: string | null,
+  fallbackTiming?: Parameters<typeof splitElementInHtml>[4],
+): Omit<SplitElementResult, "html"> {
+  const refused = (refusal: SplitRefusal) => ({ matched: false, newId: null, refusal });
   const el = findTargetElement(document, target);
-  if (!el || !isHTMLElement(el) || isNotALayerToRestructure(el))
-    return refused(source, "target-not-found");
+  if (!el || !isHTMLElement(el) || isNotALayerToRestructure(el)) return refused("target-not-found");
 
   // An untimed wrapper whose row is its timed media's own window is a view of that
   // media: cut the media and leave the wrappers untimed. A GSAP scene keeps its own window.
@@ -527,7 +561,7 @@ export function splitElementInHtml(
   const reference = readClipTiming(timed).startExpression;
   const startsAfter = reference?.kind === "reference" ? reference : null;
   if (startsAfter) {
-    if (!fallbackTiming) return refused(source, "reference-without-range");
+    if (!fallbackTiming) return refused("reference-without-range");
     start = fallbackTiming.start;
   }
   // GSAP-animated elements carry their timing in the script, not in data-* attrs,
@@ -538,12 +572,12 @@ export function splitElementInHtml(
     start = fallbackTiming.start;
     duration = fallbackTiming.duration;
   }
-  if (duration <= 0) return refused(source, "no-duration");
+  if (duration <= 0) return refused("no-duration");
   if (
     splitTime < start + SPLIT_BOUNDARY_EPSILON_S ||
     splitTime > start + duration - SPLIT_BOUNDARY_EPSILON_S
   ) {
-    return refused(source, "outside-clip");
+    return refused("outside-clip");
   }
 
   newId = nextUniqueId(document, newId ?? `${el.getAttribute("id") || "clip"}-split`);
@@ -552,7 +586,7 @@ export function splitElementInHtml(
   const secondDuration = duration - firstDuration;
 
   const clone = el.cloneNode(true);
-  if (!isHTMLElement(clone)) return refused(source, "target-not-found");
+  if (!isHTMLElement(clone)) return refused("target-not-found");
   clone.setAttribute("id", newId);
   dedupeClonedCompositionId(document, clone);
   clone.removeAttribute("data-hf-id");
@@ -622,15 +656,10 @@ export function splitElementInHtml(
     el.parentElement!.appendChild(clone);
   }
 
-  const html = wrappedFragment ? document.body.innerHTML || "" : document.toString();
-  return {
-    // The split owns its new nodes' stable ids. Leaving the clone unstamped makes
-    // the next preview request persist different bytes after history is recorded.
-    html: ensureHfIds(html),
-    matched: true,
-    newId,
-    originalId,
-  };
+  // The split owns its new nodes' stable ids. Leaving the clone unstamped makes
+  // the next preview request persist different bytes after history is recorded.
+  settleSourceDocument(document);
+  return { matched: true, newId, originalId };
 }
 
 // --- Element grouping -------------------------------------------------------
