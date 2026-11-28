@@ -1,3 +1,9 @@
+import {
+  htmlInCanvasForm,
+  markCaptureCanvas,
+  markCaptured,
+  type HtmlInCanvasForm,
+} from "@hyperframes/core/html-in-canvas";
 import { revealClip } from "@hyperframes/core/runtime/clip-reveal";
 import html2canvas from "html2canvas";
 import { DEFAULT_WIDTH, DEFAULT_HEIGHT } from "./webgl.js";
@@ -93,24 +99,16 @@ function stabilizeTransformedBoxShadows(root: HTMLElement): void {
 
 // ── HTML-in-Canvas (drawElementImage) native capture ──────────────────────
 
-interface CanvasWithLayoutSubtree extends HTMLCanvasElement {
-  layoutSubtree: boolean;
-  requestPaint: () => void;
-}
-
 interface CanvasRenderingContext2DWithDrawElement extends CanvasRenderingContext2D {
   drawElementImage: (element: Element, x: number, y: number, w: number, h: number) => void;
 }
 
+export function captureForm(): HtmlInCanvasForm | null {
+  return typeof window === "undefined" ? null : htmlInCanvasForm();
+}
+
 export function isHtmlInCanvasCaptureSupported(): boolean {
-  if (typeof document === "undefined") return false;
-  const probe = document.createElement("canvas") as HTMLCanvasElement & {
-    layoutSubtree?: boolean;
-  };
-  probe.setAttribute("layoutsubtree", "");
-  if (!("layoutSubtree" in probe)) return false;
-  const ctx = probe.getContext("2d") as CanvasRenderingContext2DWithDrawElement | null;
-  return ctx != null && typeof ctx.drawElementImage === "function";
+  return captureForm() !== null;
 }
 
 async function captureSceneWithHtmlInCanvas(
@@ -119,14 +117,16 @@ async function captureSceneWithHtmlInCanvas(
   width: number,
   height: number,
   options: CaptureSceneOptions,
+  form: HtmlInCanvasForm,
 ): Promise<HTMLCanvasElement> {
-  const canvas = document.createElement("canvas") as CanvasWithLayoutSubtree;
+  const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
-  canvas.setAttribute("layoutsubtree", "");
+  markCaptureCanvas(canvas, form);
   canvas.style.cssText = `position:fixed;top:0;left:0;width:${width}px;height:${height}px;z-index:-9999;pointer-events:none;opacity:0`;
   const clone = sceneEl.cloneNode(true) as HTMLElement;
   if (options.forceVisible) showSceneAndClips(clone);
+  markCaptured(clone, form);
   canvas.appendChild(clone);
   document.body.appendChild(canvas);
 
@@ -156,8 +156,9 @@ export function captureScene(
   height: number = DEFAULT_HEIGHT,
   options: CaptureSceneOptions = {},
 ): Promise<HTMLCanvasElement> {
-  if (isHtmlInCanvasCaptureSupported() && !options.preferBrowserPaint) {
-    return captureSceneWithHtmlInCanvas(sceneEl, bgColor, width, height, options).catch(() =>
+  const form = options.preferBrowserPaint ? null : captureForm();
+  if (form) {
+    return captureSceneWithHtmlInCanvas(sceneEl, bgColor, width, height, options, form).catch(() =>
       captureSceneWithHtml2Canvas(sceneEl, bgColor, width, height, options),
     );
   }

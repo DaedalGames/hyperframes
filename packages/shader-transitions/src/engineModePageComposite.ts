@@ -11,7 +11,7 @@
  *  Phase 1 (seek wrapper, runs inside page.evaluate):
  *    - Runs original GSAP seek to position the timeline
  *    - If inside a transition window, clones FROM/TO scene elements into
- *      layoutsubtree staging canvases
+ *      html-in-canvas staging canvases
  *    - Sets window.__hf_page_composite_pending with transition metadata
  *    - Returns immediately (seek resolves)
  *
@@ -28,6 +28,7 @@
  * drawElementImage) without depending on requestAnimationFrame for paint.
  */
 
+import { markCaptureCanvas, markCaptured } from "@hyperframes/core/html-in-canvas";
 import { revealClip } from "@hyperframes/core/runtime/clip-reveal";
 import {
   createContext,
@@ -39,7 +40,7 @@ import {
   type AccentColors,
 } from "./webgl.js";
 import { getFragSource, type ShaderName } from "./shaders/registry.js";
-import { isHtmlInCanvasCaptureSupported } from "./capture.js";
+import { captureForm } from "./capture.js";
 
 interface PageCompositeTransitionConfig {
   time: number;
@@ -136,7 +137,7 @@ function holdAnimations(liveRoot: Element, copyRoot: Element, pairs: Array<[Elem
 
 export function isPageSideCompositingSupported(): boolean {
   if (typeof window === "undefined" || typeof document === "undefined") return false;
-  if (!isHtmlInCanvasCaptureSupported()) return false;
+  if (!captureForm()) return false;
   const probe = document.createElement("canvas");
   const gl = probe.getContext("webgl") || probe.getContext("experimental-webgl");
   if (!gl) return false;
@@ -149,7 +150,8 @@ export function installPageSideCompositor(options: PageCompositorInstallOptions)
   if (typeof window === "undefined") return false;
   (window as unknown as { __HF_PAGE_COMPOSITOR_CANARY__?: string }).__HF_PAGE_COMPOSITOR_CANARY__ =
     PAGE_COMPOSITOR_BUILD_CANARY;
-  if (!isPageSideCompositingSupported()) {
+  const form = captureForm();
+  if (!form || !isPageSideCompositingSupported()) {
     // eslint-disable-next-line no-console
     console.warn(
       "[HyperShader] page-side compositing requested but drawElementImage/WebGL is not " +
@@ -227,18 +229,14 @@ export function installPageSideCompositor(options: PageCompositorInstallOptions)
     drawElementImage: (el: Element, x: number, y: number, w: number, h: number) => void;
   };
 
-  interface StagingCanvas extends HTMLCanvasElement {
-    layoutSubtree?: boolean;
-  }
-
   // Persistent staging canvases — children are swapped per transition frame.
   // Kept in the DOM so the compositor paints them on the next frame.
-  const fromStaging = document.createElement("canvas") as StagingCanvas;
-  const toStaging = document.createElement("canvas") as StagingCanvas;
+  const fromStaging = document.createElement("canvas");
+  const toStaging = document.createElement("canvas");
   for (const s of [fromStaging, toStaging]) {
     s.width = width;
     s.height = height;
-    s.setAttribute("layoutsubtree", "");
+    markCaptureCanvas(s, form);
     s.style.cssText =
       "position:fixed;top:0;left:0;width:" +
       width +
@@ -247,6 +245,11 @@ export function installPageSideCompositor(options: PageCompositorInstallOptions)
       "px;z-index:-9998;pointer-events:none;";
     document.body.appendChild(s);
   }
+
+  const stageCopy = (staging: HTMLCanvasElement, frame: HTMLElement): void => {
+    markCaptured(frame, form);
+    staging.appendChild(frame);
+  };
 
   function findActive(time: number): ResolvedTransition | null {
     for (const t of resolved) {
@@ -306,7 +309,7 @@ export function installPageSideCompositor(options: PageCompositorInstallOptions)
       const frame = document.createElement("div");
       frame.style.cssText = `position:absolute;left:0;top:0;width:${width}px;height:${height}px;margin:0;`;
       frame.appendChild(root);
-      staging.appendChild(frame);
+      stageCopy(staging, frame);
       holdAnimations(liveRoot, root, pairs);
     }
 

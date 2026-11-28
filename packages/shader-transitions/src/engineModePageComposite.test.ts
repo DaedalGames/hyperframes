@@ -7,6 +7,21 @@ import {
   PAGE_COMPOSITOR_CANVAS_ID,
 } from "./engineModePageComposite.js";
 
+type Form = "layoutsubtree" | "drawable";
+
+// The canvas members core's html-in-canvas check reads, per form.
+const FORM_MEMBERS: Record<Form, object> = {
+  layoutsubtree: { requestPaint: () => undefined, layoutSubtree: true },
+  drawable: { requestPaint: () => undefined, updateElementGeometry: () => undefined },
+};
+
+function stubBrowser(win: Record<string, unknown>, doc: Record<string, unknown>): void {
+  win.CanvasRenderingContext2D = { prototype: { drawElementImage: () => undefined } };
+  win.document = doc;
+  vi.stubGlobal("window", win);
+  vi.stubGlobal("document", doc);
+}
+
 describe("isPageSideCompositingSupported", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -23,50 +38,31 @@ describe("isPageSideCompositingSupported", () => {
     expect(isPageSideCompositingSupported()).toBe(false);
   });
 
-  it("returns true when drawElementImage and WebGL are both available", () => {
-    vi.stubGlobal("window", {});
-    vi.stubGlobal("document", {
-      createElement: (tag: string) => {
-        if (tag === "canvas") {
-          return {
-            setAttribute: () => undefined,
-            layoutSubtree: true,
-            getContext: (type: string) => {
-              if (type === "2d") return { drawElementImage: () => undefined };
-              if (type === "webgl")
-                return { getExtension: () => ({ loseContext: () => undefined }) };
-              return null;
-            },
-          };
-        }
-        return {};
-      },
-    });
-    expect(isPageSideCompositingSupported()).toBe(true);
+  const webGlCanvas = (form: Form) => ({
+    ...FORM_MEMBERS[form],
+    getContext: (type: string) =>
+      type === "webgl" ? { getExtension: () => ({ loseContext: () => undefined }) } : null,
   });
 
+  it.each(["layoutsubtree", "drawable"] as const)(
+    "returns true when html-in-canvas (%s form) and WebGL are both available",
+    (form) => {
+      stubBrowser({}, { createElement: () => webGlCanvas(form) });
+      expect(isPageSideCompositingSupported()).toBe(true);
+    },
+  );
+
   it("returns false when drawElementImage is missing", () => {
-    vi.stubGlobal("window", {});
-    vi.stubGlobal("document", {
-      createElement: () => ({
-        setAttribute: () => undefined,
-        getContext: (type: string) =>
-          type === "webgl" ? { getExtension: () => ({ loseContext: () => undefined }) } : {},
-      }),
-    });
+    stubBrowser({}, { createElement: () => webGlCanvas("drawable") });
+    (window as unknown as Record<string, unknown>).CanvasRenderingContext2D = { prototype: {} };
     expect(isPageSideCompositingSupported()).toBe(false);
   });
 
   it("returns false when WebGL is unavailable", () => {
-    vi.stubGlobal("window", {});
-    vi.stubGlobal("document", {
-      createElement: () => ({
-        setAttribute: () => undefined,
-        layoutSubtree: true,
-        getContext: (type: string) =>
-          type === "2d" ? { drawElementImage: () => undefined } : null,
-      }),
-    });
+    stubBrowser(
+      {},
+      { createElement: () => ({ ...FORM_MEMBERS.drawable, getContext: () => null }) },
+    );
     expect(isPageSideCompositingSupported()).toBe(false);
   });
 });
@@ -107,7 +103,7 @@ describe("page-side compositor seek", () => {
       style: {},
       width: 0,
       height: 0,
-      layoutSubtree: true,
+      ...FORM_MEMBERS.layoutsubtree,
       firstChild: null,
       setAttribute: () => undefined,
       remove: () => undefined,
@@ -121,20 +117,22 @@ describe("page-side compositor seek", () => {
     );
     let startPolling: (() => void) | undefined;
     const hf = { seek: vi.fn() };
-    vi.stubGlobal("window", {
-      __hf: hf,
-      setInterval: (poll: () => void) => {
-        startPolling = poll;
-        return 1;
-      },
-      clearInterval: () => undefined,
-    });
     vi.stubGlobal("HTMLElement", FakeScene);
-    vi.stubGlobal("document", {
-      createElement: canvas,
-      getElementById: (id: string) => scenes.get(id) ?? null,
-      body: { appendChild: () => undefined },
-    });
+    stubBrowser(
+      {
+        __hf: hf,
+        setInterval: (poll: () => void) => {
+          startPolling = poll;
+          return 1;
+        },
+        clearInterval: () => undefined,
+      },
+      {
+        createElement: canvas,
+        getElementById: (id: string) => scenes.get(id) ?? null,
+        body: { appendChild: () => undefined },
+      },
+    );
     const installed = installPageSideCompositor({
       scenes: ["s4", "s5"],
       transitions: [{ time: 4.4, duration: 0.8, shader: "domain-warp" }],
@@ -266,7 +264,7 @@ describe("page-side compositor scene copies", () => {
   }
 
   function installTransparentInsetFilm(
-    opts: { failDraw?: boolean; underBody?: boolean; markIncoming?: boolean } = {},
+    opts: { failDraw?: boolean; underBody?: boolean; markIncoming?: boolean; form?: Form } = {},
   ) {
     const calls: Array<{ canvas: number; op: string; args: unknown[] }> = [];
     const gl = new Proxy(fakeWebGl(), {
@@ -277,7 +275,11 @@ describe("page-side compositor scene copies", () => {
         return Reflect.get(target, key);
       },
     });
-    const canvases: Array<{ id?: string; style: Record<string, string> }> = [];
+    const canvases: Array<{
+      id?: string;
+      style: Record<string, string>;
+      attrs: Record<string, string>;
+    }> = [];
     const createCanvas = () => {
       const index = canvases.length;
       const children: FakeEl[] = [];
@@ -293,12 +295,19 @@ describe("page-side compositor scene copies", () => {
         clearRect: record("clearRect"),
         drawElementImage: record("drawElementImage"),
       };
-      const canvas: { id?: string; style: Record<string, string>; [key: string]: unknown } = {
+      const attrs: Record<string, string> = {};
+      const canvas: {
+        id?: string;
+        style: Record<string, string>;
+        attrs: Record<string, string>;
+        [key: string]: unknown;
+      } = {
         style: {},
+        attrs,
         width: 0,
         height: 0,
-        layoutSubtree: true,
-        setAttribute: () => undefined,
+        ...FORM_MEMBERS[opts.form ?? "layoutsubtree"],
+        setAttribute: (name: string, value: string) => (attrs[name] = value),
         remove: () => undefined,
         get firstChild() {
           return children[0] ?? null;
@@ -343,9 +352,8 @@ describe("page-side compositor scene copies", () => {
       },
       clearInterval: () => undefined,
     };
-    vi.stubGlobal("window", win);
     vi.stubGlobal("HTMLElement", FakeEl);
-    vi.stubGlobal("document", {
+    stubBrowser(win, {
       createElement: (tag: string) => (tag === "canvas" ? createCanvas() : new FakeEl(tag)),
       getElementById: (id: string) => scenes.get(id) ?? null,
       body,
@@ -367,8 +375,25 @@ describe("page-side compositor scene copies", () => {
       return (win.__hf_page_composite_resolve as () => boolean)();
     };
     const overlay = () => canvases.find((c) => c.id === PAGE_COMPOSITOR_CANVAS_ID)!;
-    return { calls, composite, overlay, scenes };
+    return { calls, canvases, composite, overlay, scenes };
   }
+
+  it.each([
+    ["layoutsubtree", { layoutsubtree: "" }, false],
+    ["drawable", { content: "drawable" }, true],
+  ] as const)(
+    "marks the staging canvases and each staged copy in the %s form",
+    async (form, canvasAttrs, copyMarked) => {
+      const { calls, canvases, composite } = installTransparentInsetFilm({ form });
+      expect(await composite(1.2)).toBe(true);
+      const draws = calls.filter((c) => c.op === "drawElementImage");
+      expect(draws).toHaveLength(2);
+      for (const draw of draws) {
+        expect(canvases[draw.canvas]?.attrs).toEqual(canvasAttrs);
+        expect((draw.args[0] as FakeEl).hasAttribute("drawable")).toBe(copyMarked);
+      }
+    },
+  );
 
   it("stages each scene copy inside unaltered ancestor copies in a full-frame box", async () => {
     const { calls, composite } = installTransparentInsetFilm();
