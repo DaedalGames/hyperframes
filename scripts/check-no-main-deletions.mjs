@@ -2179,6 +2179,10 @@ export const ALLOWED_DELETIONS = new Map([
     "packages/studio/src/components/editor/anchoredResizeReleaseShift.test.ts",
     "tested computeNextResizeAnchor, deleted with the per-frame convergence; the pin is now one measured formula",
   ],
+  [
+    "packages/studio/src/components/editor/gestureStartLayouts.ts",
+    "the stored press layouts' last reader, the sealed crop handles, now reads the layout the selection carries",
+  ],
 ]);
 
 export function parseBase(argv, fallback = "origin/main") {

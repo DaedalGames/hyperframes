@@ -30,7 +30,7 @@ import { CropPresetBar } from "./CropPresetBar";
 import { movesGesture } from "./domEditOverlayGestures";
 import { previewStandIn } from "./previewDrafts";
 import { onFrameShowsTime } from "../../player/lib/bridgePlayback";
-import { gestureStartLayout, readCropFrameStart } from "./previewGestureStartRead";
+import { readCropFrameStart } from "./previewGestureStartRead";
 import {
   afterStudioManualEditGestures,
   isStudioManualEditGestureActive,
@@ -246,12 +246,14 @@ function letGoOf(ref: { current: CropGestureState | null }, gesture: CropGesture
 const measuredStartOf = (
   state: { element: HTMLElement; start?: CropFrameStart },
   element: HTMLElement,
-): CropFrameStart | undefined => {
-  if (state.element === element && state.start) return state.start;
-  const handle = previewStandIn(element)?.handle;
-  const layout = handle ? gestureStartLayout(handle) : null;
-  return layout ? { layout } : undefined;
-};
+): CropFrameStart | undefined => (state.element === element ? state.start : undefined);
+
+const drawsHandles = (
+  state: { element: HTMLElement; croppable: boolean; start?: CropFrameStart },
+  element: HTMLElement,
+) => state.croppable && (!previewStandIn(element) || !!measuredStartOf(state, element));
+
+const startFrom = (layout?: CropFrameStart["layout"]) => (layout ? { layout } : undefined);
 
 /** The element's clip-path is the crop; state only holds a crop drag's draft. */
 const shownCropInsets = (dragging: boolean, draft: ClipPathInsetSides, element: HTMLElement) =>
@@ -306,7 +308,7 @@ export function DomEditCropHandles({
   // (circle/polygon/non-px inset): the crop UI must fully stand down for that
   // element — no lift, no handles — or select+deselect replaces the authored
   // clip with an inset (or deletes it).
-  const cropStateFor = (element: HTMLElement) => {
+  const cropStateFor = ({ element, layout }: DomEditSelection) => {
     const parsed = readElementCropInsets(element);
     const { top, right, bottom, left } = parsed ?? NO_CROP;
     const insets = { top, right, bottom, left };
@@ -314,10 +316,10 @@ export function DomEditCropHandles({
       element,
       croppable: parsed !== null,
       insets,
-      start: undefined as CropFrameStart | undefined,
+      start: startFrom(layout),
     };
   };
-  const [state, setState] = useState(() => cropStateFor(selection.element));
+  const [state, setState] = useState(() => cropStateFor(selection));
   const presetBarTarget = useCropPresetBarStore((s) => s.openFor);
   const closePresetBar = useCropPresetBarStore((s) => s.close);
   const showPresetBar = isCropBarTarget(selection.element, presetBarTarget);
@@ -325,20 +327,20 @@ export function DomEditCropHandles({
   // Re-sync when the selection targets a different element (reselect, or an
   // undo/redo that re-keys the node).
   if (state.element !== selection.element) {
-    setState(cropStateFor(selection.element));
+    setState(cropStateFor(selection));
   }
 
   const insets = shownCropInsets(dragging, state.insets, selection.element);
   const hasCrop = hasCropInsets(insets);
 
-  // Lift the clip while the element is selected so the full content shows and the
-  // cropped-away area can be dimmed. Keyed on the element so a direct A→B switch drops A's lift.
+  const ready = drawsHandles(state, selection.element);
+  // Lift the clip while the handles show, so the full content shows and the cropped-away area can
+  // be dimmed. Keyed on the element so a direct A→B switch drops A's lift.
   useEffect(() => {
     const el = selection.element;
-    if (readElementCropInsets(el) === null) return;
-    liftElementCrop(el);
+    if (ready) liftElementCrop(el);
     return () => dropElementCropLift(el);
-  }, [selection.element]);
+  }, [selection.element, ready]);
 
   const reads = useStandInStart(selection.element, overlayRect, dragging, setState);
 
@@ -465,7 +467,7 @@ export function DomEditCropHandles({
 
   // Uneditable clip (circle/polygon/non-px inset): the element renders exactly
   // as authored and the crop tool shows nothing. All hooks above stay mounted.
-  if (!state.croppable) return null;
+  if (!ready) return null;
 
   return (
     <>
