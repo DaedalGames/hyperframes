@@ -40,6 +40,7 @@ type StudioLoads = {
   wrote: boolean;
   offered: MessagePort | null;
   awaiting: ReturnType<typeof setTimeout> | null;
+  takeWrites: () => void;
   port: Promise<MessagePort | null>;
   settle: ((port: MessagePort | null) => void) | null;
   unclaimed: MessagePort | null;
@@ -59,6 +60,7 @@ export function watchStudioNavigations(iframe: HTMLIFrameElement): () => void {
     wrote: false,
     offered: null,
     awaiting: null,
+    takeWrites: () => {},
     port: null!,
     settle: null,
     unclaimed: null,
@@ -74,13 +76,15 @@ export function watchStudioNavigations(iframe: HTMLIFrameElement): () => void {
     else state.port = Promise.resolve(port);
     state.settle = null;
   };
-  const writes = new MutationObserver(() => {
+  const onWrite = () => {
     state.writes += 1;
     state.wrote = true;
     state.offered?.close();
     state.offered = null;
-  });
+  };
+  const writes = new MutationObserver(onWrite);
   writes.observe(iframe, { attributeFilter: ["src", "srcdoc"] });
+  state.takeWrites = () => void (writes.takeRecords().length && onWrite());
   const onOffer = (event: MessageEvent<unknown>) => {
     if (event.source !== iframe.contentWindow) return;
     const port = portOffer(event);
@@ -130,6 +134,8 @@ export function previewEditingClient(iframe: HTMLIFrameElement): EditingPortClie
   const open = clients.get(iframe);
   if (open) return open.client;
   const loads = studioLoads.get(iframe);
+  loads?.takeWrites();
+  if (loads?.writes === 0) return createEditingPortClient({ port: Promise.resolve(null) });
   const opened = testPorts.get(iframe)?.();
   const beforeLoad = !opened && !!loads?.settle;
   const port = opened ? Promise.resolve(opened) : (loads?.port ?? Promise.resolve(null));
@@ -241,23 +247,11 @@ function agentConnectedInCallOrder(client: EditingPortClient): boolean | Promise
 }
 
 async function probeAgent(client: EditingPortClient): Promise<boolean> {
-  client.ready.then(
-    () => agents.set(client, true),
-    () => agents.set(client, false),
+  const connected = await client.ready.then(
+    () => true,
+    () => false,
   );
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const probe = new Promise<boolean>(
-    (resolve) => (timer = setTimeout(resolve, AGENT_PROBE_MS, false)),
-  );
-  const connected = await Promise.race([
-    client.ready.then(
-      () => true,
-      () => false,
-    ),
-    probe,
-  ]);
-  clearTimeout(timer);
-  if (!agents.has(client)) agents.set(client, connected);
+  agents.set(client, connected);
   return connected;
 }
 

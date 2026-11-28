@@ -960,6 +960,7 @@ export function createEditingPortClient(options: {
   let watchedGeometry = false;
   let port: MessagePort | null = null;
   let held: MessagePort | null = null;
+  let unanswered: ReturnType<typeof wallSetTimeout> | undefined;
   let disposed = false;
   let lastId = 0;
   let resolveReady!: () => void;
@@ -1005,11 +1006,13 @@ export function createEditingPortClient(options: {
       if (port || !isPlainRecord(data) || data.v !== EDITING_PROTOCOL_VERSION || data.ok !== true)
         return;
       port = runtime;
+      wallClearTimeout(unanswered);
       resolveReady();
     };
     held = runtime;
     // Waits in the port until the runtime serves it; the reply is what makes this client ready.
     runtime.postMessage({ v: EDITING_PROTOCOL_VERSION, id: ++lastId, kind: "hello", params: {} });
+    unanswered = wallSetTimeout(() => port || client.dispose(), timeoutMs);
   });
 
   const client: EditingPortClient = {
@@ -1090,6 +1093,7 @@ export function createEditingPortClient(options: {
         port?.postMessage({ v: EDITING_PROTOCOL_VERSION, id: ++lastId, ...stop });
       }
       held?.close();
+      wallClearTimeout(unanswered);
       rejectReady(new EditingPortError("disposed", "client disposed"));
       for (const id of [...pending.keys()]) {
         settle(id, { error: new EditingPortError("disposed", "client disposed") });

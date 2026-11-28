@@ -2,9 +2,13 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { servePausedVideoFrames } from "./pausedVideoProvider";
 
-const handedOver = vi.hoisted(() => ({ ports: [] as MessagePort[] }));
+const handedOver = vi.hoisted(() => ({
+  ports: [] as MessagePort[],
+  ready: Promise.resolve(),
+}));
 vi.mock("./previewChannel", () => ({
   previewEditingClient: () => ({
+    ready: handedOver.ready,
     request: vi.fn(async (_: string, params: { channel: MessagePort }) => {
       handedOver.ports.push(params.channel);
       return { served: true };
@@ -13,6 +17,7 @@ vi.mock("./previewChannel", () => ({
 }));
 
 afterEach(() => {
+  handedOver.ready = Promise.resolve();
   for (const port of handedOver.ports.splice(0)) port.close();
 });
 
@@ -52,6 +57,24 @@ it("keeps serving a frame through the load of the document it was served for", a
   const port = handedOver.ports[0]!;
 
   frame.loadSameDocument();
+  expect(await answers(port)).toBe(true);
+
+  frame.loadNextDocument();
+  expect(await answers(port)).toBe(false);
+});
+
+// fails without the fix: a client asked for before Studio's page loaded closed its decoder at that page's own load.
+it("keeps serving the page its client connects to when it was asked for while the previous page showed", async () => {
+  let connect = () => {};
+  handedOver.ready = new Promise<void>((resolve) => (connect = resolve));
+  const frame = previewFrame();
+  servePausedVideoFrames(frame.iframe);
+  await vi.waitFor(() => expect(handedOver.ports).toHaveLength(1));
+  const port = handedOver.ports[0]!;
+
+  frame.loadNextDocument();
+  connect();
+  await Promise.resolve();
   expect(await answers(port)).toBe(true);
 
   frame.loadNextDocument();

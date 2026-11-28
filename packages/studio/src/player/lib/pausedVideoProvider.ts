@@ -21,7 +21,7 @@ export function servePausedVideoFrames(iframe: HTMLIFrameElement): void {
   served.set(iframe, client);
   const { port1, port2 } = new MessageChannel();
   const host = pausedFrameHost(port1, project);
-  closeOnNextDocument(iframe, host.close);
+  client.ready.then(() => closeOnNextDocument(iframe, host.close), host.close);
   client
     .request("serve-paused-frames", { channel: port2 }, { transfer: [port2] })
     .then(({ served: on }) => on || host.close(), host.close);

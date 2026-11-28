@@ -374,9 +374,10 @@ function silentFrame() {
   });
   const iframe = detachedFakeIframe(frameWindow);
   Object.defineProperty(iframe, "contentDocument", { value: null });
-  // Studio wrote the frame and its load has not come, so a client waits for its port.
+  // Studio's write has loaded, and no runtime port came with it.
   onTestFinished(watchStudioNavigations(iframe));
   iframe.setAttribute("src", "/api/projects/demo/preview");
+  queueMicrotask(() => iframe.dispatchEvent(new Event("load")));
   return sized(iframe, [100, 50, 960, 540]) as HTMLIFrameElement;
 }
 

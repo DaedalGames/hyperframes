@@ -113,10 +113,11 @@ describe("previewEditingClient", () => {
   });
 
   /** A frame whose pages post Studio an editing port each, as the runtime does; `asked` holds each port's requests. */
-  function offeringFrame() {
+  function offeringFrame(srcBeforeWatch?: string) {
     const posted = vi.fn();
     const frame: Record<string, unknown> = { postMessage: posted };
     const iframe = detachedFakeIframe(frame);
+    if (srcBeforeWatch) iframe.setAttribute("src", srcBeforeWatch);
     closers.push(watchStudioNavigations(iframe));
     const asked: string[][] = [];
     const offer = () => {
@@ -176,6 +177,27 @@ describe("previewEditingClient", () => {
     expect(frame.posted).not.toHaveBeenCalled();
   });
 
+  // fails without the fix: the early client lived on into Studio's page, past what it set up for the empty one.
+  it("ends a client made before Studio's write, and serves the written page with a fresh one", async () => {
+    const frame = offeringFrame("about:blank");
+    const early = previewEditingClient(frame.iframe);
+    await expect(early.ready).rejects.toMatchObject({ code: "disposed" });
+    await frame.write("/api/projects/demo/preview");
+    frame.offer();
+    frame.load();
+    expect(previewEditingClient(frame.iframe)).not.toBe(early);
+    await expect(frame.waited()).resolves.toEqual({ waited: false });
+  });
+
+  it("counts a write made earlier in the same task when a client is made", async () => {
+    const frame = offeringFrame();
+    frame.iframe.setAttribute("src", "/api/projects/demo/preview");
+    const asking = frame.waited();
+    frame.offer();
+    frame.load();
+    await expect(asking).resolves.toEqual({ waited: false });
+  });
+
   // fails without the fix: a load processed before the runtime's queued offer left the load with no channel.
   it("takes the runtime's port when its offer arrives just after the write's load", async () => {
     const frame = offeringFrame();
@@ -186,6 +208,17 @@ describe("previewEditingClient", () => {
     frame.offer();
     await expect(asking).resolves.toEqual({ waited: false });
     expect(frame.asked).toEqual([["hello", "wait-for-seek"], []]);
+  });
+
+  // fails without the fix: the read's own one-second probe answered null while the load was still to come.
+  it("answers a read asked before a slow load from the port offered just after that load", async () => {
+    const frame = offeringFrame();
+    await frame.write("/api/projects/demo/preview");
+    const answer = previewAnswer(frame.iframe, "wait-for-seek", {});
+    await new Promise((resolve) => setTimeout(resolve, AGENT_PROBE_MS + 200));
+    frame.load();
+    frame.offer();
+    await expect(answer).resolves.toEqual({ waited: false });
   });
 
   it("takes no port that arrives after a later load of the frame", async () => {

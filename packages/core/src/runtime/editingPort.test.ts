@@ -257,6 +257,11 @@ describe("createEditingPortClient", () => {
     await client.ready;
   });
 
+  it("ends when the runtime never answers on the port it was handed", async () => {
+    const { client } = clientOn({ timeoutMs: 20 });
+    await expect(client.ready).rejects.toMatchObject({ code: "disposed" });
+  });
+
   it("ends when its load has no port", async () => {
     const { client, handNone } = clientOn({ later: true });
     const pending = client.request("hello", {});
@@ -283,7 +288,7 @@ describe("createEditingPortClient", () => {
   });
 
   it("times out a request that gets no reply, before or after the port arrives", async () => {
-    const { client, page, hand } = clientOn({ timeoutMs: 10, later: true });
+    const { client, page, hand } = clientOn({ timeoutMs: 50, later: true });
     await expect(client.request("hello", {})).rejects.toMatchObject({ code: "timeout" });
     runtimeEnd(page);
     hand();
