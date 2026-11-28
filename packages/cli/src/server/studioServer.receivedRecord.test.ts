@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fileContentVersion } from "@hyperframes/studio-server";
 import { historyDeps, withOwner } from "../utils/historyOwner.js";
-import { receivedFiles } from "../utils/privateProjectFile.js";
+import { receivedFiles, recordReceivedFiles } from "../utils/privateProjectFile.js";
 import { contentHash } from "../utils/receivedContent.js";
 import { outsideAssetsAllowed } from "../utils/receivedRender.js";
 import { createStudioServer, type StudioServer } from "./studioServer.js";
@@ -736,5 +736,31 @@ describe("a Studio rename, move or delete in a project with a received-files rec
     expect((await move(app, folder, `parts/${folder}`)).status).toBe(200);
     expect(listed(projectDir)).toEqual([`parts/${folder}/intro.html`]);
     expect(receivedFiles(projectDir)("parts/caf\u00e9/intro.html")).toBe(true);
+  });
+});
+
+describe("a project whose received-files record is written while Studio serves it", () => {
+  const linkedPicture = async (app: StudioServer["app"]) =>
+    (await app.request("/api/projects/film/preview/shared.png")).status;
+
+  function servedWithLink(): { projectDir: string; app: StudioServer["app"] } {
+    const served = studio();
+    write(join(served.projectDir, "index.html"), `<img src="shared.png">`);
+    symlinkSync(join(root, "outside", "pic.png"), join(served.projectDir, "shared.png"));
+    return served;
+  }
+
+  it("stops serving linked outside files once its own record lists a received page", async () => {
+    const { projectDir, app } = servedWithLink();
+    expect(await linkedPicture(app)).toBe(200);
+    recordReceivedFiles(projectDir, ["index.html"]);
+    expect(await linkedPicture(app)).toBe(404);
+  });
+
+  it("stops serving them once a record in a folder above it lists one of its pages", async () => {
+    const { app } = servedWithLink();
+    expect(await linkedPicture(app)).toBe(200);
+    recordReceivedFiles(root, ["project/index.html"]);
+    expect(await linkedPicture(app)).toBe(404);
   });
 });

@@ -57,6 +57,8 @@ import { mountShareRoutes } from "./shareRoutes.js";
 import { isDevMode } from "../utils/env.js";
 import { recordFolder } from "../utils/projectRecords.js";
 import { outsideAssetsAllowed } from "../utils/receivedRender.js";
+import { receivedStateFilesAround } from "../utils/privateProjectFile.js";
+import { stat } from "node:fs/promises";
 import { insideHostApp } from "../utils/desktopApp.js";
 import { runRenderSetupWorker } from "../utils/cancellableProcess.js";
 import { lintHtmlOutOfProcess } from "../utils/lintHtmlWorker.js";
@@ -514,6 +516,18 @@ function createStateFolderBeforeWatching(projectDir: string): void {
   recordFolder(projectDir, "");
 }
 
+const filesStamp = async (files: string[]): Promise<string> =>
+  (
+    await Promise.all(
+      files.map((file) =>
+        stat(file).then(
+          (s) => `${s.mtimeMs}:${s.size}`,
+          () => "-",
+        ),
+      ),
+    )
+  ).join("|");
+
 export function createStudioServer(options: StudioServerOptions): StudioServer {
   const { projectDir, projectName } = options;
   const projectId = projectName || basename(projectDir);
@@ -528,7 +542,8 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
 
   const project: ResolvedProject = { id: projectId, dir: projectDir, title: projectId };
   let cachedProjectSignature: string | null = null;
-  let cachedOutsideAssetsAllowed: boolean | null = null;
+  let cachedOutsideAssetsAllowed: { stamp: string; allowed: boolean } | null = null;
+  const receivedStateFiles = receivedStateFilesAround(projectDir);
   watcher.addListener((changedPath) => {
     cachedOutsideAssetsAllowed = null;
     if (changedPath === "." || affectsProjectSignature(projectDir, join(projectDir, changedPath))) {
@@ -585,11 +600,15 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
     previewWarnings.add(line);
     console.warn(`[studio] ${line}`);
   };
-  const previewOutsideAssetsAllowed = (dir: string): boolean => {
+  const previewOutsideAssetsAllowed = async (dir: string): Promise<boolean> => {
     if (resolve(dir) !== resolve(projectDir))
       return outsideAssetsAllowed(dir, undefined, warnPreviewOnce);
-    cachedOutsideAssetsAllowed ??= outsideAssetsAllowed(projectDir, undefined, warnPreviewOnce);
-    return cachedOutsideAssetsAllowed;
+    const stamp = await filesStamp(receivedStateFiles);
+    if (cachedOutsideAssetsAllowed?.stamp !== stamp) {
+      const allowed = outsideAssetsAllowed(projectDir, undefined, warnPreviewOnce);
+      cachedOutsideAssetsAllowed = { stamp, allowed };
+    }
+    return cachedOutsideAssetsAllowed.allowed;
   };
 
   const adapter: PreviewApiAdapter = {
@@ -645,7 +664,7 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
       const preparedDirs = [gifOutputDir, gifDownloadDir, heifOutputDir];
       if (!preparedDirs.every((dir) => isLinkFreeWithinProject(project.dir, dir)))
         return injectDeterministicFontFaces(html);
-      const allowOutsideFiles = previewOutsideAssetsAllowed(project.dir);
+      const allowOutsideFiles = await previewOutsideAssetsAllowed(project.dir);
       const { html: htmlWithJpegs } = await prepareHeifImageInputs(html, {
         projectDir: project.dir,
         downloadDir: gifDownloadDir,

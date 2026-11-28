@@ -493,6 +493,16 @@ function walkStart(projectDir: string): string {
   }
 }
 
+export function receivedStateFilesAround(projectDir: string): string[] {
+  const files: string[] = [];
+  for (let dir = walkStart(projectDir); ; dir = dirname(dir)) {
+    files.push(join(dir, RECEIVED_RECORD), receivedContentFile(dir));
+    if (dirname(dir) === dir) break;
+  }
+  const host = process.env[RECEIVED_STATE_ENV];
+  return host ? [...files, host] : files;
+}
+
 function receivedRecords(projectDir: string): ReceivedRecord[] | null {
   const start = walkStart(projectDir);
   const below = receivedRecordsBelow(start);
